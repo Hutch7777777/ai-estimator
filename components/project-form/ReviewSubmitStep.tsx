@@ -3,8 +3,9 @@
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import { Textarea } from "@/components/ui/textarea";
+import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { CheckCircle2 } from "lucide-react";
+import { CheckCircle2, Percent } from "lucide-react";
 import { ProjectFormData } from "@/app/project/new/page";
 
 interface ReviewSubmitStepProps {
@@ -15,9 +16,9 @@ interface ReviewSubmitStepProps {
 export function ReviewSubmitStep({ data, onUpdate }: ReviewSubmitStepProps) {
   return (
     <div className="space-y-6">
-      <Card>
+      <Card className="shadow-soft rounded-xl">
         <CardHeader>
-          <CardTitle>Review & Submit</CardTitle>
+          <CardTitle className="font-heading">Review & Submit</CardTitle>
           <CardDescription>
             Review your project details before submitting
           </CardDescription>
@@ -25,8 +26,8 @@ export function ReviewSubmitStep({ data, onUpdate }: ReviewSubmitStepProps) {
         <CardContent className="space-y-6">
           {/* Project Info */}
           <div>
-            <h3 className="mb-3 flex items-center text-sm font-medium">
-              <CheckCircle2 className="mr-2 h-4 w-4 text-primary" />
+            <h3 className="mb-3 flex items-center text-sm font-medium font-heading">
+              <CheckCircle2 className="mr-2 h-4 w-4 text-brand-500" />
               Project Information
             </h3>
             <div className="ml-6 space-y-2 text-sm">
@@ -86,6 +87,37 @@ export function ReviewSubmitStep({ data, onUpdate }: ReviewSubmitStepProps) {
                 <span className="text-muted-foreground">No file uploaded</span>
               )}
             </div>
+          </div>
+
+          <Separator />
+
+          {/* Markup Percentage */}
+          <div className="space-y-2">
+            <Label htmlFor="markupPercent" className="flex items-center gap-2">
+              <Percent className="h-4 w-4" />
+              Markup Percentage
+            </Label>
+            <div className="flex items-center gap-2">
+              <Input
+                id="markupPercent"
+                type="number"
+                min="0"
+                max="100"
+                step="0.1"
+                value={data.markupPercent}
+                onChange={(e) => {
+                  const value = parseFloat(e.target.value);
+                  if (!isNaN(value) && value >= 0 && value <= 100) {
+                    onUpdate({ markupPercent: value });
+                  }
+                }}
+                className="max-w-[200px]"
+              />
+              <span className="text-sm text-muted-foreground">%</span>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              This markup will be applied to the total estimate cost (default: 15%)
+            </p>
           </div>
 
           <Separator />

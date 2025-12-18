@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
@@ -8,6 +9,7 @@ import { ProjectFormData } from "@/app/project/new/page";
 interface TradeSelectionStepProps {
   data: ProjectFormData;
   onUpdate: (data: Partial<ProjectFormData>) => void;
+  onValidationChange?: (isValid: boolean) => void;
 }
 
 const AVAILABLE_TRADES = [
@@ -17,7 +19,13 @@ const AVAILABLE_TRADES = [
   { id: "gutters", label: "Gutters", description: "Gutter installation and maintenance" },
 ];
 
-export function TradeSelectionStep({ data, onUpdate }: TradeSelectionStepProps) {
+export function TradeSelectionStep({ data, onUpdate, onValidationChange }: TradeSelectionStepProps) {
+  // Validate whenever selected trades change
+  useEffect(() => {
+    const isValid = (data.selectedTrades?.length || 0) > 0;
+    onValidationChange?.(isValid);
+  }, [data.selectedTrades, onValidationChange]);
+
   const handleTradeToggle = (tradeId: string) => {
     const currentTrades = data.selectedTrades || [];
     const newTrades = currentTrades.includes(tradeId)
@@ -27,9 +35,9 @@ export function TradeSelectionStep({ data, onUpdate }: TradeSelectionStepProps) 
   };
 
   return (
-    <Card>
+    <Card className="shadow-soft rounded-xl">
       <CardHeader>
-        <CardTitle>Select Trades</CardTitle>
+        <CardTitle className="font-heading">Select Trades</CardTitle>
         <CardDescription>
           Choose which trades are included in this project
         </CardDescription>

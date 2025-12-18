@@ -11,6 +11,8 @@ import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import { ColorSwatchGrid } from "@/components/ui/color-swatch";
+import { SearchableSelect, SearchableSelectOption } from "@/components/ui/searchable-select";
 import {
   Loader2,
   AlertCircle,
@@ -31,6 +33,7 @@ import { cn } from "@/lib/utils";
 interface ProductConfigStepProps {
   data: ProjectFormData;
   onUpdate: (data: Partial<ProjectFormData>) => void;
+  onValidationChange?: (isValid: boolean) => void;
 }
 
 interface GroupedProducts {
@@ -111,7 +114,7 @@ function getTradeDescription(trade: string): string {
   }
 }
 
-export function ProductConfigStep({ data, onUpdate }: ProductConfigStepProps) {
+export function ProductConfigStep({ data, onUpdate, onValidationChange }: ProductConfigStepProps) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [configurations, setConfigurations] = useState<TradeConfiguration[]>([]);
@@ -148,7 +151,7 @@ export function ProductConfigStep({ data, onUpdate }: ProductConfigStepProps) {
         // Debug logging to diagnose missing trade sections
         console.log('🔍 Debug: Selected trades:', data.selectedTrades);
         console.log('🔍 Debug: Configurations fetched:', configs?.length || 0);
-        console.log('🔍 Debug: Trades with data:', configs?.reduce((acc, c) => {
+        console.log('🔍 Debug: Trades with data:', configs?.reduce((acc, c: any) => {
           acc[c.trade] = (acc[c.trade] || 0) + 1;
           return acc;
         }, {} as Record<string, number>));
@@ -165,6 +168,8 @@ export function ProductConfigStep({ data, onUpdate }: ProductConfigStepProps) {
           .order('product_name', { ascending: true });
 
         if (productError) throw productError;
+
+        console.log('🔍 Configurations loaded:', configs?.length || 0, 'fields for trades:', data.selectedTrades);
 
         setConfigurations(configs || []);
         setProductCatalog(products || []);
@@ -183,6 +188,86 @@ export function ProductConfigStep({ data, onUpdate }: ProductConfigStepProps) {
   useEffect(() => {
     onUpdate({ configurations: formValues });
   }, [formValues]);
+
+  // Validate configurations and notify parent
+  useEffect(() => {
+    // Don't validate while loading or if there's an error
+    if (loading || error) return;
+
+    // If trades are selected but NO configurations loaded → INVALID
+    if (data.selectedTrades && data.selectedTrades.length > 0 && configurations.length === 0) {
+      console.log('⚠️ Validation: No configurations loaded for selected trades');
+      onValidationChange?.(false);
+      return;
+    }
+
+    // Validate all selected trades
+    let isValid = true;
+
+    data.selectedTrades?.forEach(trade => {
+      const tradeFields = configurations.filter(c => c.trade === trade);
+      const tradeValues = formValues[trade] || {};
+
+      // If trade is selected but NO fields exist in database → INVALID
+      if (tradeFields.length === 0) {
+        console.warn(`⚠️ Validation: Trade "${trade}" selected but no configuration fields exist in database`);
+        isValid = false;
+        return;
+      }
+
+      // Check database-defined required fields
+      tradeFields.forEach(field => {
+        // Only validate visible fields
+        if (!isFieldVisible(field, trade)) return;
+
+        // Check if required field is filled
+        if (field.is_required && !isFieldFilled(tradeValues[field.config_name])) {
+          isValid = false;
+        }
+      });
+
+      // EXPLICIT validation for critical required fields (defensive coding)
+      // These checks ensure validation works even if database configuration is missing
+      if (trade === 'siding') {
+        if (!tradeValues['siding_product_type'] || tradeValues['siding_product_type'] === '') {
+          console.log('❌ Validation failed: siding_product_type is required but empty');
+          isValid = false;
+        }
+      }
+
+      if (trade === 'roofing') {
+        const roofingProduct = tradeValues['shingle_product_id'] || tradeValues['shingle_product'];
+        if (!roofingProduct || roofingProduct === '') {
+          console.log('❌ Validation failed: roofing product is required but empty');
+          isValid = false;
+        }
+      }
+
+      if (trade === 'windows') {
+        if (!tradeValues['window_manufacturer'] || tradeValues['window_manufacturer'] === '') {
+          console.log('❌ Validation failed: window_manufacturer is required but empty');
+          isValid = false;
+        }
+      }
+
+      if (trade === 'gutters') {
+        if (!tradeValues['gutter_material'] || tradeValues['gutter_material'] === '') {
+          console.log('❌ Validation failed: gutter_material is required but empty');
+          isValid = false;
+        }
+      }
+    });
+
+    console.log('✅ Validation result:', {
+      isValid,
+      configurationsCount: configurations.length,
+      selectedTrades: data.selectedTrades
+    });
+
+    // Notify parent of validation state
+    onValidationChange?.(isValid);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [formValues, configurations, data.selectedTrades, loading, error, onValidationChange]);
 
   // Check if a product is a ColorPlus product
   const isProductColorPlus = (productId: string): boolean => {
@@ -312,13 +397,27 @@ export function ProductConfigStep({ data, onUpdate }: ProductConfigStepProps) {
       }
 
       // Case 2: Simple equality check (e.g., {belly_band_include: true})
-      const result = fieldValue === conditionValue;
+      // Handle type coercion for boolean values (checkbox can return true, "true", or 1)
+      let result: boolean;
+
+      if (typeof conditionValue === 'boolean') {
+        // For boolean conditions, accept: true, "true", 1
+        result = fieldValue === conditionValue ||
+                 fieldValue === String(conditionValue) ||
+                 (conditionValue === true && fieldValue === 1) ||
+                 (conditionValue === false && (fieldValue === 0 || fieldValue === ''));
+      } else {
+        // For other types (strings, numbers), use strict equality
+        result = fieldValue === conditionValue;
+      }
 
       console.log('  ↳ Condition result:', JSON.stringify({
         conditionField: conditionFieldName,
         operator: 'equals',
         expectedValue: conditionValue,
+        expectedType: typeof conditionValue,
         actualValue: fieldValue,
+        actualType: typeof fieldValue,
         result: result
       }, null, 2));
 
@@ -430,8 +529,10 @@ export function ProductConfigStep({ data, onUpdate }: ProductConfigStepProps) {
       tradeProducts = filterProductsByCatalogFilter(tradeProducts, catalogFilter);
     }
 
-    // Deduplicate by product line name
-    tradeProducts = deduplicateProducts(tradeProducts);
+    // Only deduplicate for roofing and windows - siding shows all variants
+    if (trade === 'roofing' || trade === 'windows') {
+      tradeProducts = deduplicateProducts(tradeProducts);
+    }
 
     return tradeProducts.reduce((acc, product) => {
       const category = product.category || 'Other';
@@ -509,17 +610,117 @@ export function ProductConfigStep({ data, onUpdate }: ProductConfigStepProps) {
           : null;
         const isFilled = isFieldFilled(fieldValue);
 
-        // Debug logging for catalog loading
-        if (field.load_from_catalog && selectOptions) {
-          const totalProducts = Object.values(selectOptions).flat().length;
-          console.log('🔍 Catalog field:', {
-            fieldName: field.config_name,
-            trade: field.trade,
-            catalogFilter: effectiveCatalogFilter,
-            productsFound: totalProducts
-          });
+        // Check if this is a color field
+        const isColorField = field.config_name.toLowerCase().includes('color');
+
+        // For color fields with options, use ColorSwatchGrid
+        if (isColorField && field.field_options?.options && !field.load_from_catalog) {
+          const colorOptions = field.field_options.options.map((opt: any) => ({
+            value: opt.value,
+            label: opt.label,
+            hex: opt.hex // Pass hex code from database (if available)
+          }));
+
+          return (
+            <div key={field.id} className="space-y-3">
+              <div className="flex items-center justify-between">
+                <Label className="flex items-center gap-2">
+                  {field.field_label}
+                  {field.is_required && (
+                    <Badge variant="destructive" className="text-[10px] px-1.5 py-0">
+                      Required
+                    </Badge>
+                  )}
+                </Label>
+                {isFilled && (
+                  <Check className="h-4 w-4 text-brand-600" />
+                )}
+              </div>
+              <ColorSwatchGrid
+                colors={colorOptions}
+                value={fieldValue}
+                onChange={(value) => handleFieldChange(trade, field.config_name, value)}
+              />
+              {field.is_required && !isFilled && (
+                <p className="text-xs text-destructive mt-1.5 font-medium">
+                  {field.field_label} is required
+                </p>
+              )}
+            </div>
+          );
         }
 
+        // For product catalog fields, use SearchableSelect
+        if (field.load_from_catalog && selectOptions) {
+          const searchableOptions: SearchableSelectOption[] = [];
+
+          Object.entries(selectOptions).forEach(([category, products]) => {
+            products.forEach((product) => {
+              searchableOptions.push({
+                value: product.id,
+                label: getProductDisplayName(product),
+                category: toTitleCase(category),
+                description: product.physical_properties?.is_colorplus ? 'ColorPlus Technology' : undefined
+              });
+            });
+          });
+
+          return (
+            <div key={field.id} className="space-y-2">
+              <div className="flex items-center justify-between">
+                {field.field_help_text ? (
+                  <TooltipProvider>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Label className="flex items-center gap-2 cursor-help">
+                          {field.field_label}
+                          {field.is_required && (
+                            <Badge variant="destructive" className="text-[10px] px-1.5 py-0">
+                              Required
+                            </Badge>
+                          )}
+                          <Info className="h-3.5 w-3.5 text-muted-foreground" />
+                        </Label>
+                      </TooltipTrigger>
+                      <TooltipContent>
+                        <p className="text-xs">{field.field_help_text}</p>
+                      </TooltipContent>
+                    </Tooltip>
+                  </TooltipProvider>
+                ) : (
+                  <Label className="flex items-center gap-2">
+                    {field.field_label}
+                    {field.is_required && (
+                      <Badge variant="destructive" className="text-[10px] px-1.5 py-0">
+                        Required
+                      </Badge>
+                    )}
+                  </Label>
+                )}
+                {isFilled && (
+                  <Check className="h-4 w-4 text-brand-600" />
+                )}
+              </div>
+              <SearchableSelect
+                options={searchableOptions}
+                value={fieldValue || ''}
+                onChange={(value) => handleFieldChange(trade, field.config_name, value)}
+                placeholder={field.field_placeholder || `Search ${field.field_label.toLowerCase()}...`}
+                emptyText="No products found."
+                className={cn(
+                  isFilled && "border-brand-600/50 bg-brand-50/50 dark:bg-brand-950/20"
+                )}
+              />
+              {field.is_required && !isFilled && (
+                <p className="text-xs text-destructive mt-1.5 font-medium">
+                  {field.field_label} is required
+                </p>
+              )}
+            </div>
+          );
+        }
+
+        // Default: Use standard Select for regular options
         return (
           <div key={field.id} className="space-y-2">
             <div className="flex items-center justify-between">
@@ -553,7 +754,7 @@ export function ProductConfigStep({ data, onUpdate }: ProductConfigStepProps) {
                 </Label>
               )}
               {isFilled && (
-                <Check className="h-4 w-4 text-green-600" />
+                <Check className="h-4 w-4 text-brand-600" />
               )}
             </div>
             <Select
@@ -562,49 +763,30 @@ export function ProductConfigStep({ data, onUpdate }: ProductConfigStepProps) {
             >
               <SelectTrigger id={field.config_name} className={cn(
                 "min-h-11",
-                isFilled && "border-green-600/50 bg-green-50/50 dark:bg-green-950/20"
+                isFilled && "border-brand-600/50 bg-brand-50/50 dark:bg-brand-950/20"
               )}>
                 <SelectValue placeholder={field.field_placeholder || `Select ${field.field_label.toLowerCase()}`} />
               </SelectTrigger>
               <SelectContent>
-                {selectOptions ? (
-                  // Render grouped list of products from catalog
-                  Object.entries(selectOptions).map(([category, products]) => (
-                    <SelectGroup key={category}>
-                      <SelectLabel className="text-xs font-semibold text-muted-foreground">
-                        {toTitleCase(category)}
-                      </SelectLabel>
-                      {products.map((product) => (
-                        <SelectItem key={product.id} value={product.id}>
-                          <div className="flex items-center gap-2">
-                            <span>{getProductDisplayName(product)}</span>
-                            {product.physical_properties?.is_colorplus && (
-                              <Badge className="bg-blue-500 text-white text-xs">
-                                ColorPlus
-                              </Badge>
-                            )}
-                          </div>
-                        </SelectItem>
-                      ))}
-                    </SelectGroup>
-                  ))
-                ) : (
-                  // Render options from field_options
-                  field.field_options?.options?.map((option: any) => (
-                    <SelectItem key={option.value} value={option.value}>
-                      <div className="flex flex-col">
-                        <span>{option.label}</span>
-                        {option.description && (
-                          <span className="text-xs text-muted-foreground">
-                            {option.description}
-                          </span>
-                        )}
-                      </div>
-                    </SelectItem>
-                  ))
-                )}
+                {field.field_options?.options?.map((option: any) => (
+                  <SelectItem key={option.value} value={option.value}>
+                    <div className="flex flex-col">
+                      <span>{option.label}</span>
+                      {option.description && (
+                        <span className="text-xs text-muted-foreground">
+                          {option.description}
+                        </span>
+                      )}
+                    </div>
+                  </SelectItem>
+                ))}
               </SelectContent>
             </Select>
+            {field.is_required && !isFilled && (
+              <p className="text-xs text-destructive mt-1.5 font-medium">
+                {field.field_label} is required
+              </p>
+            )}
           </div>
         );
 
@@ -683,7 +865,7 @@ export function ProductConfigStep({ data, onUpdate }: ProductConfigStepProps) {
                 </Label>
               )}
               {multiselectFilled && (
-                <Check className="h-4 w-4 text-green-600" />
+                <Check className="h-4 w-4 text-brand-600" />
               )}
             </div>
             <div className="space-y-2 rounded-lg border p-4">
@@ -719,6 +901,66 @@ export function ProductConfigStep({ data, onUpdate }: ProductConfigStepProps) {
       case 'number':
         const numberFilled = isFieldFilled(fieldValue);
 
+        // Special handling for markup_percent field - show % symbol
+        if (field.config_name === 'markup_percent') {
+          return (
+            <div key={field.id} className="space-y-2">
+              <div className="flex items-center justify-between">
+                {field.field_help_text ? (
+                  <TooltipProvider>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Label htmlFor={field.config_name} className="flex items-center gap-2 cursor-help">
+                          {field.field_label}
+                          {field.is_required && (
+                            <Badge variant="destructive" className="text-[10px] px-1.5 py-0">
+                              Required
+                            </Badge>
+                          )}
+                          <Info className="h-3.5 w-3.5 text-muted-foreground" />
+                        </Label>
+                      </TooltipTrigger>
+                      <TooltipContent>
+                        <p className="text-xs">{field.field_help_text}</p>
+                      </TooltipContent>
+                    </Tooltip>
+                  </TooltipProvider>
+                ) : (
+                  <Label htmlFor={field.config_name} className="flex items-center gap-2">
+                    {field.field_label}
+                    {field.is_required && (
+                      <Badge variant="destructive" className="text-[10px] px-1.5 py-0">
+                        Required
+                      </Badge>
+                    )}
+                  </Label>
+                )}
+                {numberFilled && (
+                  <Check className="h-4 w-4 text-brand-600" />
+                )}
+              </div>
+              <div className="flex items-center gap-2 max-w-xs">
+                <Input
+                  id={field.config_name}
+                  type="number"
+                  value={fieldValue || field.default_value || '15'}
+                  onChange={(e) => handleFieldChange(trade, field.config_name, e.target.value)}
+                  placeholder={field.field_placeholder || '15'}
+                  min={(field.validation_rules as any)?.min ?? 0}
+                  max={(field.validation_rules as any)?.max ?? 100}
+                  step={(field.validation_rules as any)?.step ?? 0.1}
+                  className={cn(
+                    "min-h-11 flex-1",
+                    numberFilled && "border-brand-600/50 bg-brand-50/50 dark:bg-brand-950/20"
+                  )}
+                />
+                <span className="text-lg font-medium text-gray-600 dark:text-gray-400">%</span>
+              </div>
+            </div>
+          );
+        }
+
+        // Default number field rendering
         return (
           <div key={field.id} className="space-y-2">
             <div className="flex items-center justify-between">
@@ -752,7 +994,7 @@ export function ProductConfigStep({ data, onUpdate }: ProductConfigStepProps) {
                 </Label>
               )}
               {numberFilled && (
-                <Check className="h-4 w-4 text-green-600" />
+                <Check className="h-4 w-4 text-brand-600" />
               )}
             </div>
             <Input
@@ -763,7 +1005,7 @@ export function ProductConfigStep({ data, onUpdate }: ProductConfigStepProps) {
               placeholder={field.field_placeholder || `Enter ${field.field_label.toLowerCase()}`}
               className={cn(
                 "min-h-11",
-                numberFilled && "border-green-600/50 bg-green-50/50 dark:bg-green-950/20"
+                numberFilled && "border-brand-600/50 bg-brand-50/50 dark:bg-brand-950/20"
               )}
             />
           </div>
@@ -931,12 +1173,12 @@ export function ProductConfigStep({ data, onUpdate }: ProductConfigStepProps) {
 
             return (
               <Collapsible key={trade} defaultOpen>
-                <Card className="shadow-sm">
+                <Card className="shadow-soft rounded-xl">
                   <CollapsibleTrigger asChild>
                     <CardHeader className="bg-muted/30 cursor-pointer hover:bg-muted/40 transition-colors">
                       <div className="flex items-center justify-between">
                         <div>
-                          <CardTitle className="text-xl">{tradeName}</CardTitle>
+                          <CardTitle className="text-xl font-heading">{tradeName}</CardTitle>
                           <CardDescription className="mt-0.5">
                             {tradeDescription}
                           </CardDescription>

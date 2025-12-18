@@ -1,0 +1,64 @@
+"use client";
+
+import { useState } from "react";
+import Link from "next/link";
+import { ArrowLeft, BarChart3 } from "lucide-react";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { ProjectForm } from "@/components/project-form/ProjectForm";
+import { ProjectsTable } from "@/components/projects/ProjectsTable";
+import { DashboardOverview } from "@/components/dashboard/DashboardOverview";
+
+export default function ProjectDashboard() {
+  const [activeTab, setActiveTab] = useState("overview");
+
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-background via-background to-muted/20">
+      <div className="container mx-auto px-4 py-8 sm:px-6 lg:px-8">
+        {/* Header */}
+        <div className="mb-8">
+          <Link
+            href="/"
+            className="inline-flex items-center text-sm text-muted-foreground hover:text-foreground transition-colors"
+          >
+            <ArrowLeft className="mr-2 h-4 w-4" />
+            Back to Home
+          </Link>
+          <h1 className="mt-4 text-4xl font-bold tracking-tight text-foreground bg-clip-text font-heading">
+            Project Dashboard
+          </h1>
+          <p className="mt-2 text-muted-foreground">
+            Create new estimates or manage existing projects
+          </p>
+        </div>
+
+        {/* Tabs */}
+        <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
+          <TabsList className="grid w-full max-w-2xl grid-cols-3 h-12">
+            <TabsTrigger value="overview" className="text-base">
+              <BarChart3 className="mr-2 h-4 w-4" />
+              Overview
+            </TabsTrigger>
+            <TabsTrigger value="new" className="text-base">
+              New Project
+            </TabsTrigger>
+            <TabsTrigger value="past" className="text-base">
+              Past Projects
+            </TabsTrigger>
+          </TabsList>
+
+          <TabsContent value="overview" className="space-y-6">
+            <DashboardOverview />
+          </TabsContent>
+
+          <TabsContent value="new" className="space-y-6">
+            <ProjectForm />
+          </TabsContent>
+
+          <TabsContent value="past" className="space-y-6">
+            <ProjectsTable />
+          </TabsContent>
+        </Tabs>
+      </div>
+    </div>
+  );
+}

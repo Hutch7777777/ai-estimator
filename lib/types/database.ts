@@ -9,11 +9,17 @@
 // ENUMS
 // ============================================================================
 
-export type ProjectStatus = 'draft' | 'processing' | 'complete' | 'error';
+export type ProjectStatus = 'pending' | 'extracted' | 'calculated' | 'priced' | 'approved' | 'sent_to_client' | 'won' | 'lost' | 'on_hold';
 
 export type Trade = 'siding' | 'roofing' | 'windows' | 'gutters';
 
 export type FieldType = 'select' | 'checkbox' | 'multiselect' | 'number';
+
+export type TakeoffStatus = 'draft' | 'in_progress' | 'review' | 'approved' | 'sent';
+
+export type CalculationSource = 'auto_scope' | 'manual' | 'hover_pdf' | 'imported';
+
+export type Unit = 'EA' | 'PC' | 'SQ' | 'LF' | 'SF' | 'RL' | 'BX' | 'BDL' | 'GAL';
 
 // ============================================================================
 // TABLE INTERFACES
@@ -26,13 +32,14 @@ export type FieldType = 'select' | 'checkbox' | 'multiselect' | 'number';
  */
 export interface Project {
   id: string; // UUID
-  project_name: string;
-  customer_name: string;
+  name: string; // Project name
+  client_name: string; // Customer/client name
   address: string;
   selected_trades: Trade[]; // Array of selected trades
   status: ProjectStatus;
   hover_pdf_url: string | null;
   excel_url: string | null;
+  markup_percent: number; // Markup percentage (e.g., 15.00 for 15%)
   processing_started_at: string | null; // ISO timestamp
   processing_completed_at: string | null; // ISO timestamp
   error_message: string | null;
@@ -157,6 +164,123 @@ export interface ProjectConfiguration {
   updated_at: string; // ISO timestamp
 }
 
+/**
+ * Takeoffs Table
+ *
+ * Main takeoff/estimate records, one per project.
+ * Created when project status changes to 'extracted'.
+ */
+export interface Takeoff {
+  id: string; // UUID
+  project_id: string; // UUID - Foreign key to projects table
+  status: TakeoffStatus;
+
+  // Totals (calculated from line items)
+  total_material: number;
+  total_labor: number;
+  total_equipment: number;
+  grand_total: number;
+
+  // Pricing
+  markup_percent: number; // Markup percentage (e.g., 15.00 for 15%)
+
+  // Metadata
+  notes: string | null;
+  approved_by: string | null;
+  approved_at: string | null; // ISO timestamp
+
+  created_at: string; // ISO timestamp
+  updated_at: string; // ISO timestamp
+}
+
+/**
+ * Takeoff Sections Table
+ *
+ * Sections organize line items by trade (siding, roofing, windows, gutters).
+ * One section per selected trade in the project.
+ */
+export interface TakeoffSection {
+  id: string; // UUID
+  takeoff_id: string; // UUID - Foreign key to takeoffs table
+  name: Trade; // Internal name: 'siding', 'roofing', 'windows', 'gutters'
+  display_name: string; // Display name: 'Siding', 'Roofing', 'Windows', 'Gutters'
+  sort_order: number;
+
+  // Section totals (calculated from line items)
+  total_material: number;
+  total_labor: number;
+  total_equipment: number;
+  section_total: number;
+
+  // Metadata
+  notes: string | null;
+  is_active: boolean;
+
+  created_at: string; // ISO timestamp
+  updated_at: string; // ISO timestamp
+}
+
+/**
+ * Takeoff Line Items Table
+ *
+ * Individual line items with detailed material/labor/equipment cost breakdown.
+ * Implements Mike Skjei pricing methodology with transparent cost breakdowns.
+ */
+export interface TakeoffLineItem {
+  id: string; // UUID
+  takeoff_id: string; // UUID - Foreign key to takeoffs table
+  section_id: string; // UUID - Foreign key to takeoff_sections table
+
+  // Item identification
+  item_number: number;
+  description: string;
+  sku: string | null;
+
+  // Quantity
+  quantity: number;
+  unit: Unit;
+
+  // Unit costs (detailed breakdown)
+  material_unit_cost: number;
+  labor_unit_cost: number;
+  equipment_unit_cost: number;
+
+  // Extended costs (auto-calculated: quantity × unit_cost)
+  // These are GENERATED ALWAYS columns in the database
+  material_extended: number;
+  labor_extended: number;
+  equipment_extended: number;
+  line_total: number;
+
+  // Product reference
+  product_id: string | null; // UUID - Optional link to product_catalog
+
+  // Provenance tracking (CORE to methodology)
+  calculation_source: CalculationSource;
+  source_id: string | null; // External reference (e.g., HOVER measurement ID)
+  formula_used: string | null; // Human-readable calculation explanation
+
+  // Metadata
+  notes: string | null;
+  is_optional: boolean;
+  is_deleted: boolean; // Soft delete for audit trail
+  sort_order: number;
+  presentation_group: string | null; // Group for display organization (e.g., 'siding', 'trim', 'flashing')
+
+  created_at: string; // ISO timestamp
+  updated_at: string; // ISO timestamp
+}
+
+/**
+ * Extended Line Item with UI State
+ *
+ * Used in AG Grid for tracking changes before saving to database.
+ */
+export interface LineItemWithState extends TakeoffLineItem {
+  isNew?: boolean; // Flag for newly added rows
+  isModified?: boolean; // Flag for modified rows
+}
+
 // ============================================================================
 // DATABASE TYPE
 // ============================================================================
@@ -191,6 +315,21 @@ export interface Database {
         Row: ProjectConfiguration;
         Insert: Omit<ProjectConfiguration, 'id' | 'created_at' | 'updated_at'>;
         Update: Partial<Omit<ProjectConfiguration, 'id' | 'created_at' | 'updated_at'>>;
+      };
+      takeoffs: {
+        Row: Takeoff;
+        Insert: Omit<Takeoff, 'id' | 'created_at' | 'updated_at' | 'total_material' | 'total_labor' | 'total_equipment' | 'grand_total'>;
+        Update: Partial<Omit<Takeoff, 'id' | 'created_at' | 'updated_at' | 'total_material' | 'total_labor' | 'total_equipment' | 'grand_total'>>;
+      };
+      takeoff_sections: {
+        Row: TakeoffSection;
+        Insert: Omit<TakeoffSection, 'id' | 'created_at' | 'updated_at' | 'total_material' | 'total_labor' | 'total_equipment' | 'section_total'>;
+        Update: Partial<Omit<TakeoffSection, 'id' | 'created_at' | 'updated_at' | 'total_material' | 'total_labor' | 'total_equipment' | 'section_total'>>;
+      };
+      takeoff_line_items: {
+        Row: TakeoffLineItem;
+        Insert: Omit<TakeoffLineItem, 'id' | 'created_at' | 'updated_at' | 'material_extended' | 'labor_extended' | 'equipment_extended' | 'line_total'>;
+        Update: Partial<Omit<TakeoffLineItem, 'id' | 'created_at' | 'updated_at' | 'material_extended' | 'labor_extended' | 'equipment_extended' | 'line_total'>>;
       };
     };
   };
