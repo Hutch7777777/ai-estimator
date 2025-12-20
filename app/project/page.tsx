@@ -2,14 +2,24 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { ArrowLeft, BarChart3 } from "lucide-react";
+import { ArrowLeft, BarChart3, Pencil } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ProjectForm } from "@/components/project-form/ProjectForm";
 import { ProjectsTable } from "@/components/projects/ProjectsTable";
 import { DashboardOverview } from "@/components/dashboard/DashboardOverview";
+import { CADMarkupStep } from "@/components/cad-markup";
 
 export default function ProjectDashboard() {
   const [activeTab, setActiveTab] = useState("overview");
+  const [cadMarkupKey, setCadMarkupKey] = useState(0);
+
+  // When switching to CAD tab, increment key to force remount
+  const handleTabChange = (value: string) => {
+    if (value === "cad") {
+      setCadMarkupKey((prev) => prev + 1);
+    }
+    setActiveTab(value);
+  };
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-background via-background to-muted/20">
@@ -32,14 +42,27 @@ export default function ProjectDashboard() {
         </div>
 
         {/* Tabs */}
-        <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
-          <TabsList className="grid w-full max-w-2xl grid-cols-3 h-12">
+        <Tabs value={activeTab} onValueChange={handleTabChange} className="space-y-6">
+          <TabsList className="grid w-full max-w-3xl grid-cols-4 h-12">
             <TabsTrigger value="overview" className="text-base">
               <BarChart3 className="mr-2 h-4 w-4" />
               Overview
             </TabsTrigger>
             <TabsTrigger value="new" className="text-base">
               New Project
+            </TabsTrigger>
+            <TabsTrigger
+              value="cad"
+              className="text-base"
+              onClick={() => {
+                // Reset when clicking CAD tab while already on it
+                if (activeTab === "cad") {
+                  setCadMarkupKey((prev) => prev + 1);
+                }
+              }}
+            >
+              <Pencil className="mr-2 h-4 w-4" />
+              CAD Markup
             </TabsTrigger>
             <TabsTrigger value="past" className="text-base">
               Past Projects
@@ -52,6 +75,10 @@ export default function ProjectDashboard() {
 
           <TabsContent value="new" className="space-y-6">
             <ProjectForm />
+          </TabsContent>
+
+          <TabsContent value="cad" className="space-y-6">
+            <CADMarkupStep key={cadMarkupKey} />
           </TabsContent>
 
           <TabsContent value="past" className="space-y-6">
