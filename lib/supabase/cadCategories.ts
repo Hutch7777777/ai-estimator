@@ -46,7 +46,8 @@ function formatCategoryLabel(category: string): string {
 export async function fetchTrades(): Promise<Trade[]> {
   const supabase = createClient();
 
-  const { data, error } = await supabase
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data, error } = await (supabase as any)
     .from("product_catalog")
     .select("trade")
     .eq("active", true)
@@ -58,8 +59,8 @@ export async function fetchTrades(): Promise<Trade[]> {
   }
 
   // Get unique trades
-  const uniqueTrades = [...new Set(data.map((d) => d.trade))];
-  const trades: Trade[] = uniqueTrades.map((t) => ({
+  const uniqueTrades = [...new Set(data.map((d: any) => d.trade))] as string[];
+  const trades: Trade[] = uniqueTrades.map((t: string) => ({
     value: t,
     label: t.charAt(0).toUpperCase() + t.slice(1),
   }));
@@ -76,7 +77,8 @@ export async function fetchCategoriesByTrade(trade: string): Promise<Category[]>
 
   const supabase = createClient();
 
-  const { data, error } = await supabase
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data, error } = await (supabase as any)
     .from("product_catalog")
     .select("category")
     .eq("trade", trade)
@@ -88,21 +90,18 @@ export async function fetchCategoriesByTrade(trade: string): Promise<Category[]>
   }
 
   // Count products per category
-  const categoryCounts = data.reduce(
-    (acc, item) => {
-      acc[item.category] = (acc[item.category] || 0) + 1;
-      return acc;
-    },
-    {} as Record<string, number>
-  );
+  const categoryCounts: Record<string, number> = {};
+  (data as any[]).forEach((item: any) => {
+    categoryCounts[item.category] = (categoryCounts[item.category] || 0) + 1;
+  });
 
   // Convert to Category array and sort
-  const categories: Category[] = Object.entries(categoryCounts)
-    .map(([category, count]) => ({
+  const categories: Category[] = Object.keys(categoryCounts)
+    .map((category) => ({
       trade,
       category,
       label: formatCategoryLabel(category),
-      productCount: count,
+      productCount: categoryCounts[category],
     }))
     .sort((a, b) => a.label.localeCompare(b.label));
 
@@ -117,7 +116,8 @@ export async function fetchProductsByCategory(trade: string, category: string): 
 
   const supabase = createClient();
 
-  const { data, error } = await supabase
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data, error } = await (supabase as any)
     .from("product_catalog")
     .select("id, trade, category, product_name, display_name, manufacturer, sku, unit")
     .eq("trade", trade)
@@ -130,7 +130,7 @@ export async function fetchProductsByCategory(trade: string, category: string): 
     return [];
   }
 
-  return data.map((p) => ({
+  return (data as any[]).map((p: any) => ({
     id: p.id,
     trade: p.trade,
     category: p.category,
@@ -146,7 +146,8 @@ export async function fetchProductsByCategory(trade: string, category: string): 
 export async function fetchAllCategories(): Promise<Category[]> {
   const supabase = createClient();
 
-  const { data, error } = await supabase
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data, error } = await (supabase as any)
     .from("product_catalog")
     .select("trade, category")
     .eq("active", true);
@@ -158,7 +159,7 @@ export async function fetchAllCategories(): Promise<Category[]> {
 
   // Group by trade and category
   const grouped: Record<string, Record<string, number>> = {};
-  data.forEach((item) => {
+  (data as any[]).forEach((item: any) => {
     if (!grouped[item.trade]) grouped[item.trade] = {};
     grouped[item.trade][item.category] = (grouped[item.trade][item.category] || 0) + 1;
   });

@@ -34,6 +34,7 @@ export function ProjectForm() {
     pdfFile: null,
     pdfUrl: "",
     notes: "",
+    markupPercent: 15, // Default 15% markup
   });
 
   const progressPercentage = (currentStep / TOTAL_STEPS) * 100;

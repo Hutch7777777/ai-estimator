@@ -29,8 +29,8 @@ export function ProjectInfoStep({ data, onUpdate, onValidationChange }: ProjectI
     });
 
     const newErrors: Record<string, string> = {};
-    if (!result.success && result.error?.errors) {
-      result.error.errors.forEach((err) => {
+    if (!result.success && result.error?.issues) {
+      result.error.issues.forEach((err: any) => {
         const field = err.path[0] as string;
         newErrors[field] = err.message;
       });

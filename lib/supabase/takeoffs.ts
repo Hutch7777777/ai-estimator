@@ -13,7 +13,8 @@ import {
   LineItemWithState,
 } from "@/lib/types/database";
 
-type TypedSupabaseClient = SupabaseClient<Database>;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type TypedSupabaseClient = SupabaseClient<any>;
 
 /**
  * Get complete takeoff data for a project (takeoff + sections + line items)

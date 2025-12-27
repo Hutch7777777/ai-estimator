@@ -116,7 +116,7 @@ export function validateSchema<T extends z.ZodType>(
   }
 
   const errors: Record<string, string> = {};
-  result.error.errors.forEach((err) => {
+  result.error.issues.forEach((err: any) => {
     const path = err.path.join('.');
     errors[path] = err.message;
   });

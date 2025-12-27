@@ -80,7 +80,8 @@ export function DashboardOverview() {
 
     try {
       // Fetch all projects to calculate stats
-      const { data: projects, error } = await supabase
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { data: projects, error } = await (supabase as any)
         .from("projects")
         .select("*")
         .order("created_at", { ascending: false });
@@ -91,15 +92,15 @@ export function DashboardOverview() {
         // Calculate statistics
         const statsData: ProjectStats = {
           total: projects.length,
-          pending: projects.filter((p) => p.status === "pending").length,
-          processing: projects.filter((p) =>
+          pending: projects.filter((p: any) => p.status === "pending").length,
+          processing: projects.filter((p: any) =>
             ["extracted", "calculated", "priced"].includes(p.status || "")
           ).length,
-          approved: projects.filter((p) =>
+          approved: projects.filter((p: any) =>
             ["approved", "sent_to_client"].includes(p.status || "")
           ).length,
-          won: projects.filter((p) => p.status === "won").length,
-          lost: projects.filter((p) => p.status === "lost").length,
+          won: projects.filter((p: any) => p.status === "won").length,
+          lost: projects.filter((p: any) => p.status === "lost").length,
         };
 
         setStats(statsData);
