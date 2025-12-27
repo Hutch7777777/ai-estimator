@@ -214,8 +214,8 @@ export default function NewProjectPage() {
       }
 
       // Step 2: Insert project into database
-      // @ts-ignore - Supabase generated types issue
-      const { data: project, error: projectError } = await supabase
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { data: project, error: projectError } = await (supabase as any)
         .from("projects")
         .insert({
           name: formData.projectName,
@@ -233,14 +233,14 @@ export default function NewProjectPage() {
 
       // Step 3: Insert configurations for each trade
       if (formData.selectedTrades.length > 0 && project) {
-        const configInserts = formData.selectedTrades.map((trade) => ({
-          project_id: project.id,
+        const configInserts = formData.selectedTrades.map((trade: string) => ({
+          project_id: (project as any).id,
           trade,
           configuration_data: formData.configurations[trade] || {},
         }));
 
-        // @ts-ignore - Supabase generated types issue
-        const { error: configError } = await supabase
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const { error: configError } = await (supabase as any)
           .from("project_configurations")
           .insert(configInserts);
 
