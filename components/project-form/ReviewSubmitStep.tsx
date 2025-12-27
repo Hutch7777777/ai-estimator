@@ -27,7 +27,7 @@ export function ReviewSubmitStep({ data, onUpdate }: ReviewSubmitStepProps) {
           {/* Project Info */}
           <div>
             <h3 className="mb-3 flex items-center text-sm font-medium font-heading">
-              <CheckCircle2 className="mr-2 h-4 w-4 text-brand-500" />
+              <CheckCircle2 className="mr-2 h-4 w-4 text-[#00cc6a]" />
               Project Information
             </h3>
             <div className="ml-6 space-y-2 text-sm">

@@ -48,17 +48,17 @@ const formatCurrency = (value: number): string => {
 const getStatusColor = (status: string): string => {
   switch (status) {
     case "draft":
-      return "bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-100";
+      return "bg-[#f1f5f9] text-[#475569]";
     case "in_progress":
-      return "bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-100";
+      return "bg-blue-100 text-blue-800";
     case "review":
-      return "bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-100";
+      return "bg-amber-100 text-amber-800";
     case "approved":
-      return "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-100";
+      return "bg-[#dcfce7] text-[#166534]";
     case "sent":
-      return "bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-100";
+      return "bg-purple-100 text-purple-800";
     default:
-      return "bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-100";
+      return "bg-[#f1f5f9] text-[#475569]";
   }
 };
 
@@ -224,17 +224,17 @@ export function EstimateSummary({
       </CardHeader>
       <CardContent className="space-y-6">
         {/* Grand Total Card */}
-        <div className="p-6 bg-gradient-to-br from-primary/10 to-primary/5 rounded-lg border-2 border-primary/20">
+        <div className="p-6 bg-[#f0fdf4] rounded-lg border border-[#00cc6a]/30">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-sm text-muted-foreground uppercase tracking-wide font-medium">
+              <p className="text-sm text-[#475569] uppercase tracking-wide font-medium">
                 Grand Total
               </p>
-              <p className="text-4xl font-bold text-primary mt-1">
+              <p className="text-4xl font-bold text-[#00cc6a] mt-1">
                 {formatCurrency(currentTotals.total)}
               </p>
               {hasUnsavedChanges && (
-                <p className="text-xs text-amber-600 dark:text-amber-400 mt-1 font-medium">
+                <p className="text-xs text-amber-600 mt-1 font-medium">
                   (Includes unsaved changes)
                 </p>
               )}
@@ -248,58 +248,52 @@ export function EstimateSummary({
 
         {/* Cost Breakdown */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-          <div className="p-4 bg-green-50 dark:bg-green-950/20 border border-green-200 dark:border-green-800 rounded-lg">
+          <div className="p-4 bg-white border border-[#e2e8f0] rounded-lg">
             <div className="flex items-center justify-between mb-2">
-              <p className="text-xs text-green-600 dark:text-green-400 uppercase tracking-wide font-medium">
+              <p className="text-xs text-green-600 uppercase tracking-wide font-medium">
                 Material
               </p>
               <Badge variant="outline" className="text-xs">
                 {materialPercent.toFixed(1)}%
               </Badge>
             </div>
-            <p className="text-2xl font-bold text-green-900 dark:text-green-100">
+            <p className="text-2xl font-bold text-[#0f172a]">
               {formatCurrency(currentTotals.material)}
             </p>
           </div>
 
-          <div className="p-4 bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-800 rounded-lg">
+          <div className="p-4 bg-white border border-[#e2e8f0] rounded-lg">
             <div className="flex items-center justify-between mb-2">
-              <p className="text-xs text-amber-600 dark:text-amber-400 uppercase tracking-wide font-medium">
+              <p className="text-xs text-amber-600 uppercase tracking-wide font-medium">
                 Labor
               </p>
               <Badge variant="outline" className="text-xs">
                 {laborPercent.toFixed(1)}%
               </Badge>
             </div>
-            <p className="text-2xl font-bold text-amber-900 dark:text-amber-100">
+            <p className="text-2xl font-bold text-[#0f172a]">
               {formatCurrency(currentTotals.labor)}
             </p>
           </div>
 
-          <div className="p-4 bg-purple-50 dark:bg-purple-950/20 border border-purple-200 dark:border-purple-800 rounded-lg">
+          <div className="p-4 bg-white border border-[#e2e8f0] rounded-lg">
             <div className="flex items-center justify-between mb-2">
-              <p className="text-xs text-purple-600 dark:text-purple-400 uppercase tracking-wide font-medium">
+              <p className="text-xs text-purple-600 uppercase tracking-wide font-medium">
                 Overhead
               </p>
               <Badge variant="outline" className="text-xs">
                 {overheadPercent.toFixed(1)}%
               </Badge>
             </div>
-            <p className="text-2xl font-bold text-purple-900 dark:text-purple-100">
+            <p className="text-2xl font-bold text-[#0f172a]">
               {formatCurrency(currentTotals.overhead)}
             </p>
           </div>
 
-          <div className={`p-4 rounded-lg ${
-            currentTotals.markup < 0
-              ? 'bg-red-50 dark:bg-red-950/20 border border-red-200 dark:border-red-800'
-              : 'bg-blue-50 dark:bg-blue-950/20 border border-blue-200 dark:border-blue-800'
-          }`}>
+          <div className="p-4 bg-white border border-[#e2e8f0] rounded-lg">
             <div className="flex items-center justify-between mb-2">
               <p className={`text-xs uppercase tracking-wide font-medium ${
-                currentTotals.markup < 0
-                  ? 'text-red-600 dark:text-red-400'
-                  : 'text-blue-600 dark:text-blue-400'
+                currentTotals.markup < 0 ? 'text-red-600' : 'text-blue-600'
               }`}>
                 Markup
               </p>
@@ -308,9 +302,7 @@ export function EstimateSummary({
               </Badge>
             </div>
             <p className={`text-2xl font-bold ${
-              currentTotals.markup < 0
-                ? 'text-red-900 dark:text-red-100'
-                : 'text-blue-900 dark:text-blue-100'
+              currentTotals.markup < 0 ? 'text-red-600' : 'text-[#0f172a]'
             }`}>
               {formatCurrency(currentTotals.markup)}
             </p>
@@ -320,7 +312,7 @@ export function EstimateSummary({
         {/* Visual Breakdown Bar */}
         <div className="space-y-2">
           <p className="text-sm font-medium text-muted-foreground">Cost Distribution</p>
-          <div className="h-6 w-full flex rounded-md overflow-hidden border">
+          <div className="h-6 w-full flex rounded-md overflow-hidden border border-[#e2e8f0]">
             {materialPercent > 0 && (
               <div
                 className="bg-green-500 flex items-center justify-center text-xs text-white font-medium"
@@ -392,7 +384,7 @@ export function EstimateSummary({
             >
               {isGeneratingProposal ? (
                 <>
-                  <div className="mr-2 h-4 w-4 animate-spin rounded-full border-2 border-gray-300 border-t-gray-900" />
+                  <div className="mr-2 h-4 w-4 animate-spin rounded-full border-2 border-[#e2e8f0] border-t-[#0f172a]" />
                   Generating...
                 </>
               ) : (

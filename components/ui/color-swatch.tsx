@@ -21,7 +21,7 @@ export function ColorSwatch({ color, label, hex, selected, onClick, className }:
     gray: "#6b7280",
     grey: "#6b7280",
     silver: "#94a3b8",
-    navy: "#1e3a8a",
+    navy: "#0f172a",
     blue: "#3b82f6",
     red: "#ef4444",
     green: "#10b981",
@@ -92,8 +92,8 @@ export function ColorSwatch({ color, label, hex, selected, onClick, className }:
       className={cn(
         "group relative flex flex-col items-center gap-2 rounded-lg border-2 p-3 transition-all",
         selected
-          ? "border-brand-500 bg-brand-50 shadow-sm ring-2 ring-brand-500/20"
-          : "border-slate-200 hover:border-brand-300 hover:bg-slate-50",
+          ? "border-[#00cc6a] bg-[#dcfce7] shadow-sm ring-2 ring-[#00cc6a]/20"
+          : "border-[#e2e8f0] hover:border-[#00cc6a]/50 hover:bg-[#f8fafc]",
         className
       )}
     >
@@ -103,10 +103,10 @@ export function ColorSwatch({ color, label, hex, selected, onClick, className }:
           className={cn(
             "h-12 w-12 rounded-full border-2 shadow-sm transition-transform group-hover:scale-105",
             selected
-              ? "border-brand-500"
+              ? "border-[#00cc6a]"
               : needsStrongerBorder
-                ? "border-slate-400"
-                : "border-slate-300"
+                ? "border-[#94a3b8]"
+                : "border-[#e2e8f0]"
           )}
           style={{ backgroundColor: bgColor }}
         >
@@ -115,7 +115,7 @@ export function ColorSwatch({ color, label, hex, selected, onClick, className }:
               <Check
                 className={cn(
                   "h-6 w-6",
-                  isLight ? "text-slate-900" : "text-white"
+                  isLight ? "text-[#0f172a]" : "text-white"
                 )}
                 strokeWidth={3}
               />
@@ -128,7 +128,7 @@ export function ColorSwatch({ color, label, hex, selected, onClick, className }:
       <span
         className={cn(
           "text-xs font-medium text-center transition-colors",
-          selected ? "text-brand-600" : "text-slate-600 group-hover:text-slate-900"
+          selected ? "text-[#00cc6a]" : "text-[#475569] group-hover:text-[#0f172a]"
         )}
       >
         {label}

@@ -2,15 +2,15 @@ import { cn } from "@/lib/utils"
 import { cva, type VariantProps } from "class-variance-authority"
 
 const statusBadgeVariants = cva(
-  "inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-medium transition-colors",
+  "inline-flex items-center gap-1.5 rounded-sm px-2.5 py-0.5 text-xs font-medium transition-colors",
   {
     variants: {
       status: {
-        draft: "bg-slate-100 text-slate-600",
-        pending: "bg-amber-50 text-amber-700 border border-amber-200",
-        processing: "bg-blue-50 text-blue-700 border border-blue-200",
-        complete: "bg-brand-50 text-brand-700 border border-brand-200",
-        error: "bg-red-50 text-red-700 border border-red-200",
+        draft: "bg-[#f1f5f9] text-[#64748b]",
+        pending: "bg-amber-50 text-amber-600",
+        processing: "bg-blue-50 text-blue-600",
+        complete: "bg-[#dcfce7] text-[#00cc6a]",
+        error: "bg-red-50 text-red-600",
       },
       size: {
         sm: "text-[10px] px-2 py-0.5",
@@ -39,10 +39,10 @@ export function StatusBadge({
   children
 }: StatusBadgeProps) {
   const dotColors: Record<string, string> = {
-    draft: "bg-slate-400",
+    draft: "bg-[#94a3b8]",
     pending: "bg-amber-500",
     processing: "bg-blue-500 animate-pulse-soft",
-    complete: "bg-brand-500",
+    complete: "bg-[#00cc6a]",
     error: "bg-red-500",
   }
 

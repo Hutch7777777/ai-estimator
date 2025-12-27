@@ -108,9 +108,9 @@ export function SearchableSelect({
           <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
         </Button>
       </PopoverTrigger>
-      <PopoverContent className="w-full p-0 bg-white dark:bg-slate-950" align="start">
-        <Command shouldFilter={false} className="bg-white dark:bg-slate-950">
-          <div className="flex items-center border-b border-slate-200/60 dark:border-slate-800/60 px-3 focus-within:border-slate-300/80 dark:focus-within:border-slate-700/80 transition-colors">
+      <PopoverContent className="w-full p-0 bg-white" align="start">
+        <Command shouldFilter={false} className="bg-white">
+          <div className="flex items-center border-b border-[#e2e8f0] px-3 focus-within:border-[#00cc6a] transition-colors">
             <Search className="mr-2 h-4 w-4 shrink-0 opacity-50" />
             <input
               placeholder="Search..."

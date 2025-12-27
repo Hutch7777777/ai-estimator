@@ -156,7 +156,7 @@ export function MarkupLegend({
                       <div className="border-b last:border-b-0">
                         <div className="px-3 py-2 bg-gray-50 font-medium text-xs flex justify-between items-center">
                           <span>Areas</span>
-                          <span className="text-brand-600">{group.totalArea.toFixed(2)} SF</span>
+                          <span className="text-[#00cc6a]">{group.totalArea.toFixed(2)} SF</span>
                         </div>
                         <div className="divide-y">
                           {group.areas.map((area, index) => (
@@ -187,7 +187,7 @@ export function MarkupLegend({
                       <div className="border-b last:border-b-0">
                         <div className="px-3 py-2 bg-gray-50 font-medium text-xs flex justify-between items-center">
                           <span>Counts</span>
-                          <span className="text-brand-600">{group.totalCount} EA</span>
+                          <span className="text-[#00cc6a]">{group.totalCount} EA</span>
                         </div>
                         <div className="divide-y">
                           {group.counts.map((count, index) => (
@@ -218,7 +218,7 @@ export function MarkupLegend({
                       <div>
                         <div className="px-3 py-2 bg-gray-50 font-medium text-xs flex justify-between items-center">
                           <span>Measurements</span>
-                          <span className="text-brand-600">
+                          <span className="text-[#00cc6a]">
                             {group.totalLength.toFixed(2)} LF
                           </span>
                         </div>

@@ -17,7 +17,7 @@ export function Logo({ className, size = "md", variant = "full" }: LogoProps) {
     <div className={cn("flex items-center gap-2", className)}>
       {/* Logo Mark */}
       <div className={cn(
-        "relative flex items-center justify-center rounded-lg bg-gradient-to-br from-brand-500 to-brand-600 text-white",
+        "relative flex items-center justify-center rounded-sm bg-[#00cc6a] text-white",
         sizes[size].icon,
         sizes[size].padding
       )}>
@@ -36,9 +36,9 @@ export function Logo({ className, size = "md", variant = "full" }: LogoProps) {
       </div>
 
       {variant === "full" && (
-        <div className={cn("font-semibold tracking-tight", sizes[size].text)}>
-          <span className="text-slate-900">Estimate</span>
-          <span className="text-brand-600">.ai</span>
+        <div className={cn("font-mono font-bold tracking-tight", sizes[size].text)}>
+          <span className="text-[#0f172a]">ESTIMATE</span>
+          <span className="text-[#00cc6a]">.ai</span>
         </div>
       )}
     </div>

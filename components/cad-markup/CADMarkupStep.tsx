@@ -1021,7 +1021,7 @@ export function CADMarkupStep({ data, onUpdate, onValidationChange }: CADMarkupS
                     isLoadingFile
                       ? "border-blue-500 bg-blue-50 cursor-wait"
                       : isDragActive
-                        ? "border-brand-500 bg-brand-50"
+                        ? "border-[#00cc6a] bg-[#dcfce7]"
                         : "border-gray-300 hover:border-blue-400 hover:bg-blue-50/50"
                   }`}
                 >
@@ -1039,7 +1039,7 @@ export function CADMarkupStep({ data, onUpdate, onValidationChange }: CADMarkupS
                       <Upload className="h-12 w-12 text-muted-foreground mb-4" />
                       <h3 className="text-lg font-semibold mb-2">Upload Project PDF</h3>
                       {isDragActive ? (
-                        <p className="text-brand-600 font-medium">Drop the file here...</p>
+                        <p className="text-[#00cc6a] font-medium">Drop the file here...</p>
                       ) : (
                         <>
                           <p className="text-muted-foreground text-center mb-2">

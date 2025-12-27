@@ -66,7 +66,7 @@ export function ProjectInfoStep({ data, onUpdate, onValidationChange }: ProjectI
             <Label htmlFor="projectName" className="flex items-center gap-2">
               Project Name
               {isFieldValid("projectName") && (
-                <CheckCircle2 className="h-4 w-4 text-brand-500" />
+                <CheckCircle2 className="h-4 w-4 text-[#00cc6a]" />
               )}
               {showError("projectName") && (
                 <AlertCircle className="h-4 w-4 text-red-500" />
@@ -82,7 +82,7 @@ export function ProjectInfoStep({ data, onUpdate, onValidationChange }: ProjectI
             onBlur={() => handleBlur("projectName")}
             className={cn(
               showError("projectName") && "border-red-500 focus-visible:ring-red-500",
-              isFieldValid("projectName") && "border-brand-500 focus-visible:ring-brand-500"
+              isFieldValid("projectName") && "border-[#00cc6a] focus-visible:ring-[#00cc6a]"
             )}
           />
           {showError("projectName") && (
@@ -99,7 +99,7 @@ export function ProjectInfoStep({ data, onUpdate, onValidationChange }: ProjectI
             <Label htmlFor="customerName" className="flex items-center gap-2">
               Customer Name
               {isFieldValid("customerName") && (
-                <CheckCircle2 className="h-4 w-4 text-brand-500" />
+                <CheckCircle2 className="h-4 w-4 text-[#00cc6a]" />
               )}
               {showError("customerName") && (
                 <AlertCircle className="h-4 w-4 text-red-500" />
@@ -115,7 +115,7 @@ export function ProjectInfoStep({ data, onUpdate, onValidationChange }: ProjectI
             onBlur={() => handleBlur("customerName")}
             className={cn(
               showError("customerName") && "border-red-500 focus-visible:ring-red-500",
-              isFieldValid("customerName") && "border-brand-500 focus-visible:ring-brand-500"
+              isFieldValid("customerName") && "border-[#00cc6a] focus-visible:ring-[#00cc6a]"
             )}
           />
           {showError("customerName") && (
@@ -132,7 +132,7 @@ export function ProjectInfoStep({ data, onUpdate, onValidationChange }: ProjectI
             <Label htmlFor="address" className="flex items-center gap-2">
               Project Address
               {isFieldValid("address") && (
-                <CheckCircle2 className="h-4 w-4 text-brand-500" />
+                <CheckCircle2 className="h-4 w-4 text-[#00cc6a]" />
               )}
               {showError("address") && (
                 <AlertCircle className="h-4 w-4 text-red-500" />
@@ -148,7 +148,7 @@ export function ProjectInfoStep({ data, onUpdate, onValidationChange }: ProjectI
             onBlur={() => handleBlur("address")}
             className={cn(
               showError("address") && "border-red-500 focus-visible:ring-red-500",
-              isFieldValid("address") && "border-brand-500 focus-visible:ring-brand-500"
+              isFieldValid("address") && "border-[#00cc6a] focus-visible:ring-[#00cc6a]"
             )}
           />
           {showError("address") && (

@@ -160,7 +160,7 @@ export default function NewProjectPage() {
   const triggerConfetti = () => {
     const duration = 3000;
     const end = Date.now() + duration;
-    const colors = ['#1e3a8a', '#1e40af', '#1d4ed8', '#94a3b8'];
+    const colors = ['#00cc6a', '#00b35e', '#dcfce7', '#94a3b8'];
 
     (function frame() {
       confetti({
@@ -355,7 +355,7 @@ export default function NewProjectPage() {
                 </CardDescription>
               </div>
               <div className="text-right">
-                <p className="text-2xl font-bold text-brand-500">
+                <p className="text-2xl font-bold text-[#00cc6a]">
                   {Math.round(progressPercentage)}%
                 </p>
                 <p className="text-xs text-muted-foreground">Complete</p>

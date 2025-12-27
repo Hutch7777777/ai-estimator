@@ -101,7 +101,7 @@ export function HoverUploadStep({ data, onUpdate }: HoverUploadStepProps) {
     const duration = 3000;
     const end = Date.now() + duration;
 
-    const colors = ['#1e3a8a', '#1e40af', '#1d4ed8', '#94a3b8']; // Navy blue and silver
+    const colors = ['#00cc6a', '#00b35e', '#dcfce7', '#94a3b8']; // Green accent and silver
 
     (function frame() {
       confetti({
@@ -455,7 +455,7 @@ export function HoverUploadStep({ data, onUpdate }: HoverUploadStepProps) {
               <AlertDescription className="text-blue-800 dark:text-blue-200">
                 <div className="mt-3 space-y-2 text-sm">
                   <div className="flex items-center gap-2">
-                    <CheckCircle2 className="h-4 w-4 text-brand-600" />
+                    <CheckCircle2 className="h-4 w-4 text-[#00cc6a]" />
                     <span>Extracted measurements from HOVER PDF</span>
                   </div>
                   <div className="flex items-center gap-2">
@@ -480,12 +480,12 @@ export function HoverUploadStep({ data, onUpdate }: HoverUploadStepProps) {
 
           {/* Complete State */}
           {uploadState === 'complete' && (
-            <Alert className="border-brand-500 bg-brand-50 dark:bg-brand-950/20">
-              <CheckCircle2 className="h-4 w-4 text-brand-600" />
-              <AlertTitle className="text-brand-900 dark:text-brand-100">
+            <Alert className="border-[#00cc6a] bg-[#dcfce7]">
+              <CheckCircle2 className="h-4 w-4 text-[#00cc6a]" />
+              <AlertTitle className="text-[#0f172a]">
                 Your estimate has been downloaded!
               </AlertTitle>
-              <AlertDescription className="text-brand-800 dark:text-brand-200">
+              <AlertDescription className="text-[#475569]">
                 <p>
                   Your Excel takeoff has been generated and automatically downloaded to your computer.
                   Check your Downloads folder for the file.

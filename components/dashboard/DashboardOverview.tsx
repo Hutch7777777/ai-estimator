@@ -120,7 +120,7 @@ export function DashboardOverview() {
       extracted: "bg-blue-500",
       calculated: "bg-purple-500",
       priced: "bg-orange-500",
-      approved: "bg-brand-500",
+      approved: "bg-[#00cc6a]",
       sent_to_client: "bg-teal-500",
       won: "bg-green-500",
       lost: "bg-red-500",
@@ -194,7 +194,7 @@ export function DashboardOverview() {
             {[
               { label: "Pending", count: stats.pending, color: "bg-amber-500" },
               { label: "Processing", count: stats.processing, color: "bg-blue-500" },
-              { label: "Approved", count: stats.approved, color: "bg-brand-500" },
+              { label: "Approved", count: stats.approved, color: "bg-[#00cc6a]" },
               { label: "Won", count: stats.won, color: "bg-green-500" },
               { label: "Lost", count: stats.lost, color: "bg-red-500" },
             ].map((item) => {
@@ -207,7 +207,7 @@ export function DashboardOverview() {
                       {item.count} ({Math.round(percentage)}%)
                     </span>
                   </div>
-                  <div className="h-2 w-full bg-slate-100 rounded-full overflow-hidden">
+                  <div className="h-2 w-full bg-[#f1f5f9] rounded-full overflow-hidden">
                     <div
                       className={`h-full ${item.color} transition-all duration-500`}
                       style={{ width: `${percentage}%` }}
