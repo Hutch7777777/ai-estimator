@@ -89,7 +89,7 @@ export function ProjectGrid({ onProjectSelect }: ProjectGridProps) {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-2xl font-bold">CAD Markup Projects</h2>
+          <h2 className="text-2xl font-bold">PDF Markup Projects</h2>
           <p className="text-muted-foreground">
             Select a project to view or edit markups
           </p>

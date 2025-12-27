@@ -34,6 +34,10 @@ interface CADViewerProps {
   selectedMeasurementId: string | null;
   onDeleteSelected?: () => void;
   onCalibrationComplete?: (pixelDistance: number, startPoint: Point, endPoint: Point) => void;
+  // PDF sharp zoom props
+  pdfDocument?: any; // PDF.js document for re-rendering at zoom
+  pdfPageNumber?: number;
+  onImageUrlChange?: (url: string) => void;
 }
 
 export function CADViewer({
@@ -57,6 +61,9 @@ export function CADViewer({
   selectedMeasurementId,
   onDeleteSelected,
   onCalibrationComplete,
+  pdfDocument,
+  pdfPageNumber,
+  onImageUrlChange,
 }: CADViewerProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -68,14 +75,22 @@ export function CADViewer({
   // Drawing state
   const [currentPoints, setCurrentPoints] = useState<Point[]>([]);
   const [isPanning, setIsPanning] = useState(false);
+  const [isRightClickPanning, setIsRightClickPanning] = useState(false);
   const [panStart, setPanStart] = useState<Point>({ x: 0, y: 0 });
   const [hoverPoint, setHoverPoint] = useState<Point | null>(null);
   const [measurementStart, setMeasurementStart] = useState<Point | null>(null);
   const [calibrationStart, setCalibrationStart] = useState<Point | null>(null);
+  const [isShiftHeld, setIsShiftHeld] = useState(false);
+  const [snappedAngle, setSnappedAngle] = useState<number | null>(null);
 
   // Loading and error states
   const [isLoading, setIsLoading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
+
+  // PDF sharp zoom state
+  const [isRerendering, setIsRerendering] = useState(false);
+  const lastRenderedScale = useRef(1);
+  const rerenderTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   // Handle image load
   const handleImageLoad = useCallback((e: React.SyntheticEvent<HTMLImageElement>) => {
@@ -173,6 +188,101 @@ export function CADViewer({
     const dy = point.y - firstPoint.y;
     return Math.sqrt(dx * dx + dy * dy) < threshold;
   };
+
+  // Snap point to 45-degree increments from start point
+  const snapTo45Degrees = useCallback(
+    (start: Point, current: Point): { point: Point; angleDegrees: number } => {
+      const dx = current.x - start.x;
+      const dy = current.y - start.y;
+      const angle = Math.atan2(dy, dx);
+      const distance = Math.sqrt(dx * dx + dy * dy);
+
+      // Round to nearest 45 degrees (PI/4 radians)
+      const snappedAngle = Math.round(angle / (Math.PI / 4)) * (Math.PI / 4);
+
+      // Calculate snapped endpoint
+      const snappedX = start.x + distance * Math.cos(snappedAngle);
+      const snappedY = start.y + distance * Math.sin(snappedAngle);
+
+      // Convert angle to degrees for display (0-360 range)
+      let angleDegrees = (snappedAngle * 180) / Math.PI;
+      if (angleDegrees < 0) angleDegrees += 360;
+
+      return {
+        point: { x: snappedX, y: snappedY },
+        angleDegrees: Math.round(angleDegrees),
+      };
+    },
+    []
+  );
+
+  // Render PDF page at specific scale for sharp zoom
+  const renderPdfAtScale = useCallback(
+    async (pdfDoc: any, pageNum: number, zoomScale: number): Promise<string> => {
+      const page = await pdfDoc.getPage(pageNum);
+      const outputScale = window.devicePixelRatio * Math.max(zoomScale, 1);
+      const baseScale = 2; // Match initial render quality
+      const viewport = page.getViewport({ scale: baseScale * outputScale });
+
+      const canvas = document.createElement("canvas");
+      const ctx = canvas.getContext("2d")!;
+      canvas.width = Math.floor(viewport.width);
+      canvas.height = Math.floor(viewport.height);
+
+      await page.render({
+        canvasContext: ctx,
+        viewport,
+        canvas,
+      }).promise;
+
+      return canvas.toDataURL("image/png");
+    },
+    []
+  );
+
+  // Re-render PDF at higher resolution when zooming in significantly
+  useEffect(() => {
+    if (!pdfDocument || !pdfPageNumber || !onImageUrlChange) return;
+
+    const currentScale = viewTransform.scale;
+    const lastScale = lastRenderedScale.current;
+    const scaleDiff = Math.abs(currentScale - lastScale);
+    const threshold = lastScale * 0.3; // 30% change triggers re-render
+
+    // Only re-render if zooming IN past threshold (not zooming out)
+    if (currentScale <= lastScale || scaleDiff < threshold) return;
+
+    // Clear any pending re-render
+    if (rerenderTimeoutRef.current) {
+      clearTimeout(rerenderTimeoutRef.current);
+    }
+
+    // Debounce: wait 300ms after zoom stops
+    rerenderTimeoutRef.current = setTimeout(async () => {
+      setIsRerendering(true);
+      console.log("[CADViewer] Re-rendering PDF at scale:", currentScale.toFixed(2));
+      try {
+        const newImageUrl = await renderPdfAtScale(pdfDocument, pdfPageNumber, currentScale);
+        onImageUrlChange(newImageUrl);
+        lastRenderedScale.current = currentScale;
+      } catch (error) {
+        console.error("[CADViewer] Failed to re-render PDF:", error);
+      } finally {
+        setIsRerendering(false);
+      }
+    }, 300);
+
+    return () => {
+      if (rerenderTimeoutRef.current) {
+        clearTimeout(rerenderTimeoutRef.current);
+      }
+    };
+  }, [viewTransform.scale, pdfDocument, pdfPageNumber, onImageUrlChange, renderPdfAtScale]);
+
+  // Reset lastRenderedScale when page changes
+  useEffect(() => {
+    lastRenderedScale.current = 1;
+  }, [pdfPageNumber]);
 
   // Draw an arrowhead pointing from 'from' to 'to'
   const drawArrowhead = (
@@ -560,7 +670,10 @@ export function CADViewer({
   const handleMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
     const point = screenToCanvas(e.clientX, e.clientY);
 
-    if (isPanning) {
+    // Update shift key state
+    setIsShiftHeld(e.shiftKey);
+
+    if (isPanning || isRightClickPanning) {
       const dx = e.clientX - panStart.x;
       const dy = e.clientY - panStart.y;
       onViewTransformChange({
@@ -569,14 +682,30 @@ export function CADViewer({
         offsetY: viewTransform.offsetY + dy,
       });
       setPanStart({ x: e.clientX, y: e.clientY });
-    } else if (currentTool === "draw" || currentTool === "linear" || currentTool === "calibrate") {
+    } else if (currentTool === "draw" || currentTool === "calibrate") {
       setHoverPoint(point);
+      setSnappedAngle(null);
+    } else if (currentTool === "linear") {
+      // For linear measurements, apply 45-degree snapping when Shift is held
+      if (measurementStart && e.shiftKey) {
+        const snapped = snapTo45Degrees(measurementStart, point);
+        setHoverPoint(snapped.point);
+        setSnappedAngle(snapped.angleDegrees);
+      } else {
+        setHoverPoint(point);
+        setSnappedAngle(null);
+      }
     }
   };
 
   // Handle mouse down
   const handleMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    if (e.altKey || e.button === 1) {
+    if (e.button === 2) {
+      // Right-click for panning (works with any tool)
+      setIsRightClickPanning(true);
+      setPanStart({ x: e.clientX, y: e.clientY });
+      e.preventDefault();
+    } else if (e.altKey || e.button === 1) {
       // Alt+click or middle mouse button for panning
       setIsPanning(true);
       setPanStart({ x: e.clientX, y: e.clientY });
@@ -585,8 +714,12 @@ export function CADViewer({
   };
 
   // Handle mouse up
-  const handleMouseUp = () => {
-    setIsPanning(false);
+  const handleMouseUp = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    if (e.button === 2) {
+      setIsRightClickPanning(false);
+    } else {
+      setIsPanning(false);
+    }
   };
 
   // Resize canvas to container using ResizeObserver
@@ -705,13 +838,20 @@ export function CADViewer({
       {/* Canvas overlay for markups only - transparent background */}
       <canvas
         ref={canvasRef}
-        className="absolute top-0 left-0 cursor-crosshair"
-        style={{ background: "transparent" }}
+        className="absolute top-0 left-0"
+        style={{
+          background: "transparent",
+          cursor: isPanning || isRightClickPanning ? "grabbing" : "crosshair",
+        }}
         onClick={handleCanvasClick}
         onDoubleClick={handleDoubleClick}
         onMouseMove={handleMouseMove}
         onMouseDown={handleMouseDown}
         onMouseUp={handleMouseUp}
+        onMouseLeave={() => {
+          setIsRightClickPanning(false);
+          setIsPanning(false);
+        }}
         onContextMenu={(e) => e.preventDefault()}
       />
 
@@ -722,6 +862,14 @@ export function CADViewer({
             <Loader2 className="h-8 w-8 animate-spin text-blue-600" />
             <p className="text-sm text-gray-600">Loading image...</p>
           </div>
+        </div>
+      )}
+
+      {/* PDF Re-rendering Indicator */}
+      {isRerendering && (
+        <div className="absolute top-2 left-2 z-20 bg-blue-600/90 text-white px-2 py-1 rounded text-xs flex items-center gap-1.5">
+          <Loader2 className="h-3 w-3 animate-spin" />
+          Sharpening...
         </div>
       )}
 
@@ -751,6 +899,22 @@ export function CADViewer({
               ? "Click the second point on the known dimension"
               : "Click the first point on a known dimension"}
           </p>
+        </div>
+      )}
+
+      {/* Linear Measurement Snap Indicator */}
+      {currentTool === "linear" && measurementStart && snappedAngle !== null && isShiftHeld && (
+        <div className="absolute top-4 left-1/2 -translate-x-1/2 z-20 bg-blue-600 text-white px-3 py-1.5 rounded-lg shadow-lg">
+          <p className="text-sm font-medium">
+            Snap: {snappedAngle}°
+          </p>
+        </div>
+      )}
+
+      {/* Linear Measurement Help Text */}
+      {currentTool === "linear" && measurementStart && !isShiftHeld && (
+        <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-20 bg-gray-800/80 text-white px-3 py-1.5 rounded-lg text-xs">
+          Hold Shift to snap to 45° angles
         </div>
       )}
     </div>

@@ -96,25 +96,26 @@
   --radius: 0.625rem;
 
   /* Light mode - Navy Blue brand colors */
-  --background: 0 0% 100%;
-  --foreground: 222.2 84% 4.9%;
-  --card: 0 0% 100%;
-  --card-foreground: 222.2 84% 4.9%;
-  --popover: 0 0% 100%;
-  --popover-foreground: 222.2 84% 4.9%;
-  --primary: 221 83% 33%;       /* Navy blue (#1e3a8a) */
-  --primary-foreground: 0 0% 100%;
-  --secondary: 210 40% 96%;
-  --secondary-foreground: 222.2 84% 4.9%;
-  --muted: 210 40% 96%;
-  --muted-foreground: 215.4 16.3% 46.9%;
-  --accent: 210 40% 96%;
-  --accent-foreground: 222.2 84% 4.9%;
-  --destructive: 0 84.2% 60.2%;
-  --destructive-foreground: 0 0% 100%;
-  --border: 214.3 31.8% 91.4%;
-  --input: 214.3 31.8% 91.4%;
-  --ring: 221 83% 33%;          /* Navy blue for focus rings */
+  /* Using oklch() for all colors for consistency with dark mode */
+  --background: oklch(1 0 0);                    /* white */
+  --foreground: oklch(0.145 0.042 264.695);      /* dark navy text */
+  --card: oklch(1 0 0);                          /* white */
+  --card-foreground: oklch(0.145 0.042 264.695); /* dark navy text */
+  --popover: oklch(1 0 0);                       /* white */
+  --popover-foreground: oklch(0.145 0.042 264.695);
+  --primary: oklch(0.398 0.15 260);              /* Navy blue (#1e3a8a) */
+  --primary-foreground: oklch(1 0 0);            /* white */
+  --secondary: oklch(0.968 0.007 247.896);       /* light gray */
+  --secondary-foreground: oklch(0.145 0.042 264.695);
+  --muted: oklch(0.968 0.007 247.896);           /* light gray */
+  --muted-foreground: oklch(0.556 0.02 256);     /* medium gray */
+  --accent: oklch(0.968 0.007 247.896);          /* light gray */
+  --accent-foreground: oklch(0.145 0.042 264.695);
+  --destructive: oklch(0.637 0.237 25.331);      /* red */
+  --destructive-foreground: oklch(1 0 0);        /* white */
+  --border: oklch(0.929 0.013 255.508);          /* light border */
+  --input: oklch(0.929 0.013 255.508);           /* light border */
+  --ring: oklch(0.398 0.15 260);                 /* Navy blue for focus rings */
   --chart-1: oklch(0.646 0.222 41.116);
   --chart-2: oklch(0.6 0.118 184.704);
   --chart-3: oklch(0.398 0.07 227.392);
@@ -317,21 +318,21 @@
   }
 
   .gradient-text {
-    background: linear-gradient(135deg, hsl(var(--primary)) 0%, hsl(var(--chart-3)) 100%);
+    background: linear-gradient(135deg, var(--primary) 0%, var(--chart-3) 100%);
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
     background-clip: text;
   }
 
   .gradient-bg-primary {
-    background: linear-gradient(135deg, hsl(var(--primary)) 0%, hsl(var(--chart-3)) 100%);
+    background: linear-gradient(135deg, var(--primary) 0%, var(--chart-3) 100%);
   }
 
   .gradient-bg-hero {
     background: linear-gradient(135deg,
-      hsl(var(--background)) 0%,
-      hsl(var(--muted)) 50%,
-      hsl(var(--background)) 100%);
+      var(--background) 0%,
+      var(--muted) 50%,
+      var(--background) 100%);
   }
 
   .gradient-border {
@@ -346,7 +347,7 @@
     inset: 0;
     border-radius: inherit;
     padding: 2px;
-    background: linear-gradient(135deg, hsl(var(--primary)) 0%, hsl(var(--chart-3)) 100%);
+    background: linear-gradient(135deg, var(--primary) 0%, var(--chart-3) 100%);
     -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
     -webkit-mask-composite: xor;
     mask-composite: exclude;
@@ -355,7 +356,7 @@
   .dot-pattern {
     background-image: radial-gradient(
       circle at 1px 1px,
-      hsl(var(--muted-foreground) / 0.15) 1px,
+      color-mix(in oklch, var(--muted-foreground) 15%, transparent) 1px,
       transparent 0
     );
     background-size: 24px 24px;
@@ -367,7 +368,7 @@
 
   .hover-lift:hover {
     transform: translateY(-4px);
-    box-shadow: 0 12px 24px -10px hsl(var(--primary) / 0.3);
+    box-shadow: 0 12px 24px -10px color-mix(in oklch, var(--primary) 30%, transparent);
   }
 
   .scroll-smooth {
@@ -416,31 +417,31 @@
  */
 
 .ag-theme-alpine {
-  /* Base colors */
-  --ag-background-color: hsl(var(--background));
-  --ag-foreground-color: hsl(var(--foreground));
-  --ag-border-color: hsl(var(--border));
+  /* Base colors - using var() directly since colors are already oklch() values */
+  --ag-background-color: var(--background);
+  --ag-foreground-color: var(--foreground);
+  --ag-border-color: var(--border);
 
   /* Header */
-  --ag-header-background-color: hsl(var(--muted) / 0.5);
-  --ag-header-foreground-color: hsl(var(--foreground));
-  --ag-header-cell-hover-background-color: hsl(var(--muted));
+  --ag-header-background-color: color-mix(in oklch, var(--muted) 50%, transparent);
+  --ag-header-foreground-color: var(--foreground);
+  --ag-header-cell-hover-background-color: var(--muted);
 
   /* Rows */
-  --ag-row-hover-color: hsl(var(--muted) / 0.3);
-  --ag-row-border-color: hsl(var(--border));
-  --ag-odd-row-background-color: hsl(var(--background));
-  --ag-even-row-background-color: hsl(var(--muted) / 0.1);
+  --ag-row-hover-color: color-mix(in oklch, var(--muted) 30%, transparent);
+  --ag-row-border-color: var(--border);
+  --ag-odd-row-background-color: var(--background);
+  --ag-even-row-background-color: color-mix(in oklch, var(--muted) 10%, transparent);
 
   /* Selected rows */
-  --ag-selected-row-background-color: hsl(var(--primary) / 0.1);
+  --ag-selected-row-background-color: color-mix(in oklch, var(--primary) 10%, transparent);
 
   /* Cell editing */
-  --ag-input-focus-border-color: hsl(var(--primary));
+  --ag-input-focus-border-color: var(--primary);
 
   /* Range selection */
-  --ag-range-selection-border-color: hsl(var(--primary));
-  --ag-range-selection-background-color: hsl(var(--primary) / 0.2);
+  --ag-range-selection-border-color: var(--primary);
+  --ag-range-selection-background-color: color-mix(in oklch, var(--primary) 20%, transparent);
 
   /* Borders */
   --ag-borders: solid 1px;
@@ -462,27 +463,27 @@
 
 /* Dark mode overrides */
 .dark .ag-theme-alpine {
-  --ag-background-color: hsl(var(--card));
-  --ag-foreground-color: hsl(var(--foreground));
-  --ag-border-color: hsl(var(--border));
+  --ag-background-color: var(--card);
+  --ag-foreground-color: var(--foreground);
+  --ag-border-color: var(--border);
 
-  --ag-header-background-color: hsl(var(--muted) / 0.3);
-  --ag-row-hover-color: hsl(var(--muted) / 0.5);
-  --ag-odd-row-background-color: hsl(var(--card));
-  --ag-even-row-background-color: hsl(var(--muted) / 0.1);
+  --ag-header-background-color: color-mix(in oklch, var(--muted) 30%, transparent);
+  --ag-row-hover-color: color-mix(in oklch, var(--muted) 50%, transparent);
+  --ag-odd-row-background-color: var(--card);
+  --ag-even-row-background-color: color-mix(in oklch, var(--muted) 10%, transparent);
 }
 
 /* Custom cell classes for calculated fields */
 .ag-theme-alpine .bg-muted\/30 {
-  background-color: hsl(var(--muted) / 0.3) !important;
+  background-color: color-mix(in oklch, var(--muted) 30%, transparent) !important;
 }
 
 .ag-theme-alpine .bg-primary\/5 {
-  background-color: hsl(var(--primary) / 0.05) !important;
+  background-color: color-mix(in oklch, var(--primary) 5%, transparent) !important;
 }
 
 .ag-theme-alpine .text-muted-foreground {
-  color: hsl(var(--muted-foreground));
+  color: var(--muted-foreground);
 }
 
 .ag-theme-alpine .font-medium {
@@ -512,25 +513,25 @@
 
 /* Editable cell indicators */
 .ag-theme-alpine .ag-cell-inline-editing {
-  background-color: hsl(var(--primary) / 0.05);
-  border: 2px solid hsl(var(--primary));
+  background-color: color-mix(in oklch, var(--primary) 5%, transparent);
+  border: 2px solid var(--primary);
 }
 
 /* Focus styles */
 .ag-theme-alpine .ag-cell-focus {
-  border: 2px solid hsl(var(--primary)) !important;
+  border: 2px solid var(--primary) !important;
 }
 
 /* Pinned columns */
 .ag-theme-alpine .ag-pinned-left-cols-container,
 .ag-theme-alpine .ag-pinned-right-cols-container {
-  background-color: hsl(var(--background));
-  border-right: 2px solid hsl(var(--border));
+  background-color: var(--background);
+  border-right: 2px solid var(--border);
 }
 
 .dark .ag-theme-alpine .ag-pinned-left-cols-container,
 .dark .ag-theme-alpine .ag-pinned-right-cols-container {
-  background-color: hsl(var(--card));
+  background-color: var(--card);
 }
 
 /* Scrollbars */
@@ -540,40 +541,40 @@
 }
 
 .ag-theme-alpine ::-webkit-scrollbar-track {
-  background: hsl(var(--muted) / 0.2);
+  background: color-mix(in oklch, var(--muted) 20%, transparent);
   border-radius: 4px;
 }
 
 .ag-theme-alpine ::-webkit-scrollbar-thumb {
-  background: hsl(var(--muted-foreground) / 0.4);
+  background: color-mix(in oklch, var(--muted-foreground) 40%, transparent);
   border-radius: 4px;
 }
 
 .ag-theme-alpine ::-webkit-scrollbar-thumb:hover {
-  background: hsl(var(--muted-foreground) / 0.6);
+  background: color-mix(in oklch, var(--muted-foreground) 60%, transparent);
 }
 
 /* Checkbox styles */
 .ag-theme-alpine .ag-checkbox-input-wrapper {
-  color: hsl(var(--primary));
+  color: var(--primary);
 }
 
 .ag-theme-alpine .ag-checkbox-input-wrapper.ag-checked {
-  color: hsl(var(--primary));
+  color: var(--primary);
 }
 
 /* Header checkbox */
 .ag-theme-alpine .ag-header-cell .ag-checkbox-input-wrapper {
-  color: hsl(var(--primary));
+  color: var(--primary);
 }
 
 /* Select dropdown in cells */
 .ag-theme-alpine .ag-select .ag-picker-field-wrapper {
-  background-color: hsl(var(--background));
-  border: 1px solid hsl(var(--border));
+  background-color: var(--background);
+  border: 1px solid var(--border);
   border-radius: 6px;
 }
 
 .dark .ag-theme-alpine .ag-select .ag-picker-field-wrapper {
-  background-color: hsl(var(--card));
+  background-color: var(--card);
 }

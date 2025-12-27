@@ -23,7 +23,7 @@ export default function ProjectDashboard() {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-background via-background to-muted/20">
-      <div className="container mx-auto px-4 py-8 sm:px-6 lg:px-8">
+      <div className="mx-auto px-2 py-4 sm:px-4 lg:px-6 max-w-[1920px]">
         {/* Header */}
         <div className="mb-8">
           <Link
@@ -62,7 +62,7 @@ export default function ProjectDashboard() {
               }}
             >
               <Pencil className="mr-2 h-4 w-4" />
-              CAD Markup
+              PDF Markups
             </TabsTrigger>
             <TabsTrigger value="past" className="text-base">
               Past Projects

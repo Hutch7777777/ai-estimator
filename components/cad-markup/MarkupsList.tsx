@@ -39,6 +39,7 @@ export interface MarkupsListProps {
   onDeletePolygon: (id: string) => void;
   onDeleteMarker: (id: string) => void;
   onDeleteMeasurement: (id: string) => void;
+  hideCard?: boolean;
 }
 
 interface MarkupListItem {
@@ -154,6 +155,7 @@ export function MarkupsList({
   onDeletePolygon,
   onDeleteMarker,
   onDeleteMeasurement,
+  hideCard = false,
 }: MarkupsListProps) {
   // Track which cells are being edited
   const [editingCell, setEditingCell] = useState<{
@@ -316,29 +318,31 @@ export function MarkupsList({
     [editingCell, editValue, handleKeyDown, saveEdit, startEditing]
   );
 
+  // Empty state content
+  const emptyContent = (
+    <p className="text-sm text-muted-foreground text-center py-8">
+      No markups yet. Use the toolbar to draw areas, place count markers, or measure
+      distances.
+    </p>
+  );
+
   if (items.length === 0) {
+    if (hideCard) {
+      return <div className="p-4">{emptyContent}</div>;
+    }
     return (
       <Card>
         <CardHeader className="pb-3">
           <CardTitle className="text-base">Markups</CardTitle>
         </CardHeader>
-        <CardContent>
-          <p className="text-sm text-muted-foreground text-center py-8">
-            No markups yet. Use the toolbar to draw areas, place count markers, or measure
-            distances.
-          </p>
-        </CardContent>
+        <CardContent>{emptyContent}</CardContent>
       </Card>
     );
   }
 
-  return (
-    <Card>
-      <CardHeader className="pb-3">
-        <CardTitle className="text-base">Markups ({items.length})</CardTitle>
-      </CardHeader>
-      <CardContent className="p-0">
-        <Table>
+  // Table content
+  const tableContent = (
+    <Table>
           <TableHeader>
             <TableRow>
               <TableHead className="w-[180px]">Subject</TableHead>
@@ -421,7 +425,18 @@ export function MarkupsList({
             </TableRow>
           </TableFooter>
         </Table>
-      </CardContent>
+  );
+
+  if (hideCard) {
+    return <div className="h-full overflow-auto">{tableContent}</div>;
+  }
+
+  return (
+    <Card>
+      <CardHeader className="pb-3">
+        <CardTitle className="text-base">Markups ({items.length})</CardTitle>
+      </CardHeader>
+      <CardContent className="p-0">{tableContent}</CardContent>
     </Card>
   );
 }

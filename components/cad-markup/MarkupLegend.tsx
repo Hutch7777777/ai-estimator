@@ -18,6 +18,7 @@ interface MarkupLegendProps {
   onDeleteMarker: (id: string) => void;
   onDeleteMeasurement: (id: string) => void;
   onExportSummary: () => void;
+  hideCard?: boolean;
 }
 
 interface SummaryGroup {
@@ -40,6 +41,7 @@ export function MarkupLegend({
   onDeleteMarker,
   onDeleteMeasurement,
   onExportSummary,
+  hideCard = false,
 }: MarkupLegendProps) {
   // Helper to get material key and label
   const getMaterialInfo = (material: { trade: string; category: string; productName?: string; color: string }) => {
@@ -121,22 +123,18 @@ export function MarkupLegend({
 
   const hasItems = summaryGroups.length > 0;
 
-  return (
-    <Card className="h-full shadow-soft rounded-xl flex flex-col">
-      <CardHeader className="pb-4">
-        <CardTitle className="font-heading text-lg">Takeoff Summary</CardTitle>
-      </CardHeader>
-
-      <CardContent className="flex-1 space-y-4 overflow-y-auto">
-        {!hasItems ? (
-          <div className="text-center text-muted-foreground py-8">
-            <p className="text-sm">No markups yet</p>
-            <p className="text-xs mt-2">Use the tools to add areas, counts, or measurements</p>
-          </div>
-        ) : (
-          <>
-            {/* Summary Table */}
-            <div className="space-y-3">
+  // Content to render (shared between Card and hideCard modes)
+  const content = (
+    <div className="flex-1 space-y-4 overflow-y-auto p-4">
+      {!hasItems ? (
+        <div className="text-center text-muted-foreground py-8">
+          <p className="text-sm">No markups yet</p>
+          <p className="text-xs mt-2">Use the tools to add areas, counts, or measurements</p>
+        </div>
+      ) : (
+        <>
+          {/* Summary Table */}
+          <div className="space-y-3">
               {summaryGroups.map((group) => (
                 <div key={group.key} className="border rounded-lg overflow-hidden">
                   {/* Group Header */}
@@ -264,7 +262,19 @@ export function MarkupLegend({
             </Button>
           </>
         )}
-      </CardContent>
+      </div>
+  );
+
+  if (hideCard) {
+    return content;
+  }
+
+  return (
+    <Card className="h-full shadow-soft rounded-xl flex flex-col">
+      <CardHeader className="pb-4">
+        <CardTitle className="font-heading text-lg">Takeoff Summary</CardTitle>
+      </CardHeader>
+      <CardContent className="flex-1 p-0 overflow-hidden">{content}</CardContent>
     </Card>
   );
 }

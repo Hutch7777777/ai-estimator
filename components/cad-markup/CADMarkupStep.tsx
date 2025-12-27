@@ -6,7 +6,22 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
-import { Upload, FileImage, X, Loader2, Save, ArrowLeft } from "lucide-react";
+import {
+  Upload,
+  FileImage,
+  X,
+  Loader2,
+  Save,
+  ArrowLeft,
+  ChevronLeft,
+  ChevronRight,
+  MousePointer2,
+  Pentagon as PolygonIcon,
+  Circle,
+  Ruler,
+  List,
+  ClipboardList,
+} from "lucide-react";
 import { CADViewer } from "./CADViewer";
 import { MarkupToolbar } from "./MarkupToolbar";
 import { MarkupLegend } from "./MarkupLegend";
@@ -179,6 +194,10 @@ export function CADMarkupStep({ data, onUpdate, onValidationChange }: CADMarkupS
   // Browse/Edit mode state
   const [mode, setMode] = useState<"browse" | "edit">("browse");
 
+  // Panel collapse state
+  const [isToolsCollapsed, setIsToolsCollapsed] = useState(false);
+  const [isRightPanelCollapsed, setIsRightPanelCollapsed] = useState(false);
+
   // Ref to track blob URL for proper cleanup (prevents GC of blob URLs)
   const blobUrlRef = useRef<string | null>(null);
 
@@ -191,6 +210,43 @@ export function CADMarkupStep({ data, onUpdate, onValidationChange }: CADMarkupS
       }
       pdfDocRef.current = null;
     };
+  }, []);
+
+  // Load panel collapse state from localStorage on mount
+  useEffect(() => {
+    const saved = localStorage.getItem("pdfMarkup.panelState");
+    if (saved) {
+      try {
+        const state = JSON.parse(saved);
+        setIsToolsCollapsed(state.tools ?? false);
+        setIsRightPanelCollapsed(state.rightPanel ?? false);
+      } catch {
+        // Ignore invalid JSON
+      }
+    }
+  }, []);
+
+  // Save panel collapse state to localStorage when changed
+  useEffect(() => {
+    localStorage.setItem(
+      "pdfMarkup.panelState",
+      JSON.stringify({
+        tools: isToolsCollapsed,
+        rightPanel: isRightPanelCollapsed,
+      })
+    );
+  }, [isToolsCollapsed, isRightPanelCollapsed]);
+
+  // Keyboard shortcuts for panel toggle
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Don't trigger if user is typing in an input
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+      if (e.key === "[") setIsToolsCollapsed((prev) => !prev);
+      if (e.key === "]") setIsRightPanelCollapsed((prev) => !prev);
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
   }, []);
 
   // File upload handler - only called when a project is selected (State 2)
@@ -916,7 +972,7 @@ export function CADMarkupStep({ data, onUpdate, onValidationChange }: CADMarkupS
   }, [imageUrl, pixelsPerFoot, polygons, onValidationChange]);
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-2">
       {/* BROWSE MODE: Show project grid */}
       {mode === "browse" ? (
         <ProjectGrid onProjectSelect={handleProjectSelect} />
@@ -1012,6 +1068,242 @@ export function CADMarkupStep({ data, onUpdate, onValidationChange }: CADMarkupS
           ) : (
             /* Full editor */
             <>
+              {/* Page Navigation for multi-page PDFs */}
+              {totalPages > 1 && (
+                <div className="flex items-center justify-center">
+                  <PageNavigation
+                    currentPage={currentPage}
+                    totalPages={totalPages}
+                    onPageChange={handlePageChange}
+                    disabled={isLoadingPage}
+                  />
+                </div>
+              )}
+
+              {/* Main Markup Interface */}
+              <div className={`grid grid-cols-1 gap-2 h-[calc(100vh-200px)] min-h-[600px] transition-all duration-200 ${
+                  isToolsCollapsed && isRightPanelCollapsed
+                    ? "lg:grid-cols-[40px_1fr_40px]"
+                    : isToolsCollapsed
+                      ? "lg:grid-cols-[40px_1fr_300px]"
+                      : isRightPanelCollapsed
+                        ? "lg:grid-cols-[160px_1fr_40px]"
+                        : "lg:grid-cols-[160px_1fr_300px]"
+                }`}>
+                {/* Left Toolbar - Collapsible */}
+                <div className="h-full transition-all duration-200">
+                  {isToolsCollapsed ? (
+                    <Card className="h-full shadow-soft rounded-xl flex flex-col items-center py-2">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="mb-2"
+                        onClick={() => setIsToolsCollapsed(false)}
+                        title="Expand Tools (press [)"
+                      >
+                        <ChevronRight className="h-4 w-4" />
+                      </Button>
+                      {/* Mini tool icons when collapsed */}
+                      <div className="flex flex-col gap-1">
+                        <Button
+                          variant={currentTool === "select" ? "default" : "ghost"}
+                          size="icon"
+                          className="h-8 w-8"
+                          onClick={() => setCurrentTool("select")}
+                          title="Select"
+                        >
+                          <MousePointer2 className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          variant={currentTool === "draw" ? "default" : "ghost"}
+                          size="icon"
+                          className="h-8 w-8"
+                          onClick={() => setCurrentTool("draw")}
+                          title="Draw Area"
+                        >
+                          <PolygonIcon className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          variant={currentTool === "count" ? "default" : "ghost"}
+                          size="icon"
+                          className="h-8 w-8"
+                          onClick={() => setCurrentTool("count")}
+                          title="Count"
+                        >
+                          <Circle className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          variant={currentTool === "linear" ? "default" : "ghost"}
+                          size="icon"
+                          className="h-8 w-8"
+                          onClick={() => setCurrentTool("linear")}
+                          title="Linear"
+                        >
+                          <Ruler className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    </Card>
+                  ) : (
+                    <div className="relative h-full">
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="absolute -right-1 top-2 z-10 h-6 w-6 hover:bg-muted rounded"
+                        onClick={() => setIsToolsCollapsed(true)}
+                        title="Collapse Tools (press [)"
+                      >
+                        <ChevronLeft className="h-4 w-4" />
+                      </Button>
+                      <MarkupToolbar
+                        currentTool={currentTool}
+                        selectedMaterial={selectedMaterial}
+                        onToolChange={setCurrentTool}
+                        onMaterialChange={setSelectedMaterial}
+                        onUndo={handleUndo}
+                        onRedo={handleRedo}
+                        onClearAll={handleClearAll}
+                        onExportCSV={handleExportCSV}
+                        onExportExcel={handleExportExcel}
+                        onExportJSON={handleExportJSON}
+                        canUndo={canUndo}
+                        canRedo={canRedo}
+                      />
+                    </div>
+                  )}
+                </div>
+
+                {/* Center Canvas */}
+                <Card className="shadow-soft rounded-xl overflow-hidden flex flex-col relative">
+                  {/* PDF Uploading Indicator */}
+                  {isUploadingPdf && (
+                    <div className="absolute top-2 right-2 z-10 bg-blue-100 text-blue-700 px-3 py-1 rounded-full text-sm flex items-center gap-2">
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      Uploading to cloud...
+                    </div>
+                  )}
+                  <div className="flex-1 min-h-0">
+                    <CADViewer
+                      imageUrl={imageUrl}
+                      polygons={currentPagePolygons}
+                      markers={currentPageMarkers}
+                      measurements={currentPageMeasurements}
+                      currentTool={currentTool}
+                      selectedMaterial={selectedMaterial}
+                      pixelsPerFoot={pixelsPerFoot}
+                      viewTransform={viewTransform}
+                      onPolygonAdd={handlePolygonAdd}
+                      onMarkerAdd={handleMarkerAdd}
+                      onMeasurementAdd={handleMeasurementAdd}
+                      onViewTransformChange={setViewTransform}
+                      onPolygonSelect={setSelectedPolygonId}
+                      selectedPolygonId={selectedPolygonId}
+                      onMarkerSelect={setSelectedMarkerId}
+                      selectedMarkerId={selectedMarkerId}
+                      onMeasurementSelect={setSelectedMeasurementId}
+                      selectedMeasurementId={selectedMeasurementId}
+                      onDeleteSelected={handleDeleteSelected}
+                      onCalibrationComplete={handleCalibrationComplete}
+                      pdfDocument={pdfDocRef.current}
+                      pdfPageNumber={currentPage}
+                      onImageUrlChange={setImageUrl}
+                    />
+                  </div>
+
+                  {/* Page Thumbnails Strip */}
+                  {totalPages > 1 && pdfDocRef.current && (
+                    <PageThumbnails
+                      pdfDocument={pdfDocRef.current}
+                      currentPage={currentPage}
+                      totalPages={totalPages}
+                      onPageSelect={handlePageChange}
+                    />
+                  )}
+                </Card>
+
+                {/* Right Panel - MarkupsList and Legend - Collapsible Sidebar */}
+                <div className="h-full transition-all duration-200">
+                  {isRightPanelCollapsed ? (
+                    <Card className="h-full shadow-soft rounded-xl flex flex-col items-center py-2">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="mb-4"
+                        onClick={() => setIsRightPanelCollapsed(false)}
+                        title="Expand Panel (press ])"
+                      >
+                        <ChevronLeft className="h-4 w-4" />
+                      </Button>
+                      {/* Mini icons when collapsed */}
+                      <div className="flex flex-col gap-2 items-center">
+                        <div className="flex flex-col items-center gap-1" title="Markups">
+                          <List className="h-4 w-4 text-muted-foreground" />
+                          <span className="text-[10px] text-muted-foreground">List</span>
+                        </div>
+                        <div className="flex flex-col items-center gap-1 mt-2" title="Takeoff Summary">
+                          <ClipboardList className="h-4 w-4 text-muted-foreground" />
+                          <span className="text-[10px] text-muted-foreground">Summary</span>
+                        </div>
+                      </div>
+                    </Card>
+                  ) : (
+                    <div className="relative h-full flex flex-col gap-2">
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="absolute -left-1 top-2 z-10 h-6 w-6 hover:bg-muted rounded"
+                        onClick={() => setIsRightPanelCollapsed(true)}
+                        title="Collapse Panel (press ])"
+                      >
+                        <ChevronRight className="h-4 w-4" />
+                      </Button>
+
+                      {/* Markups Panel */}
+                      <Card className="flex-1 min-h-0 shadow-soft rounded-xl flex flex-col">
+                        <CardHeader className="pb-2 pt-3 pl-8">
+                          <CardTitle className="text-base">Markups</CardTitle>
+                        </CardHeader>
+                        <div className="flex-1 min-h-0 overflow-hidden">
+                          <MarkupsList
+                            polygons={currentPagePolygons}
+                            markers={currentPageMarkers}
+                            measurements={currentPageMeasurements}
+                            selection={currentSelection}
+                            onSelect={handleMarkupsListSelect}
+                            onUpdatePolygon={handleUpdatePolygon}
+                            onUpdateMarker={handleUpdateMarker}
+                            onUpdateMeasurement={handleUpdateMeasurement}
+                            onDeletePolygon={handleDeletePolygon}
+                            onDeleteMarker={handleDeleteMarker}
+                            onDeleteMeasurement={handleDeleteMeasurement}
+                            hideCard
+                          />
+                        </div>
+                      </Card>
+
+                      {/* Takeoff Summary Panel */}
+                      <Card className="h-[220px] flex-shrink-0 shadow-soft rounded-xl flex flex-col">
+                        <CardHeader className="pb-2 pt-3">
+                          <CardTitle className="text-base">Takeoff Summary</CardTitle>
+                        </CardHeader>
+                        <div className="flex-1 overflow-y-auto">
+                          {/* MarkupLegend shows totals across ALL pages */}
+                          <MarkupLegend
+                            polygons={polygons}
+                            markers={markers}
+                            measurements={measurements}
+                            onDeletePolygon={handleDeletePolygon}
+                            onDeleteMarker={handleDeleteMarker}
+                            onDeleteMeasurement={handleDeleteMeasurement}
+                            onExportSummary={handleExportCSV}
+                            hideCard
+                          />
+                        </div>
+                      </Card>
+                    </div>
+                  )}
+                </div>
+              </div>
+
               {/* Scale Input */}
               <Card className="shadow-soft rounded-xl">
                 <CardHeader>
@@ -1057,115 +1349,6 @@ export function CADMarkupStep({ data, onUpdate, onValidationChange }: CADMarkupS
               {selectedProject && (
                 <CadDataPanel projectId={selectedProject.id} />
               )}
-
-              {/* Page Navigation for multi-page PDFs */}
-              {totalPages > 1 && (
-                <div className="flex items-center justify-center">
-                  <PageNavigation
-                    currentPage={currentPage}
-                    totalPages={totalPages}
-                    onPageChange={handlePageChange}
-                    disabled={isLoadingPage}
-                  />
-                </div>
-              )}
-
-              {/* Main Markup Interface */}
-              <div className="grid grid-cols-1 lg:grid-cols-[200px_1fr_380px] gap-4 h-[calc(100vh-300px)] min-h-[600px]">
-                {/* Left Toolbar */}
-                <div className="h-full">
-                  <MarkupToolbar
-                    currentTool={currentTool}
-                    selectedMaterial={selectedMaterial}
-                    onToolChange={setCurrentTool}
-                    onMaterialChange={setSelectedMaterial}
-                    onUndo={handleUndo}
-                    onRedo={handleRedo}
-                    onClearAll={handleClearAll}
-                    onExportCSV={handleExportCSV}
-                    onExportExcel={handleExportExcel}
-                    onExportJSON={handleExportJSON}
-                    canUndo={canUndo}
-                    canRedo={canRedo}
-                  />
-                </div>
-
-                {/* Center Canvas */}
-                <Card className="shadow-soft rounded-xl overflow-hidden flex flex-col relative">
-                  {/* PDF Uploading Indicator */}
-                  {isUploadingPdf && (
-                    <div className="absolute top-2 right-2 z-10 bg-blue-100 text-blue-700 px-3 py-1 rounded-full text-sm flex items-center gap-2">
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                      Uploading to cloud...
-                    </div>
-                  )}
-                  <div className="flex-1 min-h-0">
-                    <CADViewer
-                      imageUrl={imageUrl}
-                      polygons={currentPagePolygons}
-                      markers={currentPageMarkers}
-                      measurements={currentPageMeasurements}
-                      currentTool={currentTool}
-                      selectedMaterial={selectedMaterial}
-                      pixelsPerFoot={pixelsPerFoot}
-                      viewTransform={viewTransform}
-                      onPolygonAdd={handlePolygonAdd}
-                      onMarkerAdd={handleMarkerAdd}
-                      onMeasurementAdd={handleMeasurementAdd}
-                      onViewTransformChange={setViewTransform}
-                      onPolygonSelect={setSelectedPolygonId}
-                      selectedPolygonId={selectedPolygonId}
-                      onMarkerSelect={setSelectedMarkerId}
-                      selectedMarkerId={selectedMarkerId}
-                      onMeasurementSelect={setSelectedMeasurementId}
-                      selectedMeasurementId={selectedMeasurementId}
-                      onDeleteSelected={handleDeleteSelected}
-                      onCalibrationComplete={handleCalibrationComplete}
-                    />
-                  </div>
-
-                  {/* Page Thumbnails Strip */}
-                  {totalPages > 1 && pdfDocRef.current && (
-                    <PageThumbnails
-                      pdfDocument={pdfDocRef.current}
-                      currentPage={currentPage}
-                      totalPages={totalPages}
-                      onPageSelect={handlePageChange}
-                    />
-                  )}
-                </Card>
-
-                {/* Right Panel - MarkupsList and Legend */}
-                <div className="h-full flex flex-col gap-4">
-                  <div className="flex-1 min-h-0 overflow-hidden">
-                    <MarkupsList
-                      polygons={currentPagePolygons}
-                      markers={currentPageMarkers}
-                      measurements={currentPageMeasurements}
-                      selection={currentSelection}
-                      onSelect={handleMarkupsListSelect}
-                      onUpdatePolygon={handleUpdatePolygon}
-                      onUpdateMarker={handleUpdateMarker}
-                      onUpdateMeasurement={handleUpdateMeasurement}
-                      onDeletePolygon={handleDeletePolygon}
-                      onDeleteMarker={handleDeleteMarker}
-                      onDeleteMeasurement={handleDeleteMeasurement}
-                    />
-                  </div>
-                  <div className="h-[280px] flex-shrink-0">
-                    {/* MarkupLegend shows totals across ALL pages */}
-                    <MarkupLegend
-                      polygons={polygons}
-                      markers={markers}
-                      measurements={measurements}
-                      onDeletePolygon={handleDeletePolygon}
-                      onDeleteMarker={handleDeleteMarker}
-                      onDeleteMeasurement={handleDeleteMeasurement}
-                      onExportSummary={handleExportCSV}
-                    />
-                  </div>
-                </div>
-              </div>
             </>
           )}
         </>
