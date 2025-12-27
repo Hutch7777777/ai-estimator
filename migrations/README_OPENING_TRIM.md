@@ -130,7 +130,7 @@ Trim Accessories
 
 ### Example Payload (n8n webhook)
 
-When a user submits the form, the payload sent to `http://localhost:5678/webhook/multi-trade-coordinator` will include:
+When a user submits the form, the payload sent to `https://n8n-production-293e.up.railway.app/webhook/multi-trade-coordinator` will include:
 
 ```json
 {
