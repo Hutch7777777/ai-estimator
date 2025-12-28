@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
 import { Inter, Plus_Jakarta_Sans, JetBrains_Mono, Space_Grotesk } from "next/font/google";
 import { Toaster } from "sonner";
+import { UserProvider } from "@/lib/hooks/useUser";
+import { OrganizationProvider } from "@/lib/hooks/useOrganization";
 import "./globals.css";
 
 const inter = Inter({
@@ -40,7 +42,11 @@ export default function RootLayout({
   return (
     <html lang="en" className={`${inter.variable} ${jakarta.variable} ${jetbrainsMono.variable} ${spaceGrotesk.variable}`}>
       <body className="antialiased">
-        {children}
+        <UserProvider>
+          <OrganizationProvider>
+            {children}
+          </OrganizationProvider>
+        </UserProvider>
         <Toaster position="top-right" richColors closeButton />
       </body>
     </html>
