@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { Suspense, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { createClient } from '@/lib/supabase/client';
@@ -10,7 +10,7 @@ import { Label } from '@/components/ui/label';
 import { Loader2, Mail, Lock, ArrowRight } from 'lucide-react';
 import { toast } from 'sonner';
 
-export default function LoginPage() {
+function LoginForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const redirectTo = searchParams.get('redirectTo') || '/project';
@@ -216,5 +216,17 @@ export default function LoginPage() {
         </p>
       </div>
     </div>
+  );
+}
+
+export default function LoginPage() {
+  return (
+    <Suspense fallback={
+      <div className="flex min-h-screen items-center justify-center bg-[#f8fafc]">
+        <Loader2 className="h-8 w-8 animate-spin text-[#00cc6a]" />
+      </div>
+    }>
+      <LoginForm />
+    </Suspense>
   );
 }
