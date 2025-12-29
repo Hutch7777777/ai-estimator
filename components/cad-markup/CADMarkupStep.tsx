@@ -118,6 +118,8 @@ interface MarkupState {
 }
 
 export function CADMarkupStep({ data, onUpdate, onValidationChange }: CADMarkupStepProps) {
+  console.log('[CADMarkupStep] Component rendering, mode will be browse initially');
+
   // State
   const [imageUrl, setImageUrl] = useState<string>(data?.imageUrl || "");
   const [imageName, setImageName] = useState<string>(data?.imageName || "");
@@ -693,11 +695,15 @@ export function CADMarkupStep({ data, onUpdate, onValidationChange }: CADMarkupS
         setPixelsPerFoot(project.pixels_per_foot);
       }
 
-      // Load the project's PDF if it has one
-      if (project.source_pdf_path) {
+      // Load the project's PDF if it has a valid URL
+      const pdfUrl = project.source_pdf_path;
+      const hasValidPdfUrl = pdfUrl &&
+        (pdfUrl.startsWith('http://') || pdfUrl.startsWith('https://'));
+
+      if (hasValidPdfUrl) {
         setIsLoadingPdf(true);
         try {
-          const { blob, error: pdfError } = await downloadProjectPdf(project.source_pdf_path);
+          const { blob, error: pdfError } = await downloadProjectPdf(pdfUrl);
 
           if (pdfError) {
             toast.error(`Failed to load PDF: ${pdfError}`);

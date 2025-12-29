@@ -84,6 +84,7 @@ export default function ProjectDashboard() {
           </TabsContent>
 
           <TabsContent value="cad" className="space-y-6">
+            {(() => { console.log('[ProjectDashboard] Rendering CAD tab content'); return null; })()}
             <CADMarkupStep key={cadMarkupKey} />
           </TabsContent>
 

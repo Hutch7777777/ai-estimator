@@ -23,21 +23,28 @@ export async function fetchProjects(): Promise<{
   data: BluebeamProject[] | null;
   error?: string;
 }> {
+  console.log('fetchProjects: Starting...');
   const supabase = createClient();
 
   try {
+    console.log('fetchProjects: Querying bluebeam_projects table...');
     // Note: bluebeam_projects table is not in the typed schema, using type assertion
     const { data, error } = await (supabase as any)
       .from("bluebeam_projects")
       .select("*")
       .order("updated_at", { ascending: false });
 
+    console.log('fetchProjects: Query complete', { hasData: !!data, hasError: !!error, errorMessage: error?.message });
+
     if (error) {
+      console.error('fetchProjects: Error from Supabase:', error);
       return { data: null, error: error.message };
     }
 
+    console.log('fetchProjects: Success, returning', data?.length || 0, 'projects');
     return { data: data as BluebeamProject[] };
   } catch (error) {
+    console.error('fetchProjects: Exception caught:', error);
     return { data: null, error: String(error) };
   }
 }

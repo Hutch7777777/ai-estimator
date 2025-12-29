@@ -35,15 +35,25 @@ export function ProjectGrid({ onProjectSelect }: ProjectGridProps) {
   }, []);
 
   const loadProjects = async () => {
+    console.log('ProjectGrid: loadProjects starting...');
     setLoading(true);
-    const { data, error } = await fetchProjects();
-    if (error) {
+    try {
+      const { data, error } = await fetchProjects();
+      console.log('ProjectGrid: fetchProjects returned', { hasData: !!data, hasError: !!error });
+      if (error) {
+        toast.error("Failed to load projects");
+        console.error('ProjectGrid: Error:', error);
+      } else {
+        setProjects(data || []);
+        console.log('ProjectGrid: Set', data?.length || 0, 'projects');
+      }
+    } catch (err) {
+      console.error('ProjectGrid: Exception in loadProjects:', err);
       toast.error("Failed to load projects");
-      console.error(error);
-    } else {
-      setProjects(data || []);
+    } finally {
+      console.log('ProjectGrid: Setting loading to false');
+      setLoading(false);
     }
-    setLoading(false);
   };
 
   const handleCreateProject = async () => {

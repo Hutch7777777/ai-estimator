@@ -54,6 +54,12 @@ export async function downloadProjectPdf(
   pdfUrl: string
 ): Promise<{ blob: Blob | null; error?: string }> {
   try {
+    // Validate URL - must be a full URL, not a relative path
+    if (!pdfUrl || (!pdfUrl.startsWith('http://') && !pdfUrl.startsWith('https://'))) {
+      console.warn('Invalid PDF URL (not a full URL):', pdfUrl);
+      return { blob: null, error: 'Invalid PDF URL - not a full URL' };
+    }
+
     const response = await fetch(pdfUrl);
     if (!response.ok) {
       return { blob: null, error: `Failed to fetch PDF: ${response.statusText}` };
