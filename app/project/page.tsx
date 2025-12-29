@@ -2,21 +2,17 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { ArrowLeft, BarChart3, Pencil, LogOut } from "lucide-react";
+import { ArrowLeft, BarChart3, Pencil } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Button } from "@/components/ui/button";
 import { ProjectForm } from "@/components/project-form/ProjectForm";
 import { ProjectsTable } from "@/components/projects/ProjectsTable";
 import { DashboardOverview } from "@/components/dashboard/DashboardOverview";
 import { CADMarkupStep } from "@/components/cad-markup";
-import { useUser } from "@/lib/hooks/useUser";
-import { useOrganization } from "@/lib/hooks/useOrganization";
+import { UserMenu } from "@/components/layout/UserMenu";
 
 export default function ProjectDashboard() {
   const [activeTab, setActiveTab] = useState("overview");
   const [cadMarkupKey, setCadMarkupKey] = useState(0);
-  const { signOut } = useUser();
-  const { organization } = useOrganization();
 
   // When switching to CAD tab, increment key to force remount
   const handleTabChange = (value: string) => {
@@ -47,15 +43,7 @@ export default function ProjectDashboard() {
                 Create new estimates or manage existing projects
               </p>
             </div>
-            <div className="flex items-center gap-4">
-              {organization && (
-                <span className="text-sm text-muted-foreground">{organization.name}</span>
-              )}
-              <Button type="button" variant="ghost" size="sm" onClick={signOut}>
-                <LogOut className="h-4 w-4 mr-2" />
-                Sign out
-              </Button>
-            </div>
+            <UserMenu />
           </div>
         </div>
 

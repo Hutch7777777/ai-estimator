@@ -103,16 +103,24 @@ export function OrganizationProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     const loadOrganizations = async () => {
-      if (isUserLoading) return;
+      console.log('useOrganization: Starting loadOrganizations', { isUserLoading, hasUser: !!user });
+
+      if (isUserLoading) {
+        console.log('useOrganization: Waiting for user to load...');
+        return;
+      }
 
       if (!user) {
+        console.log('useOrganization: No user, clearing orgs and setting isLoading false');
         setOrganizations([]);
         setCurrentOrgId(null);
         setIsLoading(false);
         return;
       }
 
+      console.log('useOrganization: Fetching organizations for user', user.id);
       const orgs = await fetchOrganizations(user.id);
+      console.log('useOrganization: Fetched orgs', { count: orgs.length });
       setOrganizations(orgs);
 
       // Try to restore saved org, or use first one
@@ -128,6 +136,7 @@ export function OrganizationProvider({ children }: { children: ReactNode }) {
         }
       }
 
+      console.log('useOrganization: Finished, setting isLoading false');
       setIsLoading(false);
     };
 

@@ -1,6 +1,6 @@
 'use client';
 
-import { createContext, useContext, useEffect, useState, ReactNode, useMemo } from 'react';
+import { createContext, useContext, useEffect, useState, ReactNode, useMemo, useCallback } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { User } from '@supabase/supabase-js';
 
@@ -27,10 +27,9 @@ export function UserProvider({ children }: { children: ReactNode }) {
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
-  // Create client once with useMemo
   const supabase = useMemo(() => createClient(), []);
 
-  const fetchProfile = async (userId: string) => {
+  const fetchProfile = useCallback(async (userId: string): Promise<UserProfile | null> => {
     try {
       const { data, error } = await supabase
         .from('user_profiles')
@@ -39,90 +38,112 @@ export function UserProvider({ children }: { children: ReactNode }) {
         .single();
 
       if (error) {
-        console.error('Error fetching profile:', error.message, error.details, error.hint);
+        console.log('Profile fetch error (may not exist yet):', error.message);
         return null;
       }
-
       return data as UserProfile;
     } catch (err) {
       console.error('Profile fetch exception:', err);
       return null;
     }
-  };
+  }, [supabase]);
 
-  const refreshProfile = async () => {
+  const refreshProfile = useCallback(async () => {
     if (user) {
       const newProfile = await fetchProfile(user.id);
       setProfile(newProfile);
     }
-  };
+  }, [user, fetchProfile]);
+
+  const signOut = useCallback(async () => {
+    try {
+      await supabase.auth.signOut();
+      setUser(null);
+      setProfile(null);
+    } catch (err) {
+      console.error('Sign out error:', err);
+    }
+    window.location.href = '/login';
+  }, [supabase]);
 
   useEffect(() => {
-    const getInitialSession = async () => {
+    let isMounted = true;
+
+    const initialize = async () => {
+      console.log('useUser: Initializing...');
+
       try {
-        const { data: { user }, error } = await supabase.auth.getUser();
+        const { data: { user: authUser }, error } = await supabase.auth.getUser();
 
-        // "Auth session missing!" is expected when not logged in - don't log it as error
-        if (error && error.message !== 'Auth session missing!') {
-          console.error('Auth error:', error.message);
-        }
+        console.log('useUser: getUser result', {
+          userId: authUser?.id,
+          error: error?.message
+        });
 
-        setUser(user);
+        if (!isMounted) return;
 
-        if (user) {
-          const profile = await fetchProfile(user.id);
-          setProfile(profile);
+        if (authUser) {
+          setUser(authUser);
+          const userProfile = await fetchProfile(authUser.id);
+          if (isMounted) {
+            setProfile(userProfile);
+          }
+        } else {
+          setUser(null);
+          setProfile(null);
         }
       } catch (err) {
-        console.error('Session check exception:', err);
+        console.error('useUser: Initialize error', err);
+        if (isMounted) {
+          setUser(null);
+          setProfile(null);
+        }
       } finally {
-        setIsLoading(false);
+        console.log('useUser: Setting isLoading to false');
+        if (isMounted) {
+          setIsLoading(false);
+        }
       }
     };
 
-    getInitialSession();
+    initialize();
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (event, session) => {
-        console.log('Auth state changed:', event);
+        console.log('useUser: Auth state changed:', event);
+
+        if (!isMounted) return;
+
         const currentUser = session?.user ?? null;
         setUser(currentUser);
 
         if (currentUser) {
-          const profile = await fetchProfile(currentUser.id);
-          setProfile(profile);
+          const userProfile = await fetchProfile(currentUser.id);
+          if (isMounted) {
+            setProfile(userProfile);
+          }
         } else {
           setProfile(null);
         }
-
-        setIsLoading(false);
       }
     );
 
     return () => {
+      isMounted = false;
       subscription.unsubscribe();
     };
-  }, [supabase]);
+  }, [supabase, fetchProfile]);
 
-  const signOut = async () => {
-    try {
-      const { error } = await supabase.auth.signOut();
-      if (error) {
-        console.error('Sign out error:', error.message);
-      }
-      setUser(null);
-      setProfile(null);
-      // Force redirect to login
-      window.location.href = '/login';
-    } catch (err) {
-      console.error('Sign out exception:', err);
-      // Force redirect anyway
-      window.location.href = '/login';
-    }
-  };
+  const value = useMemo(() => ({
+    user,
+    profile,
+    isLoading,
+    signOut,
+    refreshProfile,
+  }), [user, profile, isLoading, signOut, refreshProfile]);
 
   return (
-    <UserContext.Provider value={{ user, profile, isLoading, signOut, refreshProfile }}>
+    <UserContext.Provider value={value}>
       {children}
     </UserContext.Provider>
   );
