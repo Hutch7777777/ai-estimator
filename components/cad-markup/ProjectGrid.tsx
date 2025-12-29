@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -30,31 +30,43 @@ export function ProjectGrid({ onProjectSelect }: ProjectGridProps) {
   const [newProjectName, setNewProjectName] = useState("");
   const [newClientName, setNewClientName] = useState("");
 
+  // Ref to prevent multiple simultaneous fetches
+  const isFetchingRef = useRef(false);
+
   useEffect(() => {
+    const loadProjects = async () => {
+      // Guard against multiple simultaneous fetches
+      if (isFetchingRef.current) {
+        console.log('ProjectGrid: Already fetching, skipping...');
+        return;
+      }
+
+      isFetchingRef.current = true;
+      console.log('ProjectGrid: loadProjects starting...');
+      setLoading(true);
+
+      try {
+        const { data, error } = await fetchProjects();
+        console.log('ProjectGrid: fetchProjects returned', { hasData: !!data, hasError: !!error });
+        if (error) {
+          toast.error("Failed to load projects");
+          console.error('ProjectGrid: Error:', error);
+        } else {
+          setProjects(data || []);
+          console.log('ProjectGrid: Set', data?.length || 0, 'projects');
+        }
+      } catch (err) {
+        console.error('ProjectGrid: Exception in loadProjects:', err);
+        toast.error("Failed to load projects");
+      } finally {
+        console.log('ProjectGrid: Setting loading to false');
+        setLoading(false);
+        isFetchingRef.current = false;
+      }
+    };
+
     loadProjects();
   }, []);
-
-  const loadProjects = async () => {
-    console.log('ProjectGrid: loadProjects starting...');
-    setLoading(true);
-    try {
-      const { data, error } = await fetchProjects();
-      console.log('ProjectGrid: fetchProjects returned', { hasData: !!data, hasError: !!error });
-      if (error) {
-        toast.error("Failed to load projects");
-        console.error('ProjectGrid: Error:', error);
-      } else {
-        setProjects(data || []);
-        console.log('ProjectGrid: Set', data?.length || 0, 'projects');
-      }
-    } catch (err) {
-      console.error('ProjectGrid: Exception in loadProjects:', err);
-      toast.error("Failed to load projects");
-    } finally {
-      console.log('ProjectGrid: Setting loading to false');
-      setLoading(false);
-    }
-  };
 
   const handleCreateProject = async () => {
     if (!newProjectName.trim()) return;

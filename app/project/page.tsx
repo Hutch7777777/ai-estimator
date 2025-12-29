@@ -12,13 +12,9 @@ import { UserMenu } from "@/components/layout/UserMenu";
 
 export default function ProjectDashboard() {
   const [activeTab, setActiveTab] = useState("overview");
-  const [cadMarkupKey, setCadMarkupKey] = useState(0);
 
-  // When switching to CAD tab, increment key to force remount
+  // Simple tab change handler - no forced remount needed
   const handleTabChange = (value: string) => {
-    if (value === "cad") {
-      setCadMarkupKey((prev) => prev + 1);
-    }
     setActiveTab(value);
   };
 
@@ -57,16 +53,7 @@ export default function ProjectDashboard() {
             <TabsTrigger value="new" className="text-base">
               New Project
             </TabsTrigger>
-            <TabsTrigger
-              value="cad"
-              className="text-base"
-              onClick={() => {
-                // Reset when clicking CAD tab while already on it
-                if (activeTab === "cad") {
-                  setCadMarkupKey((prev) => prev + 1);
-                }
-              }}
-            >
+            <TabsTrigger value="cad" className="text-base">
               <Pencil className="mr-2 h-4 w-4" />
               PDF Markups
             </TabsTrigger>
@@ -85,7 +72,7 @@ export default function ProjectDashboard() {
 
           <TabsContent value="cad" className="space-y-6">
             {(() => { console.log('[ProjectDashboard] Rendering CAD tab content'); return null; })()}
-            <CADMarkupStep key={cadMarkupKey} />
+            <CADMarkupStep />
           </TabsContent>
 
           <TabsContent value="past" className="space-y-6">
