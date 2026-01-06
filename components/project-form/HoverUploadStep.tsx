@@ -22,6 +22,7 @@ import {
 } from "lucide-react";
 import { ProjectFormData } from "@/app/project/new/page";
 import { createClient } from "@/lib/supabase/client";
+import { useOrganization } from "@/lib/hooks/useOrganization";
 import { cn } from "@/lib/utils";
 
 interface HoverUploadStepProps {
@@ -37,6 +38,7 @@ export function HoverUploadStep({ data, onUpdate }: HoverUploadStepProps) {
   const [progress, setProgress] = useState(0);
   const [errorMessage, setErrorMessage] = useState('');
 
+  const { organization } = useOrganization();
   const supabase = createClient();
 
   // Validation helper
@@ -241,6 +243,14 @@ export function HoverUploadStep({ data, onUpdate }: HoverUploadStepProps) {
 
     if (!selectedFile) return;
 
+    // Verify organization is selected before proceeding
+    if (!organization?.id) {
+      toast.error("No organization selected", {
+        description: "Please select an organization before generating an estimate",
+      });
+      return;
+    }
+
     try {
       // Generate a temporary project ID
       const tempProjectId = crypto.randomUUID();
@@ -258,6 +268,7 @@ export function HoverUploadStep({ data, onUpdate }: HoverUploadStepProps) {
       // Step 2: Save to database
       const projectInsert = {
         id: tempProjectId,
+        organization_id: organization.id,
         name: data.projectName,
         client_name: data.customerName,
         address: data.address,

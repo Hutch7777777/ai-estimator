@@ -17,14 +17,20 @@ export interface BluebeamProject {
 }
 
 /**
- * Fetch all projects for the project selector
+ * Fetch all projects for the project selector - filtered by organization
  */
-export async function fetchProjects(): Promise<{
+export async function fetchProjects(organizationId?: string): Promise<{
   data: BluebeamProject[] | null;
   error?: string;
 }> {
-  console.log('fetchProjects: Starting...');
+  console.log('fetchProjects: Starting...', { organizationId });
   const supabase = createClient();
+
+  // Don't fetch if no organization is provided
+  if (!organizationId) {
+    console.log('fetchProjects: No organization ID provided, returning empty list');
+    return { data: [], error: undefined };
+  }
 
   try {
     console.log('fetchProjects: Querying bluebeam_projects table...');
@@ -32,6 +38,7 @@ export async function fetchProjects(): Promise<{
     const { data, error } = await (supabase as any)
       .from("bluebeam_projects")
       .select("*")
+      .eq("organization_id", organizationId)
       .order("updated_at", { ascending: false });
 
     console.log('fetchProjects: Query complete', { hasData: !!data, hasError: !!error, errorMessage: error?.message });
@@ -50,9 +57,10 @@ export async function fetchProjects(): Promise<{
 }
 
 /**
- * Create a new project
+ * Create a new project - requires organization ID
  */
 export async function createProject(
+  organizationId: string,
   projectName: string,
   clientName?: string,
   pdfPath?: string,
@@ -60,11 +68,16 @@ export async function createProject(
 ): Promise<{ data: BluebeamProject | null; error?: string }> {
   const supabase = createClient();
 
+  if (!organizationId) {
+    return { data: null, error: "Organization ID is required" };
+  }
+
   try {
     // Note: bluebeam_projects table is not in the typed schema, using type assertion
     const { data, error } = await (supabase as any)
       .from("bluebeam_projects")
       .insert({
+        organization_id: organizationId,
         project_name: projectName,
         client_name: clientName || null,
         source_pdf_path: pdfPath || null,

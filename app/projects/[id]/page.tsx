@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
+import { useOrganization } from "@/lib/hooks/useOrganization";
 import { useTakeoffData, useLineItemsSave } from "@/lib/hooks";
 import { LineItemWithState, Project } from "@/lib/types/database";
 import {
@@ -38,6 +39,7 @@ export default function ProjectEstimatePage() {
   const [localLineItems, setLocalLineItems] = useState<LineItemWithState[]>([]);
 
   const supabase = createClient();
+  const { organization, isLoading: isOrgLoading } = useOrganization();
 
   // Fetch takeoff data
   const {
@@ -57,9 +59,19 @@ export default function ProjectEstimatePage() {
     lastSaved,
   } = useLineItemsSave();
 
-  // Fetch project details
+  // Fetch project details with organization ownership verification
   useEffect(() => {
     async function fetchProject() {
+      // Wait for organization to be loaded
+      if (isOrgLoading) return;
+
+      // Don't fetch if no organization is selected
+      if (!organization?.id) {
+        setProjectError("No organization selected");
+        setProjectLoading(false);
+        return;
+      }
+
       try {
         setProjectLoading(true);
         setProjectError(null);
@@ -77,6 +89,12 @@ export default function ProjectEstimatePage() {
           return;
         }
 
+        // Verify the project belongs to the user's organization
+        if (data.organization_id !== organization.id) {
+          setProjectError("You don't have access to this project");
+          return;
+        }
+
         setProject(data);
       } catch (err) {
         console.error("Error fetching project:", err);
@@ -87,7 +105,7 @@ export default function ProjectEstimatePage() {
     }
 
     fetchProject();
-  }, [projectId, supabase]);
+  }, [projectId, supabase, organization?.id, isOrgLoading]);
 
   // Sync line items from hook to local state
   useEffect(() => {
@@ -126,7 +144,7 @@ export default function ProjectEstimatePage() {
   }, [localLineItems, saveLineItems, refresh]);
 
   // Loading state
-  if (projectLoading || takeoffLoading) {
+  if (isOrgLoading || projectLoading || takeoffLoading) {
     return (
       <div className="container mx-auto py-8 space-y-6">
         <Skeleton className="h-12 w-full" />

@@ -13,6 +13,7 @@ import { useUser } from '@/lib/hooks/useUser';
 import { useOrganization } from '@/lib/hooks/useOrganization';
 import { createClient } from '@/lib/supabase/client';
 import { toast } from 'sonner';
+import { NoOrganization } from '@/components/no-organization';
 
 function AccountSettingsContent() {
   const router = useRouter();
@@ -20,7 +21,7 @@ function AccountSettingsContent() {
   const initialTab = searchParams.get('tab') || 'profile';
 
   const { user, profile, refreshProfile, isLoading: isUserLoading } = useUser();
-  const { organization, membership, organizations, isOwner, isAdmin, refreshOrganization, isLoading: isOrgLoading } = useOrganization();
+  const { organization, isOwner, isAdmin, refreshOrganization, isLoading: isOrgLoading, hasNoOrganizations } = useOrganization();
 
   const [activeTab, setActiveTab] = useState(initialTab);
   const [isSaving, setIsSaving] = useState(false);
@@ -311,6 +312,27 @@ function AccountSettingsContent() {
               </div>
             </>
           )}
+        </div>
+      </div>
+    );
+  }
+
+  // Show no organization state
+  if (hasNoOrganizations) {
+    return (
+      <div className="min-h-screen bg-[#f8fafc]">
+        <div className="mx-auto max-w-4xl px-4 py-8">
+          <div className="mb-8">
+            <Link
+              href="/project"
+              className="inline-flex items-center text-sm text-[#64748b] hover:text-[#0f172a] transition-colors"
+            >
+              <ArrowLeft className="mr-2 h-4 w-4" />
+              Back to Dashboard
+            </Link>
+            <h1 className="mt-4 text-3xl font-bold text-[#0f172a]">Account Settings</h1>
+          </div>
+          <NoOrganization />
         </div>
       </div>
     );

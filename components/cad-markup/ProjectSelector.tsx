@@ -20,12 +20,13 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Plus, Loader2 } from "lucide-react";
+import { Plus, Loader2, AlertCircle } from "lucide-react";
 import {
   fetchProjects,
   createProject,
   BluebeamProject,
 } from "@/lib/supabase/bluebeamProjects";
+import { useOrganization } from "@/lib/hooks/useOrganization";
 
 interface ProjectSelectorProps {
   selectedProject: BluebeamProject | null;
@@ -48,14 +49,23 @@ export function ProjectSelector({
   const [newClientName, setNewClientName] = useState("");
   const [error, setError] = useState<string | null>(null);
 
-  // Load projects on mount
+  const { organization, isLoading: isOrgLoading } = useOrganization();
+
+  // Load projects when organization is available
   useEffect(() => {
+    if (isOrgLoading) return;
     loadProjects();
-  }, []);
+  }, [organization?.id, isOrgLoading]);
 
   const loadProjects = async () => {
+    if (!organization?.id) {
+      setProjects([]);
+      setLoading(false);
+      return;
+    }
+
     setLoading(true);
-    const { data, error } = await fetchProjects();
+    const { data, error } = await fetchProjects(organization.id);
     if (error) {
       console.error("Error loading projects:", error);
       setError(error);
@@ -68,10 +78,16 @@ export function ProjectSelector({
   const handleCreateProject = async () => {
     if (!newProjectName.trim()) return;
 
+    if (!organization?.id) {
+      setError("No organization selected");
+      return;
+    }
+
     setCreating(true);
     setError(null);
 
     const { data: newProject, error } = await createProject(
+      organization.id,
       newProjectName.trim(),
       newClientName.trim() || undefined
     );
@@ -102,6 +118,21 @@ export function ProjectSelector({
       onProjectSelect(project || null);
     }
   };
+
+  // Show error state inline
+  if (error && !loading && projects.length === 0) {
+    return (
+      <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 px-3 py-2 border rounded-md bg-red-50 border-red-200 text-red-700 text-sm">
+          <AlertCircle className="h-4 w-4" />
+          <span>Failed to load projects</span>
+          <Button variant="ghost" size="sm" onClick={() => window.location.reload()} className="h-6 px-2 text-red-700 hover:text-red-800">
+            Retry
+          </Button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="flex items-center gap-2">

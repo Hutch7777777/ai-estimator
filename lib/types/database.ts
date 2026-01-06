@@ -21,6 +21,38 @@ export type CalculationSource = 'auto_scope' | 'manual' | 'hover_pdf' | 'importe
 
 export type Unit = 'EA' | 'PC' | 'SQ' | 'LF' | 'SF' | 'RL' | 'BX' | 'BDL' | 'GAL';
 
+// Extraction system enums
+export type DetectionStatus = 'auto' | 'verified' | 'edited' | 'deleted';
+
+export type DetectionClass =
+  | 'window'
+  | 'door'
+  | 'garage'
+  | 'building'
+  | 'roof'
+  | 'gable'
+  | 'exterior_wall'
+  | '';
+
+export type PageType =
+  | 'elevation'
+  | 'floor_plan'
+  | 'schedule'
+  | 'cover'
+  | 'detail'
+  | 'section'
+  | 'site_plan'
+  | 'other';
+
+export type ElevationName = 'front' | 'rear' | 'left' | 'right';
+
+export type JobStatus =
+  | 'converting'
+  | 'classifying'
+  | 'processing'
+  | 'complete'
+  | 'failed';
+
 // ============================================================================
 // TABLE INTERFACES
 // ============================================================================
@@ -282,6 +314,190 @@ export interface LineItemWithState extends TakeoffLineItem {
 }
 
 // ============================================================================
+// EXTRACTION SYSTEM TABLES
+// ============================================================================
+
+/**
+ * Extraction Jobs Table
+ *
+ * Tracks PDF extraction jobs with page/detection processing status.
+ */
+export interface ExtractionJob {
+  id: string; // UUID
+  project_id: string | null; // UUID - Optional link to projects table
+  project_name: string | null;
+  status: JobStatus;
+  source_pdf_url: string | null;
+  total_pages: number;
+  elevation_count: number;
+  created_at: string; // ISO timestamp
+  completed_at: string | null; // ISO timestamp
+  default_scale_ratio: number | null;
+  plan_dpi: number | null;
+}
+
+/**
+ * Extraction Pages Table
+ *
+ * Individual pages from extracted PDFs with classification info.
+ */
+export interface ExtractionPage {
+  id: string; // UUID
+  job_id: string; // UUID - Foreign key to extraction_jobs
+  page_number: number;
+  image_url: string;
+  thumbnail_url: string | null;
+  page_type: PageType | null;
+  page_type_confidence: number | null;
+  elevation_name: ElevationName | null;
+  status: string;
+  scale_ratio: number | null;
+  dpi: number | null;
+  // Original unmarked image (detection coordinates are in this space)
+  original_image_url: string | null;
+  original_width: number | null;
+  original_height: number | null;
+}
+
+/**
+ * Extraction Detection Details Table (View)
+ *
+ * ML-detected bounding boxes with real-world measurements.
+ * This is typically a view that joins detection data with calculated dimensions.
+ */
+export interface ExtractionDetectionDetail {
+  id: string; // UUID
+  job_id: string; // UUID
+  page_id: string; // UUID
+  class: DetectionClass;
+  detection_index: number;
+  confidence: number;
+
+  // Pixel coordinates (from ML model)
+  pixel_x: number;
+  pixel_y: number;
+  pixel_width: number;
+  pixel_height: number;
+
+  // Real-world measurements (calculated from scale)
+  real_width_in: number | null;
+  real_height_in: number | null;
+  real_width_ft: number | null;
+  real_height_ft: number | null;
+  area_sf: number | null;
+  perimeter_lf: number | null;
+
+  // Additional properties
+  is_triangle: boolean;
+  matched_tag: string | null;
+  created_at: string; // ISO timestamp
+
+  // Edit tracking
+  status: DetectionStatus;
+  edited_by: string | null;
+  edited_at: string | null;
+  original_bbox: {
+    pixel_x: number;
+    pixel_y: number;
+    pixel_width: number;
+    pixel_height: number;
+  } | null;
+}
+
+/**
+ * Extraction Elevation Calcs Table
+ *
+ * Aggregated calculations per elevation (facade areas, opening areas, etc.)
+ */
+export interface ExtractionElevationCalc {
+  id: string; // UUID
+  job_id: string; // UUID
+  page_id: string; // UUID
+  elevation_name: string | null;
+
+  // Counts
+  window_count: number;
+  door_count: number;
+  garage_count: number;
+  gable_count: number;
+  roof_count: number;
+  exterior_wall_count: number;
+
+  // Area calculations
+  gross_facade_sf: number;
+  window_area_sf: number;
+  door_area_sf: number;
+  garage_area_sf: number;
+  total_openings_sf: number;
+  net_siding_sf: number;
+
+  // Window perimeter measurements
+  window_perimeter_lf: number;
+  window_head_lf: number;
+  window_jamb_lf: number;
+  window_sill_lf: number;
+
+  // Door perimeter measurements
+  door_perimeter_lf: number;
+  door_head_lf: number;
+  door_jamb_lf: number;
+
+  // Other measurements
+  garage_head_lf: number;
+  gable_rake_lf: number;
+  roof_eave_lf: number;
+  roof_rake_lf: number;
+
+  // Scale info
+  scale_ratio: number | null;
+  dpi: number | null;
+  confidence_avg: number | null;
+}
+
+/**
+ * Extraction Job Totals Table
+ *
+ * Aggregated totals across all elevations for a job.
+ */
+export interface ExtractionJobTotal {
+  id: string; // UUID
+  job_id: string; // UUID
+  elevation_count: number;
+  elevations_processed: string[];
+
+  // Counts
+  total_windows: number;
+  total_doors: number;
+  total_garages: number;
+  total_gables: number;
+
+  // Area totals
+  total_gross_facade_sf: number;
+  total_openings_sf: number;
+  total_net_siding_sf: number;
+
+  // Window perimeter totals
+  total_window_head_lf: number;
+  total_window_jamb_lf: number;
+  total_window_sill_lf: number;
+  total_window_perimeter_lf: number;
+
+  // Door perimeter totals
+  total_door_head_lf: number;
+  total_door_jamb_lf: number;
+  total_door_perimeter_lf: number;
+
+  // Other totals
+  total_garage_head_lf: number;
+  total_gable_rake_lf: number;
+  total_roof_eave_lf: number;
+
+  // Derived values
+  siding_squares: number;
+  calculation_version: string | null;
+}
+
+// ============================================================================
 // DATABASE TYPE
 // ============================================================================
 
@@ -330,6 +546,32 @@ export interface Database {
         Row: TakeoffLineItem;
         Insert: Omit<TakeoffLineItem, 'id' | 'created_at' | 'updated_at' | 'material_extended' | 'labor_extended' | 'equipment_extended' | 'line_total'>;
         Update: Partial<Omit<TakeoffLineItem, 'id' | 'created_at' | 'updated_at' | 'material_extended' | 'labor_extended' | 'equipment_extended' | 'line_total'>>;
+      };
+      // Extraction system tables
+      extraction_jobs: {
+        Row: ExtractionJob;
+        Insert: Omit<ExtractionJob, 'id' | 'created_at'>;
+        Update: Partial<Omit<ExtractionJob, 'id' | 'created_at'>>;
+      };
+      extraction_pages: {
+        Row: ExtractionPage;
+        Insert: Omit<ExtractionPage, 'id'>;
+        Update: Partial<Omit<ExtractionPage, 'id'>>;
+      };
+      extraction_detection_details: {
+        Row: ExtractionDetectionDetail;
+        Insert: Omit<ExtractionDetectionDetail, 'id' | 'created_at'>;
+        Update: Partial<Omit<ExtractionDetectionDetail, 'id' | 'created_at'>>;
+      };
+      extraction_elevation_calcs: {
+        Row: ExtractionElevationCalc;
+        Insert: Omit<ExtractionElevationCalc, 'id'>;
+        Update: Partial<Omit<ExtractionElevationCalc, 'id'>>;
+      };
+      extraction_job_totals: {
+        Row: ExtractionJobTotal;
+        Insert: Omit<ExtractionJobTotal, 'id'>;
+        Update: Partial<Omit<ExtractionJobTotal, 'id'>>;
       };
     };
   };

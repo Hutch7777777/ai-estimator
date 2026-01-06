@@ -16,6 +16,7 @@ import {
   Calendar,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
+import { useOrganization } from "@/lib/hooks/useOrganization";
 import Link from "next/link";
 
 interface ProjectStats {
@@ -37,6 +38,7 @@ interface RecentProject {
 }
 
 export function DashboardOverview() {
+  const { organization } = useOrganization();
   const [stats, setStats] = useState<ProjectStats>({
     total: 0,
     pending: 0,
@@ -49,6 +51,12 @@ export function DashboardOverview() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    // Only load data if we have an organization
+    if (!organization) {
+      setLoading(false);
+      return;
+    }
+
     loadDashboardData();
 
     // Subscribe to realtime changes for live stats updates
@@ -73,17 +81,20 @@ export function DashboardOverview() {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, []);
+  }, [organization]);
 
   const loadDashboardData = async () => {
+    if (!organization) return;
+
     const supabase = createClient();
 
     try {
-      // Fetch all projects to calculate stats
+      // Fetch all projects for this organization
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const { data: projects, error } = await (supabase as any)
         .from("projects")
         .select("*")
+        .eq("organization_id", organization.id)
         .order("created_at", { ascending: false });
 
       if (error) throw error;

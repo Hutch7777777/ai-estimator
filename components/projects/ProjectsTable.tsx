@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
+import { useOrganization } from "@/lib/hooks/useOrganization";
 import {
   Table,
   TableBody,
@@ -65,10 +66,22 @@ export function ProjectsTable() {
 
   const supabase = createClient();
   const router = useRouter();
+  const { organization, isLoading: isOrgLoading } = useOrganization();
 
-  // Fetch projects from database
+  // Fetch projects from database - filtered by organization
   useEffect(() => {
     async function fetchProjects() {
+      // Wait for organization to be loaded
+      if (isOrgLoading) return;
+
+      // Don't fetch if no organization is selected
+      if (!organization?.id) {
+        setProjects([]);
+        setFilteredProjects([]);
+        setLoading(false);
+        return;
+      }
+
       try {
         setLoading(true);
         setError(null);
@@ -76,6 +89,7 @@ export function ProjectsTable() {
         const { data, error: fetchError } = await supabase
           .from("projects")
           .select("*")
+          .eq("organization_id", organization.id)
           .order("created_at", { ascending: false });
 
         if (fetchError) throw fetchError;
@@ -92,7 +106,9 @@ export function ProjectsTable() {
 
     fetchProjects();
 
-    // Subscribe to realtime changes
+    // Subscribe to realtime changes - only for current organization's projects
+    if (!organization?.id) return;
+
     const channel = supabase
       .channel("projects-changes")
       .on(
@@ -101,6 +117,7 @@ export function ProjectsTable() {
           event: "*",
           schema: "public",
           table: "projects",
+          filter: `organization_id=eq.${organization.id}`,
         },
         (payload) => {
           console.log("Project change detected:", payload);
@@ -125,7 +142,7 @@ export function ProjectsTable() {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [supabase]);
+  }, [supabase, organization?.id, isOrgLoading]);
 
   // Filter projects based on search query
   useEffect(() => {

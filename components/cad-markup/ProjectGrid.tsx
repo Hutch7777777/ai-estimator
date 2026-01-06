@@ -14,6 +14,7 @@ import {
 import { Label } from "@/components/ui/label";
 import { Plus, Search, Loader2, FolderOpen } from "lucide-react";
 import { fetchProjects, createProject, BluebeamProject } from "@/lib/supabase/bluebeamProjects";
+import { useOrganization } from "@/lib/hooks/useOrganization";
 import { ProjectCard } from "./ProjectCard";
 import { toast } from "sonner";
 
@@ -24,17 +25,30 @@ interface ProjectGridProps {
 export function ProjectGrid({ onProjectSelect }: ProjectGridProps) {
   const [projects, setProjects] = useState<BluebeamProject[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [dialogOpen, setDialogOpen] = useState(false);
   const [creating, setCreating] = useState(false);
   const [newProjectName, setNewProjectName] = useState("");
   const [newClientName, setNewClientName] = useState("");
 
+  const { organization, isLoading: isOrgLoading } = useOrganization();
+
   // Ref to prevent multiple simultaneous fetches
   const isFetchingRef = useRef(false);
 
   useEffect(() => {
+    // Wait for organization to load
+    if (isOrgLoading) return;
+
     const loadProjects = async () => {
+      // Don't fetch if no organization
+      if (!organization?.id) {
+        setProjects([]);
+        setLoading(false);
+        return;
+      }
+
       // Guard against multiple simultaneous fetches
       if (isFetchingRef.current) {
         console.log('ProjectGrid: Already fetching, skipping...');
@@ -46,17 +60,20 @@ export function ProjectGrid({ onProjectSelect }: ProjectGridProps) {
       setLoading(true);
 
       try {
-        const { data, error } = await fetchProjects();
-        console.log('ProjectGrid: fetchProjects returned', { hasData: !!data, hasError: !!error });
-        if (error) {
+        const { data, error: fetchError } = await fetchProjects(organization.id);
+        console.log('ProjectGrid: fetchProjects returned', { hasData: !!data, hasError: !!fetchError });
+        if (fetchError) {
+          setError(fetchError);
           toast.error("Failed to load projects");
-          console.error('ProjectGrid: Error:', error);
+          console.error('ProjectGrid: Error:', fetchError);
         } else {
+          setError(null);
           setProjects(data || []);
           console.log('ProjectGrid: Set', data?.length || 0, 'projects');
         }
       } catch (err) {
         console.error('ProjectGrid: Exception in loadProjects:', err);
+        setError(err instanceof Error ? err.message : "Failed to load projects");
         toast.error("Failed to load projects");
       } finally {
         console.log('ProjectGrid: Setting loading to false');
@@ -66,13 +83,19 @@ export function ProjectGrid({ onProjectSelect }: ProjectGridProps) {
     };
 
     loadProjects();
-  }, []);
+  }, [organization?.id, isOrgLoading]);
 
   const handleCreateProject = async () => {
     if (!newProjectName.trim()) return;
 
+    if (!organization?.id) {
+      toast.error("No organization selected");
+      return;
+    }
+
     setCreating(true);
     const { data, error } = await createProject(
+      organization.id,
       newProjectName.trim(),
       newClientName.trim() || undefined
     );
@@ -102,6 +125,23 @@ export function ProjectGrid({ onProjectSelect }: ProjectGridProps) {
     return (
       <div className="flex items-center justify-center min-h-[400px]">
         <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-[400px] text-center p-8">
+        <div className="text-red-500 mb-4">
+          <svg className="h-12 w-12 mx-auto" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+          </svg>
+        </div>
+        <h3 className="text-lg font-semibold text-gray-900 mb-2">Failed to load projects</h3>
+        <p className="text-sm text-gray-500 mb-4">{error}</p>
+        <Button onClick={() => window.location.reload()} variant="outline">
+          Try Again
+        </Button>
       </div>
     );
   }

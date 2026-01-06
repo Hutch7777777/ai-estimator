@@ -7,6 +7,7 @@ import { Progress } from "@/components/ui/progress";
 import { Separator } from "@/components/ui/separator";
 import { Stepper, Step } from "@/components/ui/stepper";
 import { useAutoSave } from "@/lib/hooks/useAutoSave";
+import { useOrganization } from "@/lib/hooks/useOrganization";
 import { createClient } from "@/lib/supabase/client";
 import {
   ArrowLeft,
@@ -73,6 +74,7 @@ const STEPS: Step[] = [
 
 export default function NewProjectPage() {
   const router = useRouter();
+  const { organization } = useOrganization();
   const [currentStep, setCurrentStep] = useState(1);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [formData, setFormData] = useState<ProjectFormData>({
@@ -186,6 +188,14 @@ export default function NewProjectPage() {
 
   // Submit project to Supabase
   const handleSubmit = async () => {
+    // Verify organization is selected before proceeding
+    if (!organization?.id) {
+      toast.error("No organization selected", {
+        description: "Please select an organization before creating a project",
+      });
+      return;
+    }
+
     setIsSubmitting(true);
     const supabase = createClient();
 
@@ -218,6 +228,7 @@ export default function NewProjectPage() {
       const { data: project, error: projectError } = await (supabase as any)
         .from("projects")
         .insert({
+          organization_id: organization.id,
           name: formData.projectName,
           client_name: formData.customerName,
           address: formData.address,

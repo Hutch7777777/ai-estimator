@@ -3,6 +3,7 @@ import { Inter, Plus_Jakarta_Sans, JetBrains_Mono, Space_Grotesk } from "next/fo
 import { Toaster } from "sonner";
 import { UserProvider } from "@/lib/hooks/useUser";
 import { OrganizationProvider } from "@/lib/hooks/useOrganization";
+import { DebugLogger } from "@/components/debug-logger";
 import "./globals.css";
 
 const inter = Inter({
@@ -42,6 +43,7 @@ export default function RootLayout({
   return (
     <html lang="en" className={`${inter.variable} ${jakarta.variable} ${jetbrainsMono.variable} ${spaceGrotesk.variable}`}>
       <body className="antialiased">
+        <DebugLogger />
         <UserProvider>
           <OrganizationProvider>
             {children}

@@ -10,6 +10,9 @@ import { DashboardOverview } from "@/components/dashboard/DashboardOverview";
 import { CADMarkupStep } from "@/components/cad-markup";
 import { UserMenu } from "@/components/layout/UserMenu";
 
+// Note: Auth and organization checks are handled by the parent layout.tsx
+// This page only renders when user is authenticated and has an organization
+
 export default function ProjectDashboard() {
   const [activeTab, setActiveTab] = useState("overview");
 
