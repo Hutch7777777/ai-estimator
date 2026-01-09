@@ -4,6 +4,7 @@ import React, { useState, useRef, useCallback, useEffect, memo } from 'react';
 import type {
   ExtractionDetection,
   DetectionClass,
+  AllDetectionClasses,
   ViewTransform,
   ToolMode,
   ResizeHandle,
@@ -620,7 +621,10 @@ const DetectionCanvas = memo(function DetectionCanvas({
   const sortedOverlayDetections = showMarkupOverlay
     ? [...(overlayDetections || detections)]
         .filter((d) => d.status !== 'deleted')
-        .filter((d) => d.class !== 'building' && d.class !== 'exterior_wall')
+        .filter((d) => {
+          const cls = d.class as AllDetectionClasses;
+          return cls !== 'building' && cls !== 'exterior_wall';
+        })
         .sort((a, b) => {
           const order: Record<string, number> = {
             roof: 0,

@@ -1,6 +1,7 @@
 // Extraction System Data Access Functions
 // Using direct fetch instead of Supabase client to bypass client issues
 
+import type React from 'react';
 import { createClient } from '@supabase/supabase-js';
 import type {
   ExtractionJob,
@@ -484,11 +485,21 @@ export interface DetectionCallbacks {
   onDelete?: (detection: ExtractionDetection) => void;
 }
 
+export interface SubscriptionOptions {
+  /**
+   * Optional ref to check if user is currently editing.
+   * When true, realtime updates will be skipped to preserve local changes.
+   */
+  editingModeRef?: React.MutableRefObject<boolean>;
+}
+
 export function subscribeToPageDetections(
   pageId: string,
-  callbacks: DetectionCallbacks
+  callbacks: DetectionCallbacks,
+  options?: SubscriptionOptions
 ): () => void {
   const supabase = getClient();
+  const { editingModeRef } = options || {};
 
   const channel = supabase
     .channel(`page-detections-${pageId}`)
@@ -501,6 +512,11 @@ export function subscribeToPageDetections(
         filter: `page_id=eq.${pageId}`,
       },
       (payload) => {
+        // Skip realtime updates while in editing mode to preserve local changes
+        if (editingModeRef?.current) {
+          console.log('[subscribeToPageDetections] Skipping INSERT - editing mode active');
+          return;
+        }
         if (callbacks.onInsert) {
           callbacks.onInsert(payload.new as ExtractionDetection);
         }
@@ -515,6 +531,11 @@ export function subscribeToPageDetections(
         filter: `page_id=eq.${pageId}`,
       },
       (payload) => {
+        // Skip realtime updates while in editing mode to preserve local changes
+        if (editingModeRef?.current) {
+          console.log('[subscribeToPageDetections] Skipping UPDATE - editing mode active');
+          return;
+        }
         if (callbacks.onUpdate) {
           callbacks.onUpdate(payload.new as ExtractionDetection);
         }
@@ -529,6 +550,11 @@ export function subscribeToPageDetections(
         filter: `page_id=eq.${pageId}`,
       },
       (payload) => {
+        // Skip realtime updates while in editing mode to preserve local changes
+        if (editingModeRef?.current) {
+          console.log('[subscribeToPageDetections] Skipping DELETE - editing mode active');
+          return;
+        }
         if (callbacks.onDelete) {
           callbacks.onDelete(payload.old as ExtractionDetection);
         }

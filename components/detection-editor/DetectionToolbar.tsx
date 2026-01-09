@@ -14,6 +14,9 @@ import {
   Check,
   X,
   Camera,
+  Undo2,
+  Redo2,
+  Save,
 } from 'lucide-react';
 import type { ToolMode, DetectionClass } from '@/lib/types/extraction';
 import { DETECTION_CLASS_COLORS } from '@/lib/types/extraction';
@@ -45,6 +48,15 @@ export interface DetectionToolbarProps {
   isApproving?: boolean;
   onGenerateMarkup?: () => void;
   isGeneratingMarkup?: boolean;
+  // Local-first editing props
+  hasUnsavedChanges?: boolean;
+  canUndo?: boolean;
+  canRedo?: boolean;
+  onUndo?: () => void;
+  onRedo?: () => void;
+  onValidate?: () => void;
+  onReset?: () => void;
+  isValidating?: boolean;
 }
 
 // =============================================================================
@@ -62,11 +74,10 @@ const TOOLS: { mode: ToolMode; icon: typeof MousePointer2; label: string; shortc
 ];
 
 const DETECTION_CLASSES: { value: DetectionClass; label: string }[] = [
+  { value: 'siding', label: 'Siding' },
   { value: 'window', label: 'Window' },
   { value: 'door', label: 'Door' },
   { value: 'garage', label: 'Garage' },
-  { value: 'building', label: 'Building' },
-  { value: 'exterior_wall', label: 'Exterior Wall' },
   { value: 'roof', label: 'Roof' },
   { value: 'gable', label: 'Gable' },
 ];
@@ -178,6 +189,15 @@ const DetectionToolbar = memo(function DetectionToolbar({
   isApproving = false,
   onGenerateMarkup,
   isGeneratingMarkup = false,
+  // Local-first editing props
+  hasUnsavedChanges = false,
+  canUndo = false,
+  canRedo = false,
+  onUndo,
+  onRedo,
+  onValidate,
+  onReset,
+  isValidating = false,
 }: DetectionToolbarProps) {
   const zoomPercentage = Math.round(scale * 100);
   const { total, reviewed, percentComplete } = reviewProgress;
@@ -245,24 +265,95 @@ const DetectionToolbar = memo(function DetectionToolbar({
         </button>
       </div>
 
+      {/* Undo/Redo Controls */}
+      {(onUndo || onRedo) && (
+        <div className="flex items-center gap-1 border-r border-gray-200 dark:border-gray-700 pr-4">
+          <button
+            type="button"
+            onClick={onUndo}
+            disabled={!canUndo}
+            className={`p-2 rounded transition-colors ${
+              canUndo
+                ? 'hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-600 dark:text-gray-400'
+                : 'text-gray-300 dark:text-gray-600 cursor-not-allowed'
+            }`}
+            title="Undo (Ctrl+Z)"
+          >
+            <Undo2 className="w-4 h-4" />
+          </button>
+          <button
+            type="button"
+            onClick={onRedo}
+            disabled={!canRedo}
+            className={`p-2 rounded transition-colors ${
+              canRedo
+                ? 'hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-600 dark:text-gray-400'
+                : 'text-gray-300 dark:text-gray-600 cursor-not-allowed'
+            }`}
+            title="Redo (Ctrl+Shift+Z)"
+          >
+            <Redo2 className="w-4 h-4" />
+          </button>
+        </div>
+      )}
+
+      {/* Unsaved Changes Indicator & Actions */}
+      {hasUnsavedChanges && (
+        <div className="flex items-center gap-2 border-r border-gray-200 dark:border-gray-700 pr-4">
+          <div className="flex items-center gap-2 text-yellow-600 dark:text-yellow-400">
+            <div className="w-2 h-2 rounded-full bg-yellow-500 animate-pulse" />
+            <span className="text-sm font-medium">Unsaved changes</span>
+          </div>
+          {onReset && (
+            <button
+              type="button"
+              onClick={onReset}
+              className="px-2 py-1 text-xs rounded border border-gray-300 dark:border-gray-600 hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-600 dark:text-gray-400 transition-colors"
+              title="Discard all changes"
+            >
+              Reset
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* Validate & Save Button */}
+      {onValidate && (
+        <div className="border-r border-gray-200 dark:border-gray-700 pr-4">
+          <button
+            type="button"
+            onClick={onValidate}
+            disabled={!hasUnsavedChanges || isValidating}
+            className={`
+              flex items-center gap-2 px-3 py-1.5 rounded-md text-sm font-medium transition-colors
+              ${
+                !hasUnsavedChanges || isValidating
+                  ? 'bg-gray-100 dark:bg-gray-800 text-gray-400 dark:text-gray-500 cursor-not-allowed'
+                  : 'bg-green-600 hover:bg-green-700 text-white'
+              }
+            `}
+            title="Save all changes (Ctrl+S)"
+          >
+            {isValidating ? (
+              <>
+                <Loader2 className="w-4 h-4 animate-spin" />
+                <span>Saving...</span>
+              </>
+            ) : (
+              <>
+                <Save className="w-4 h-4" />
+                <span>Save Changes</span>
+              </>
+            )}
+          </button>
+        </div>
+      )}
+
       {/* Spacer */}
       <div className="flex-1" />
 
-      {/* Sync Status */}
+      {/* Sync Status (Legacy - now shows saved state) */}
       <div className="flex items-center gap-2 border-r border-gray-200 dark:border-gray-700 pr-4">
-        {isSyncing && (
-          <div className="flex items-center gap-2 text-blue-600 dark:text-blue-400">
-            <Loader2 className="w-4 h-4 animate-spin" />
-            <span className="text-sm">Saving...</span>
-          </div>
-        )}
-
-        {!isSyncing && pendingEdits > 0 && (
-          <div className="flex items-center gap-2 text-yellow-600 dark:text-yellow-400">
-            <span className="text-sm">{pendingEdits} pending</span>
-          </div>
-        )}
-
         {lastError && (
           <div className="flex items-center gap-2 text-red-600 dark:text-red-400">
             <AlertCircle className="w-4 h-4" />
@@ -279,7 +370,7 @@ const DetectionToolbar = memo(function DetectionToolbar({
           </div>
         )}
 
-        {!isSyncing && pendingEdits === 0 && !lastError && (
+        {!lastError && !hasUnsavedChanges && (
           <div className="flex items-center gap-2 text-green-600 dark:text-green-400">
             <Check className="w-4 h-4" />
             <span className="text-sm">Saved</span>

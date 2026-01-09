@@ -2,20 +2,33 @@
 // Matches production database schema
 
 // =============================================================================
+// Re-exports
+// =============================================================================
+
+// Polygon support for freeform shape editing
+export type { PolygonPoint } from '@/lib/utils/polygonUtils';
+
+// =============================================================================
 // Literal Types
 // =============================================================================
 
 export type DetectionStatus = 'auto' | 'verified' | 'edited' | 'deleted';
 
+// User-selectable classes (shown in dropdown)
 export type DetectionClass =
   | 'window'
   | 'door'
   | 'garage'
-  | 'building'
+  | 'siding'    // Facade/wall area - replaces exterior_wall in UI
   | 'roof'
   | 'gable'
-  | 'exterior_wall'
   | '';
+
+// Internal classes - used for calculations but not user-selectable
+export type InternalDetectionClass = 'building' | 'exterior_wall';
+
+// Combined type for database compatibility
+export type AllDetectionClasses = DetectionClass | InternalDetectionClass;
 
 export type PageType =
   | 'elevation'
@@ -122,6 +135,26 @@ export interface ExtractionDetection {
     pixel_width: number;
     pixel_height: number;
   } | null;
+
+  // Polygon support (null = legacy rectangle mode)
+  // When set, polygon_points contains absolute pixel coordinates for each vertex
+  // The pixel_x/y/width/height fields become the bounding box of the polygon
+  polygon_points?: Array<{ x: number; y: number }> | null;
+
+  // Product assignment (for Properties Panel)
+  assigned_material_id?: string | null;
+}
+
+/** Material/product details for assigned detections */
+export interface AssignedMaterial {
+  id: string;
+  sku: string;
+  product_name: string;
+  manufacturer: string | null;
+  category: string;
+  material_cost: number;
+  labor_cost: number;
+  unit: string;
 }
 
 export interface ExtractionElevationCalcs {
@@ -261,16 +294,27 @@ export interface ViewTransform {
 // Constants
 // =============================================================================
 
-export const DETECTION_CLASS_COLORS: Record<DetectionClass, string> = {
-  window: '#3B82F6',        // Blue
-  door: '#10B981',          // Green
-  garage: '#F59E0B',        // Amber
-  building: '#8B5CF6',      // Purple
-  exterior_wall: '#6366F1', // Indigo
-  roof: '#EF4444',          // Red
-  gable: '#EC4899',         // Pink
-  '': '#6B7280',            // Gray (empty/unknown)
+export const DETECTION_CLASS_COLORS: Record<DetectionClass | InternalDetectionClass, string> = {
+  window: '#3B82F6',         // Blue
+  door: '#F59E0B',           // Amber
+  garage: '#6366F1',         // Indigo
+  siding: '#10B981',         // Emerald
+  roof: '#EF4444',           // Red
+  gable: '#EC4899',          // Pink
+  building: '#8B5CF6',       // Purple (internal)
+  exterior_wall: '#10B981',  // Same as siding (legacy compatibility)
+  '': '#6B7280',             // Gray - unclassified
 };
+
+/** Classes that users can select in the UI dropdown */
+export const USER_SELECTABLE_CLASSES: DetectionClass[] = [
+  'siding',
+  'window',
+  'door',
+  'garage',
+  'roof',
+  'gable',
+];
 
 export const CONFIDENCE_THRESHOLDS = {
   high: 0.85,
@@ -345,6 +389,6 @@ export function getConfidenceLevel(confidence: number): ConfidenceLevel {
   return 'very_low';
 }
 
-export function getDetectionColor(detectionClass: DetectionClass): string {
+export function getDetectionColor(detectionClass: DetectionClass | InternalDetectionClass): string {
   return DETECTION_CLASS_COLORS[detectionClass] ?? DETECTION_CLASS_COLORS[''];
 }

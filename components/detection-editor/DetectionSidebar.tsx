@@ -1,6 +1,6 @@
 'use client';
 
-import React, { memo, useState, useMemo, useEffect } from 'react';
+import React, { memo, useState, useMemo, useEffect, useRef } from 'react';
 import {
   FileImage,
   Layers,
@@ -17,6 +17,7 @@ import {
   CornerDownRight,
   Ruler,
   Loader2,
+  SlidersHorizontal,
 } from 'lucide-react';
 import type {
   ExtractionPage,
@@ -24,11 +25,14 @@ import type {
   ExtractionElevationCalcs,
   ExtractionJobTotals,
   DetectionClass,
+  AllDetectionClasses,
   DetectionStatus,
   Phase4Data,
 } from '@/lib/types/extraction';
 import { DETECTION_CLASS_COLORS, CONFIDENCE_THRESHOLDS } from '@/lib/types/extraction';
 import { getPhase4Data, calculateLinearElements } from '@/lib/api/extractionApi';
+import ClassSelector from './PropertiesPanel/ClassSelector';
+import SelectionProperties from './PropertiesPanel/SelectionProperties';
 
 // =============================================================================
 // Types
@@ -47,9 +51,12 @@ export interface DetectionSidebarProps {
   showDeleted: boolean;
   onShowDeletedChange: (show: boolean) => void;
   jobId: string; // For Phase 4 data fetching
+  // Selection properties section
+  selectedDetections: ExtractionDetection[];
+  onClassChange: (detectionIds: string[], newClass: DetectionClass) => void;
 }
 
-type TabType = 'pages' | 'detections' | 'totals';
+type TabType = 'pages' | 'detections' | 'properties' | 'totals';
 
 // =============================================================================
 // Constants
@@ -58,6 +65,7 @@ type TabType = 'pages' | 'detections' | 'totals';
 const TABS: { id: TabType; icon: typeof FileImage; label: string }[] = [
   { id: 'pages', icon: FileImage, label: 'Pages' },
   { id: 'detections', icon: Layers, label: 'Detections' },
+  { id: 'properties', icon: SlidersHorizontal, label: 'Properties' },
   { id: 'totals', icon: Calculator, label: 'Totals' },
 ];
 
@@ -69,12 +77,14 @@ const STATUS_OPTIONS: { value: DetectionStatus | 'all'; label: string }[] = [
   { value: 'deleted', label: 'Deleted' },
 ];
 
-const CLASS_ORDER: DetectionClass[] = [
+// Note: Uses AllDetectionClasses to support legacy 'exterior_wall'/'building' from DB
+const CLASS_ORDER: AllDetectionClasses[] = [
+  'siding',
   'window',
   'door',
   'garage',
-  'exterior_wall',
-  'building',
+  'exterior_wall', // Legacy - kept for backward compatibility
+  'building',      // Internal class for gross facade
   'roof',
   'gable',
 ];
@@ -83,7 +93,7 @@ const CLASS_ORDER: DetectionClass[] = [
 // Helper Functions
 // =============================================================================
 
-function formatClassName(cls: DetectionClass): string {
+function formatClassName(cls: AllDetectionClasses | ''): string {
   if (!cls) return 'Unknown';
   return cls
     .split('_')
@@ -245,7 +255,7 @@ const DetectionItem = memo(function DetectionItem({
 });
 
 interface DetectionGroupProps {
-  detectionClass: DetectionClass;
+  detectionClass: AllDetectionClasses;
   detections: ExtractionDetection[];
   isExpanded: boolean;
   onToggle: () => void;
@@ -360,9 +370,11 @@ const DetectionSidebar = memo(function DetectionSidebar({
   showDeleted,
   onShowDeletedChange,
   jobId,
+  selectedDetections,
+  onClassChange,
 }: DetectionSidebarProps) {
   const [activeTab, setActiveTab] = useState<TabType>('detections');
-  const [expandedClasses, setExpandedClasses] = useState<Set<DetectionClass>>(
+  const [expandedClasses, setExpandedClasses] = useState<Set<AllDetectionClasses>>(
     new Set(CLASS_ORDER)
   );
   const [filterStatus, setFilterStatus] = useState<DetectionStatus | 'all'>('all');
@@ -371,6 +383,15 @@ const DetectionSidebar = memo(function DetectionSidebar({
   const [phase4Data, setPhase4Data] = useState<Phase4Data | null>(null);
   const [phase4Loading, setPhase4Loading] = useState(false);
   const [phase4Expanded, setPhase4Expanded] = useState(true);
+
+  // Auto-switch to Properties tab when selection changes from empty to non-empty
+  const prevSelectedCountRef = useRef(0);
+  useEffect(() => {
+    if (prevSelectedCountRef.current === 0 && selectedDetections.length > 0) {
+      setActiveTab('properties');
+    }
+    prevSelectedCountRef.current = selectedDetections.length;
+  }, [selectedDetections.length]);
 
   // Load Phase 4 data when jobId changes or tab switches to totals
   useEffect(() => {
@@ -436,22 +457,23 @@ const DetectionSidebar = memo(function DetectionSidebar({
 
   // Group by class
   const groupedDetections = useMemo(() => {
-    const groups = new Map<DetectionClass, ExtractionDetection[]>();
+    const groups = new Map<AllDetectionClasses, ExtractionDetection[]>();
 
     for (const cls of CLASS_ORDER) {
       groups.set(cls, []);
     }
 
     for (const detection of filteredDetections) {
-      const cls = detection.class || '';
-      if (!groups.has(cls as DetectionClass)) {
-        groups.set(cls as DetectionClass, []);
+      // Cast to handle legacy 'exterior_wall'/'building' values from DB
+      const cls = (detection.class || '') as AllDetectionClasses;
+      if (!groups.has(cls)) {
+        groups.set(cls, []);
       }
-      groups.get(cls as DetectionClass)!.push(detection);
+      groups.get(cls)!.push(detection);
     }
 
     // Sort by detection_index within each group
-    for (const [cls, dets] of groups) {
+    for (const [, dets] of groups) {
       dets.sort((a, b) => a.detection_index - b.detection_index);
     }
 
@@ -465,7 +487,7 @@ const DetectionSidebar = memo(function DetectionSidebar({
     return groups;
   }, [filteredDetections]);
 
-  const toggleClassExpanded = (cls: DetectionClass) => {
+  const toggleClassExpanded = (cls: AllDetectionClasses) => {
     setExpandedClasses((prev) => {
       const next = new Set(prev);
       if (next.has(cls)) {
@@ -488,13 +510,16 @@ const DetectionSidebar = memo(function DetectionSidebar({
         {TABS.map((tab) => {
           const Icon = tab.icon;
           const isActive = activeTab === tab.id;
+          const isPropertiesDisabled = tab.id === 'properties' && selectedDetections.length === 0;
           return (
             <button
               key={tab.id}
               type="button"
               onClick={() => setActiveTab(tab.id)}
+              title={tab.label}
               className={`
-                flex-1 flex items-center justify-center gap-1.5 py-3 text-sm font-medium transition-colors
+                flex-1 flex items-center justify-center py-3 transition-colors relative
+                ${isPropertiesDisabled ? 'opacity-50' : ''}
                 ${
                   isActive
                     ? 'text-blue-600 dark:text-blue-400 border-b-2 border-blue-600 dark:border-blue-400'
@@ -502,11 +527,17 @@ const DetectionSidebar = memo(function DetectionSidebar({
                 }
               `}
             >
-              <Icon className="w-4 h-4" />
-              <span className="hidden sm:inline">{tab.label}</span>
+              <Icon className="w-5 h-5" />
+              {/* Badge for detection count */}
               {tab.id === 'detections' && totalDetections > 0 && (
-                <span className="ml-1 px-1.5 py-0.5 text-xs bg-gray-200 dark:bg-gray-700 rounded-full">
-                  {totalDetections}
+                <span className="absolute top-1 right-1 min-w-[18px] h-[18px] bg-gray-500 text-white text-[10px] font-medium rounded-full flex items-center justify-center px-1">
+                  {totalDetections > 99 ? '99+' : totalDetections}
+                </span>
+              )}
+              {/* Badge for selection count */}
+              {tab.id === 'properties' && selectedDetections.length > 0 && (
+                <span className="absolute top-1 right-1 min-w-[18px] h-[18px] bg-blue-500 text-white text-[10px] font-medium rounded-full flex items-center justify-center px-1">
+                  {selectedDetections.length > 99 ? '99+' : selectedDetections.length}
                 </span>
               )}
             </button>
@@ -589,6 +620,66 @@ const DetectionSidebar = memo(function DetectionSidebar({
                 </div>
               )}
             </div>
+          </div>
+        )}
+
+        {/* Properties Tab */}
+        {activeTab === 'properties' && (
+          <div className="p-3 space-y-4">
+            {selectedDetections.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-8 text-center">
+                <SlidersHorizontal className="w-8 h-8 text-gray-400 mb-2" />
+                <p className="text-sm text-gray-500 dark:text-gray-400">
+                  Select a detection to view properties
+                </p>
+              </div>
+            ) : (
+              <>
+                {/* Selection Header */}
+                <div className="text-sm font-medium text-gray-900 dark:text-gray-100">
+                  {selectedDetections.length === 1
+                    ? '1 Detection Selected'
+                    : `${selectedDetections.length} Detections Selected`}
+                </div>
+
+                {/* Class Selector */}
+                <div className="space-y-1">
+                  <span className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                    Class
+                  </span>
+                  <ClassSelector
+                    selectedDetections={selectedDetections}
+                    onClassChange={(newClass) => {
+                      const ids = selectedDetections.map((d) => d.id);
+                      onClassChange(ids, newClass);
+                    }}
+                  />
+                </div>
+
+                {/* Selection Properties (status, measurements) */}
+                <SelectionProperties selectedDetections={selectedDetections} />
+
+                {/* Selected Items List (for multi-select context) */}
+                {selectedDetections.length > 1 && (
+                  <div className="space-y-1">
+                    <span className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                      Selected Items
+                    </span>
+                    <div className="space-y-1 max-h-40 overflow-y-auto">
+                      {selectedDetections.map((d, idx) => (
+                        <div
+                          key={d.id}
+                          className="text-xs text-gray-600 dark:text-gray-300 flex justify-between"
+                        >
+                          <span className="capitalize">{d.class || 'Unknown'} #{idx + 1}</span>
+                          <span>{d.area_sf?.toFixed(1)} SF</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
           </div>
         )}
 

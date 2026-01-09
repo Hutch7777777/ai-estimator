@@ -19,6 +19,7 @@ const WEBHOOK_URL =
   process.env.NEXT_PUBLIC_N8N_WEBHOOK_URL ||
   'https://n8n-production-293e.up.railway.app';
 const SYNC_ENDPOINT = `${WEBHOOK_URL}/webhook/detection-edit-sync`;
+const VALIDATE_ENDPOINT = `${WEBHOOK_URL}/webhook/validate-detections`;
 const MAX_RETRIES = 3;
 const RETRY_DELAYS = [1000, 2000, 4000]; // ms
 
@@ -85,6 +86,42 @@ export interface UseDetectionSyncReturn {
   pendingEdits: number;
   lastError: Error | null;
   clearError: () => void;
+}
+
+// =============================================================================
+// Validation Types (for local-first editing)
+// =============================================================================
+
+export interface ValidationDetection {
+  page_id: string;
+  class: DetectionClass;
+  pixel_x: number;
+  pixel_y: number;
+  pixel_width: number;
+  pixel_height: number;
+  confidence: number;
+  source_detection_id: string;
+  is_deleted: boolean;
+  detection_index: number;
+  matched_tag: string | null;
+  polygon_points?: Array<{ x: number; y: number }> | null;
+}
+
+export interface ValidationRequest {
+  job_id: string;
+  detections: ValidationDetection[];
+}
+
+export interface ValidationResult {
+  success: boolean;
+  message?: string;
+  error?: string;
+  updated_count?: number;
+  deleted_count?: number;
+  created_count?: number;
+  elevation_totals?: ExtractionElevationCalcs[];
+  job_totals?: ExtractionJobTotals;
+  timestamp?: string;
 }
 
 // =============================================================================
@@ -171,10 +208,20 @@ export function useDetectionSync(
             throw new Error(`HTTP ${response.status}: ${response.statusText}`);
           }
 
-          const data: DetectionEditResponse = await response.json();
+          // Parse response with better error handling for non-JSON responses
+          let data: DetectionEditResponse;
+          let responseText: string | undefined;
+          try {
+            responseText = await response.text();
+            data = responseText ? JSON.parse(responseText) : null;
+          } catch (parseError) {
+            console.error('Failed to parse response:', parseError);
+            console.error('Response text:', responseText?.substring(0, 500));
+            throw new Error(`Invalid response from server: ${responseText?.substring(0, 100) || 'empty response'}`);
+          }
 
-          if (!data.success) {
-            throw new Error(data.error || 'Sync failed');
+          if (!data || !data.success) {
+            throw new Error(data?.error || 'Sync failed');
           }
 
           // Success - cleanup and call callbacks
@@ -428,4 +475,100 @@ export function createOptimisticReclassify(
     status: 'edited',
     edited_at: new Date().toISOString(),
   };
+}
+
+// =============================================================================
+// Batch Validation Function (for local-first editing)
+// =============================================================================
+
+/**
+ * Validates and saves all local detection changes to the database.
+ * This is the batch save endpoint for local-first editing mode.
+ *
+ * @param jobId - The extraction job ID
+ * @param detections - All detections from all pages (including deleted ones)
+ * @returns ValidationResult with success status and updated totals
+ */
+export async function validateDetections(
+  jobId: string,
+  detections: ExtractionDetection[]
+): Promise<ValidationResult> {
+  try {
+    const validationRequest: ValidationRequest = {
+      job_id: jobId,
+      detections: detections.map((d) => ({
+        page_id: d.page_id,
+        class: d.class,
+        pixel_x: d.pixel_x,
+        pixel_y: d.pixel_y,
+        pixel_width: d.pixel_width,
+        pixel_height: d.pixel_height,
+        confidence: d.confidence,
+        source_detection_id: d.id,
+        is_deleted: d.status === 'deleted',
+        detection_index: d.detection_index,
+        matched_tag: d.matched_tag,
+        polygon_points: d.polygon_points ?? null,
+      })),
+    };
+
+    console.log('[validateDetections] Sending validation request:', {
+      jobId,
+      detectionCount: detections.length,
+      endpoint: VALIDATE_ENDPOINT,
+    });
+
+    const response = await fetch(VALIDATE_ENDPOINT, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(validationRequest),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error('[validateDetections] HTTP error:', response.status, errorText);
+      return {
+        success: false,
+        error: `HTTP ${response.status}: ${response.statusText}`,
+        timestamp: new Date().toISOString(),
+      };
+    }
+
+    // Parse response with better error handling
+    let result: ValidationResult;
+    let responseText: string | undefined;
+    try {
+      responseText = await response.text();
+      result = responseText ? JSON.parse(responseText) : { success: false, error: 'Empty response' };
+    } catch (parseError) {
+      console.error('[validateDetections] Failed to parse response:', parseError);
+      console.error('[validateDetections] Response text:', responseText?.substring(0, 500));
+      return {
+        success: false,
+        error: `Invalid response from server: ${responseText?.substring(0, 100) || 'empty response'}`,
+        timestamp: new Date().toISOString(),
+      };
+    }
+
+    console.log('[validateDetections] Response:', {
+      success: result.success,
+      updatedCount: result.updated_count,
+      deletedCount: result.deleted_count,
+      createdCount: result.created_count,
+    });
+
+    return {
+      ...result,
+      timestamp: result.timestamp || new Date().toISOString(),
+    };
+  } catch (error) {
+    console.error('[validateDetections] Error:', error);
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Unknown error',
+      timestamp: new Date().toISOString(),
+    };
+  }
 }

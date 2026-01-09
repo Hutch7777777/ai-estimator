@@ -2,23 +2,29 @@
 
 import React, { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import { Loader2, AlertCircle, RefreshCw, Eye, EyeOff, X, Layers, Home } from 'lucide-react';
+import { toast } from 'sonner';
 import {
   useExtractionData,
   useDetectionSync,
+  validateDetections,
   createOptimisticMove,
   createOptimisticMoveAndResize,
   createOptimisticDelete,
   createOptimisticVerify,
   createOptimisticReclassify,
 } from '@/lib/hooks';
+import { calculateRealWorldMeasurements } from '@/lib/utils/coordinates';
 import type {
   ViewTransform,
   ToolMode,
   DetectionClass,
+  AllDetectionClasses,
   ExtractionDetection,
+  PolygonPoint,
 } from '@/lib/types/extraction';
 import DetectionToolbar from './DetectionToolbar';
-import DetectionCanvas from './DetectionCanvas';
+import KonvaDetectionCanvas from './KonvaDetectionCanvas';
+import type { PolygonUpdatePayload } from './KonvaDetectionPolygon';
 import DetectionSidebar from './DetectionSidebar';
 
 // =============================================================================
@@ -51,14 +57,15 @@ const DEFAULT_IMAGE_WIDTH = 1920;
 const DEFAULT_IMAGE_HEIGHT = 1080;
 
 // Class shortcuts mapping (1-7 keys)
-const CLASS_SHORTCUTS: DetectionClass[] = [
+// Note: Uses AllDetectionClasses to include internal classes for keyboard shortcuts
+const CLASS_SHORTCUTS: AllDetectionClasses[] = [
   'window',
   'door',
   'garage',
-  'building',
-  'exterior_wall',
+  'siding',
   'roof',
   'gable',
+  'building', // Internal class - still accessible via shortcut for power users
 ];
 
 // =============================================================================
@@ -137,16 +144,22 @@ export default function DetectionEditor({
     addDetectionLocally,
     updateJobTotalsLocally,
     updateElevationCalcsLocally,
+    markAsRecentlyEdited,
+    // Local-first editing
+    hasUnsavedChanges,
+    canUndo,
+    canRedo,
+    undo,
+    redo,
+    resetToSaved,
+    clearUnsavedChanges,
+    restoreDrafts,
+    getAllDetections,
   } = useExtractionData(jobId, { includeDeleted: true });
 
+  // Note: In local-first mode, we only use useDetectionSync for legacy/fallback purposes
+  // All edits now stay local until explicit validation
   const {
-    verifyDetection,
-    moveDetection,
-    resizeDetection,
-    moveAndResizeDetection,
-    deleteDetection,
-    reclassifyDetection,
-    createDetection,
     isSyncing,
     pendingEdits,
     lastError: syncError,
@@ -156,49 +169,23 @@ export default function DetectionEditor({
     pageId: currentPageId || '',
     scaleRatio: currentPage?.scale_ratio || 64,
     dpi: currentPage?.dpi || 100,
-    onSuccess: (response) => {
-      if (response.updated_detection) {
-        // For move/resize/verify operations, preserve the original class
-        // The server should not change the class, but some backends return "Unknown"
-        // Only reclassify should actually change the class
-        const editType = response.edit_type;
-        const preserveClassTypes: string[] = ['move', 'resize', 'verify'];
-
-        if (preserveClassTypes.includes(editType) && response.detection_id) {
-          // Find the current detection to preserve its class
-          const currentDetection = currentPageDetections.find(
-            (d) => d.id === response.detection_id
-          );
-          if (currentDetection) {
-            // Merge server response with preserved class
-            updateDetectionLocally({
-              ...response.updated_detection,
-              class: currentDetection.class,
-            });
-          } else {
-            // Fallback: use server response as-is
-            updateDetectionLocally(response.updated_detection);
-          }
-        } else {
-          // For reclassify, create, delete - use server response
-          updateDetectionLocally(response.updated_detection);
-        }
-      }
-      if (response.elevation_totals && currentPageId) {
-        updateElevationCalcsLocally(currentPageId, response.elevation_totals);
-      }
-      if (response.job_totals) {
-        updateJobTotalsLocally(response.job_totals);
-      }
-    },
     onError: (err) => onError?.(err),
   });
+
+  // Validation state
+  const [isValidating, setIsValidating] = useState(false);
+
+  // Draft recovery modal state
+  const [showDraftRecovery, setShowDraftRecovery] = useState(false);
+  const [draftTimestamp, setDraftTimestamp] = useState<number | null>(null);
+  const draftCheckDoneRef = useRef(false);
 
   // ============================================================================
   // Local UI State
   // ============================================================================
 
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [selectedDetectionId, setSelectedDetectionId] = useState<string | null>(null);
   const [hoveredId, setHoveredId] = useState<string | null>(null);
   const [toolMode, setToolMode] = useState<ToolMode>('select');
   const [createClass, setCreateClass] = useState<DetectionClass>('window');
@@ -208,6 +195,10 @@ export default function DetectionEditor({
   const [showArea, setShowArea] = useState(true);
   const [isApproving, setIsApproving] = useState(false);
   const [isGeneratingMarkup, setIsGeneratingMarkup] = useState(false);
+
+  // Canvas container size tracking for Konva
+  const canvasContainerRef = useRef<HTMLDivElement>(null);
+  const [canvasContainerSize, setCanvasContainerSize] = useState({ width: 800, height: 600 });
 
   // Markup display state (PNG image view)
   const [markupUrl, setMarkupUrl] = useState<string | null>(null);
@@ -274,11 +265,531 @@ export default function DetectionEditor({
 
   useEffect(() => {
     setSelectedIds(new Set());
+    setSelectedDetectionId(null);
     setHoveredId(null);
     // Clear markup when changing pages since markup is page-specific
     setMarkupUrl(null);
     setShowMarkup(false);
   }, [currentPageId]);
+
+  // ============================================================================
+  // Canvas Container Size Tracking
+  // ============================================================================
+
+  useEffect(() => {
+    const container = canvasContainerRef.current;
+    if (!container) {
+      console.log('[DetectionEditor] Canvas container ref is null');
+      return;
+    }
+
+    const updateSize = () => {
+      const rect = container.getBoundingClientRect();
+      console.log('[DetectionEditor] Canvas container size update:', {
+        clientWidth: container.clientWidth,
+        clientHeight: container.clientHeight,
+        boundingRect: { width: rect.width, height: rect.height },
+      });
+
+      // Use bounding rect dimensions, fallback to client dimensions, then window
+      const width = rect.width || container.clientWidth || window.innerWidth - 400;
+      const height = rect.height || container.clientHeight || window.innerHeight - 200;
+
+      if (width > 0 && height > 0) {
+        setCanvasContainerSize({ width, height });
+      }
+    };
+
+    // Initial size
+    updateSize();
+
+    // Also try after a short delay (in case layout hasn't settled)
+    const timeoutId = setTimeout(updateSize, 100);
+    // And another slightly later for slow renders
+    const timeoutId2 = setTimeout(updateSize, 500);
+
+    // Observe resize
+    const resizeObserver = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        const { width, height } = entry.contentRect;
+        console.log('[DetectionEditor] ResizeObserver fired:', { width, height });
+        if (width > 0 && height > 0) {
+          setCanvasContainerSize({ width, height });
+        }
+      }
+    });
+    resizeObserver.observe(container);
+
+    // Also listen to window resize as fallback
+    const handleWindowResize = () => {
+      updateSize();
+    };
+    window.addEventListener('resize', handleWindowResize);
+
+    return () => {
+      clearTimeout(timeoutId);
+      clearTimeout(timeoutId2);
+      resizeObserver.disconnect();
+      window.removeEventListener('resize', handleWindowResize);
+    };
+  }, [currentPage]); // Re-run when currentPage changes to re-measure after data loads
+
+  // ============================================================================
+  // Selection Handlers
+  // ============================================================================
+
+  const handleSelect = useCallback((id: string, addToSelection: boolean) => {
+    setSelectedIds((prev) => {
+      if (addToSelection) {
+        const next = new Set(prev);
+        if (next.has(id)) {
+          next.delete(id);
+        } else {
+          next.add(id);
+        }
+        return next;
+      } else {
+        return new Set([id]);
+      }
+    });
+  }, []);
+
+  const handleClearSelection = useCallback(() => {
+    setSelectedIds(new Set());
+  }, []);
+
+  const handleHover = useCallback((id: string | null) => {
+    setHoveredId(id);
+  }, []);
+
+  // ============================================================================
+  // Detection Edit Handlers (Konva-compatible)
+  // ============================================================================
+
+  // Handle detection move - receives detection object and new center coordinates
+  // Local-first: Only updates local state, no sync to server
+  const handleDetectionMove = useCallback(
+    (detection: ExtractionDetection, newCoords: { pixel_x: number; pixel_y: number }) => {
+      // Apply optimistic update with the absolute new position
+      const optimistic = createOptimisticMove(detection, newCoords.pixel_x, newCoords.pixel_y);
+
+      // Update local state only - no server sync in local-first mode
+      updateDetectionLocally(optimistic);
+    },
+    [updateDetectionLocally]
+  );
+
+  // Handle detection resize - receives detection object and new bounds (center coordinates)
+  // Local-first: Only updates local state, no sync to server
+  const handleDetectionResize = useCallback(
+    (
+      detection: ExtractionDetection,
+      newCoords: { pixel_x: number; pixel_y: number; pixel_width: number; pixel_height: number }
+    ) => {
+      // CRITICAL: Derive scale_ratio from the detection's existing measurements
+      // This ensures we use the same scale that was used to create the original measurements
+      // Formula: scale_ratio = pixel_width / real_width_ft
+      let scaleRatio: number;
+
+      if (detection.real_width_ft && detection.real_width_ft > 0 && detection.pixel_width > 0) {
+        // Derive from existing detection measurements (most accurate)
+        scaleRatio = detection.pixel_width / detection.real_width_ft;
+      } else if (currentPage?.scale_ratio) {
+        // Fallback to page scale_ratio
+        scaleRatio = currentPage.scale_ratio;
+      } else {
+        // Last resort default
+        scaleRatio = 64;
+      }
+
+      // Calculate new real-world measurements using the derived scale_ratio
+      const measurements = calculateRealWorldMeasurements(
+        newCoords.pixel_width,
+        newCoords.pixel_height,
+        scaleRatio
+      );
+
+      // Create optimistic update with measurements
+      const optimistic: ExtractionDetection = {
+        ...detection,
+        pixel_x: newCoords.pixel_x,
+        pixel_y: newCoords.pixel_y,
+        pixel_width: newCoords.pixel_width,
+        pixel_height: newCoords.pixel_height,
+        real_width_ft: measurements.real_width_ft,
+        real_height_ft: measurements.real_height_ft,
+        real_width_in: measurements.real_width_in,
+        real_height_in: measurements.real_height_in,
+        area_sf: measurements.area_sf,
+        perimeter_lf: measurements.perimeter_lf,
+        status: 'edited',
+        edited_at: new Date().toISOString(),
+        original_bbox: detection.original_bbox || {
+          pixel_x: detection.pixel_x,
+          pixel_y: detection.pixel_y,
+          pixel_width: detection.pixel_width,
+          pixel_height: detection.pixel_height,
+        },
+      };
+
+      // Update local state only - no server sync in local-first mode
+      updateDetectionLocally(optimistic);
+    },
+    [currentPage?.scale_ratio, updateDetectionLocally]
+  );
+
+  // Handle polygon update - receives detection and complete update payload from polygon corner drag
+  // Local-first: Only updates local state, no sync to server
+  const handleDetectionPolygonUpdate = useCallback(
+    (detection: ExtractionDetection, updates: PolygonUpdatePayload) => {
+      // Create optimistic update with all polygon data
+      const optimistic: ExtractionDetection = {
+        ...detection,
+        polygon_points: updates.polygon_points,
+        pixel_x: updates.pixel_x,
+        pixel_y: updates.pixel_y,
+        pixel_width: updates.pixel_width,
+        pixel_height: updates.pixel_height,
+        area_sf: updates.area_sf,
+        perimeter_lf: updates.perimeter_lf,
+        real_width_ft: updates.real_width_ft,
+        real_height_ft: updates.real_height_ft,
+        status: 'edited',
+        edited_at: new Date().toISOString(),
+        original_bbox: detection.original_bbox || {
+          pixel_x: detection.pixel_x,
+          pixel_y: detection.pixel_y,
+          pixel_width: detection.pixel_width,
+          pixel_height: detection.pixel_height,
+        },
+      };
+
+      // Update local state only - no server sync in local-first mode
+      updateDetectionLocally(optimistic);
+    },
+    [updateDetectionLocally]
+  );
+
+  // Handle detection creation - receives bounds (center coordinates) with class
+  // Local-first: Only updates local state, no sync to server
+  const handleDetectionCreate = useCallback(
+    (newCoords: {
+      pixel_x: number;
+      pixel_y: number;
+      pixel_width: number;
+      pixel_height: number;
+      class: DetectionClass;
+      polygon_points?: PolygonPoint[];
+      area_sf?: number;
+      perimeter_lf?: number;
+      real_width_ft?: number;
+      real_height_ft?: number;
+    }) => {
+      // Use pre-calculated measurements if provided (polygon), otherwise calculate from bounding box
+      const measurements = newCoords.area_sf !== undefined
+        ? {
+            area_sf: newCoords.area_sf,
+            perimeter_lf: newCoords.perimeter_lf!,
+            real_width_ft: newCoords.real_width_ft!,
+            real_height_ft: newCoords.real_height_ft!,
+            real_width_in: newCoords.real_width_ft! * 12,
+            real_height_in: newCoords.real_height_ft! * 12,
+          }
+        : calculateRealWorldMeasurements(
+            newCoords.pixel_width,
+            newCoords.pixel_height,
+            currentPage?.scale_ratio || 64
+          );
+
+      // Generate valid UUID for new detection (required for PostgreSQL)
+      const tempId = crypto.randomUUID();
+
+      const newDetection: ExtractionDetection = {
+        id: tempId,
+        job_id: job?.id || '',
+        page_id: currentPage?.id || '',
+        class: newCoords.class,
+        detection_index: currentPageDetections.length,
+        confidence: 1.0,
+        pixel_x: newCoords.pixel_x,
+        pixel_y: newCoords.pixel_y,
+        pixel_width: newCoords.pixel_width,
+        pixel_height: newCoords.pixel_height,
+        real_width_ft: measurements.real_width_ft,
+        real_height_ft: measurements.real_height_ft,
+        real_width_in: measurements.real_width_in,
+        real_height_in: measurements.real_height_in,
+        area_sf: measurements.area_sf,
+        perimeter_lf: measurements.perimeter_lf,
+        is_triangle: false,
+        matched_tag: null,
+        created_at: new Date().toISOString(),
+        status: 'edited',
+        edited_by: null,
+        edited_at: new Date().toISOString(),
+        original_bbox: null,
+        polygon_points: newCoords.polygon_points || null,
+      };
+
+      // Add to local state only - no server sync in local-first mode
+      addDetectionLocally(newDetection);
+      setSelectedDetectionId(tempId);
+      setSelectedIds(new Set([tempId]));
+      setToolMode('select');
+    },
+    [job?.id, currentPage?.id, currentPage?.scale_ratio, currentPageDetections.length, addDetectionLocally]
+  );
+
+  // Legacy handlers for backward compatibility with old canvas
+  const handleMoveDetection = useCallback(
+    (id: string, newX: number, newY: number) => {
+      const detection = currentPageDetections.find((d) => d.id === id);
+      if (!detection) return;
+      handleDetectionMove(detection, { pixel_x: newX, pixel_y: newY });
+    },
+    [currentPageDetections, handleDetectionMove]
+  );
+
+  const handleResizeDetection = useCallback(
+    (id: string, newBounds: { x: number; y: number; width: number; height: number }) => {
+      const detection = currentPageDetections.find((d) => d.id === id);
+      if (!detection) return;
+      handleDetectionResize(detection, {
+        pixel_x: newBounds.x,
+        pixel_y: newBounds.y,
+        pixel_width: newBounds.width,
+        pixel_height: newBounds.height,
+      });
+    },
+    [currentPageDetections, handleDetectionResize]
+  );
+
+  const handleCreateDetectionLegacy = useCallback(
+    (
+      bounds: { x: number; y: number; width: number; height: number },
+      detectionClass: DetectionClass
+    ) => {
+      handleDetectionCreate({
+        pixel_x: bounds.x,
+        pixel_y: bounds.y,
+        pixel_width: bounds.width,
+        pixel_height: bounds.height,
+        class: detectionClass,
+      });
+    },
+    [handleDetectionCreate]
+  );
+
+  // Local-first: Only updates local state, no sync to server
+  const handleVerifyDetection = useCallback(
+    (id: string) => {
+      const detection = currentPageDetections.find((d) => d.id === id);
+      if (!detection) return;
+
+      // Apply local update only - no server sync in local-first mode
+      const optimistic = createOptimisticVerify(detection);
+      updateDetectionLocally(optimistic);
+    },
+    [currentPageDetections, updateDetectionLocally]
+  );
+
+  const handleVerifySelected = useCallback(() => {
+    selectedIds.forEach((id) => {
+      handleVerifyDetection(id);
+    });
+  }, [selectedIds, handleVerifyDetection]);
+
+  // Local-first: Only updates local state, no sync to server
+  const handleDeleteSelected = useCallback(() => {
+    if (selectedIds.size === 0) return;
+
+    selectedIds.forEach((id) => {
+      const detection = currentPageDetections.find((d) => d.id === id);
+      if (!detection) return;
+
+      // Apply local update only - no server sync in local-first mode
+      const optimistic = createOptimisticDelete(detection);
+      updateDetectionLocally(optimistic);
+    });
+
+    // Clear selection after delete
+    setSelectedIds(new Set());
+  }, [selectedIds, currentPageDetections, updateDetectionLocally]);
+
+  // Handle class change from PropertiesPanel
+  // Local-first: Only updates local state, no sync to server
+  const handleClassChange = useCallback(
+    (detectionIds: string[], newClass: DetectionClass) => {
+      if (detectionIds.length === 0) return;
+
+      detectionIds.forEach((id) => {
+        const detection = currentPageDetections.find((d) => d.id === id);
+        if (!detection) return;
+
+        // Apply optimistic update with new class
+        const optimistic = createOptimisticReclassify(detection, newClass);
+        updateDetectionLocally(optimistic);
+      });
+
+      console.log(
+        `[DetectionEditor] Changed class to '${newClass}' for ${detectionIds.length} detection(s)`
+      );
+    },
+    [currentPageDetections, updateDetectionLocally]
+  );
+
+  // ============================================================================
+  // Zoom Handlers
+  // ============================================================================
+
+  const handleZoomIn = useCallback(() => {
+    setTransform((prev) => ({
+      ...prev,
+      scale: Math.min(MAX_SCALE, prev.scale * ZOOM_STEP),
+    }));
+  }, []);
+
+  const handleZoomOut = useCallback(() => {
+    setTransform((prev) => ({
+      ...prev,
+      scale: Math.max(MIN_SCALE, prev.scale / ZOOM_STEP),
+    }));
+  }, []);
+
+  const handleZoomReset = useCallback(() => {
+    setTransform(DEFAULT_TRANSFORM);
+  }, []);
+
+  // ============================================================================
+  // Local-First Editing Handlers
+  // ============================================================================
+
+  // Handle validation - saves all local changes to database
+  const handleValidate = useCallback(async () => {
+    if (!jobId || !hasUnsavedChanges) return;
+
+    setIsValidating(true);
+
+    try {
+      const allDetections = getAllDetections();
+      console.log('[DetectionEditor] Validating', allDetections.length, 'detections');
+
+      const result = await validateDetections(jobId, allDetections);
+
+      if (result.success) {
+        // Clear undo/redo stacks and localStorage
+        clearUnsavedChanges();
+        toast.success('Changes saved successfully', {
+          description: `Updated ${result.updated_count || 0} detections`,
+        });
+      } else {
+        toast.error('Validation failed', {
+          description: result.error || 'Unknown error',
+        });
+      }
+    } catch (err) {
+      console.error('[DetectionEditor] Validation error:', err);
+      toast.error('Validation failed', {
+        description: err instanceof Error ? err.message : 'Unknown error',
+      });
+    } finally {
+      if (isMountedRef.current) {
+        setIsValidating(false);
+      }
+    }
+  }, [jobId, hasUnsavedChanges, getAllDetections, clearUnsavedChanges]);
+
+  // Handle reset - discard all local changes
+  const handleReset = useCallback(async () => {
+    if (!hasUnsavedChanges) return;
+    await resetToSaved();
+    toast.info('Changes discarded', {
+      description: 'Reset to last saved state',
+    });
+  }, [hasUnsavedChanges, resetToSaved]);
+
+  // Handle draft recovery - restore from localStorage
+  const handleRestoreDrafts = useCallback(() => {
+    if (typeof window === 'undefined') return;
+
+    try {
+      const draftKey = `detection-drafts-${jobId}`;
+      const draftData = localStorage.getItem(draftKey);
+
+      if (draftData) {
+        const parsed = JSON.parse(draftData);
+        const detectionsArray: [string, ExtractionDetection[]][] = parsed.detections;
+        const restoredMap = new Map<string, ExtractionDetection[]>(detectionsArray);
+
+        restoreDrafts(restoredMap);
+        toast.success('Drafts restored', {
+          description: 'Your unsaved changes have been recovered',
+        });
+      }
+    } catch (err) {
+      console.error('[DetectionEditor] Failed to restore drafts:', err);
+      toast.error('Failed to restore drafts');
+    }
+
+    setShowDraftRecovery(false);
+  }, [jobId, restoreDrafts]);
+
+  // Handle discard drafts
+  const handleDiscardDrafts = useCallback(() => {
+    if (typeof window !== 'undefined') {
+      localStorage.removeItem(`detection-drafts-${jobId}`);
+    }
+    setShowDraftRecovery(false);
+    toast.info('Drafts discarded');
+  }, [jobId]);
+
+  // ============================================================================
+  // Draft Recovery Check (on mount)
+  // ============================================================================
+
+  useEffect(() => {
+    if (draftCheckDoneRef.current || typeof window === 'undefined' || loading) return;
+
+    const draftKey = `detection-drafts-${jobId}`;
+    const draftData = localStorage.getItem(draftKey);
+
+    if (draftData) {
+      try {
+        const parsed = JSON.parse(draftData);
+        const age = Date.now() - parsed.timestamp;
+        const maxAge = 60 * 60 * 1000; // 60 minutes
+
+        if (age < maxAge) {
+          setDraftTimestamp(parsed.timestamp);
+          setShowDraftRecovery(true);
+        } else {
+          // Draft is too old, clear it
+          localStorage.removeItem(draftKey);
+        }
+      } catch {
+        localStorage.removeItem(draftKey);
+      }
+    }
+
+    draftCheckDoneRef.current = true;
+  }, [jobId, loading]);
+
+  // ============================================================================
+  // Beforeunload Warning
+  // ============================================================================
+
+  useEffect(() => {
+    if (!hasUnsavedChanges) return;
+
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = 'You have unsaved changes. Are you sure you want to leave?';
+      return e.returnValue;
+    };
+
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [hasUnsavedChanges]);
 
   // ============================================================================
   // Keyboard Shortcuts
@@ -296,9 +807,35 @@ export default function DetectionEditor({
       }
 
       const key = e.key.toLowerCase();
+      const isMeta = e.metaKey || e.ctrlKey;
 
-      // Tool mode shortcuts
-      if (key === 's') {
+      // Undo/Redo/Save shortcuts (Ctrl/Cmd + key)
+      if (isMeta) {
+        // Ctrl/Cmd + Z = Undo (or Ctrl/Cmd + Shift + Z = Redo)
+        if (key === 'z') {
+          e.preventDefault();
+          if (e.shiftKey) {
+            // Redo
+            if (canRedo) redo();
+          } else {
+            // Undo
+            if (canUndo) undo();
+          }
+          return;
+        }
+
+        // Ctrl/Cmd + S = Validate & Save
+        if (key === 's') {
+          e.preventDefault();
+          if (hasUnsavedChanges && !isValidating) {
+            handleValidate();
+          }
+          return;
+        }
+      }
+
+      // Tool mode shortcuts (without Ctrl/Cmd)
+      if (!isMeta && key === 's') {
         e.preventDefault();
         setToolMode('select');
         return;
@@ -340,9 +877,13 @@ export default function DetectionEditor({
 
       // Class shortcuts (1-7)
       const num = parseInt(key);
-      if (num >= 1 && num <= 7) {
+      if (num >= 1 && num <= CLASS_SHORTCUTS.length) {
         e.preventDefault();
-        setCreateClass(CLASS_SHORTCUTS[num - 1]);
+        const cls = CLASS_SHORTCUTS[num - 1];
+        // Only allow setting user-selectable classes (not internal ones like 'building')
+        if (cls !== 'building' && cls !== 'exterior_wall') {
+          setCreateClass(cls as DetectionClass);
+        }
         return;
       }
 
@@ -366,161 +907,7 @@ export default function DetectionEditor({
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [selectedIds]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // ============================================================================
-  // Selection Handlers
-  // ============================================================================
-
-  const handleSelect = useCallback((id: string, addToSelection: boolean) => {
-    setSelectedIds((prev) => {
-      if (addToSelection) {
-        const next = new Set(prev);
-        if (next.has(id)) {
-          next.delete(id);
-        } else {
-          next.add(id);
-        }
-        return next;
-      } else {
-        return new Set([id]);
-      }
-    });
-  }, []);
-
-  const handleClearSelection = useCallback(() => {
-    setSelectedIds(new Set());
-  }, []);
-
-  const handleHover = useCallback((id: string | null) => {
-    setHoveredId(id);
-  }, []);
-
-  // ============================================================================
-  // Detection Edit Handlers
-  // ============================================================================
-
-  // Handler now receives absolute new position instead of delta
-  // This fixes the compounding movement bug where optimistic updates
-  // caused deltas to be applied to already-moved positions
-  const handleMoveDetection = useCallback(
-    (id: string, newX: number, newY: number) => {
-      const detection = currentPageDetections.find((d) => d.id === id);
-      if (!detection) return;
-
-      // Apply optimistic update with the absolute new position
-      const optimistic = createOptimisticMove(detection, newX, newY);
-      updateDetectionLocally(optimistic);
-
-      // Sync to server
-      moveDetection(id, newX, newY);
-    },
-    [currentPageDetections, updateDetectionLocally, moveDetection]
-  );
-
-  const handleResizeDetection = useCallback(
-    (id: string, newBounds: { x: number; y: number; width: number; height: number }) => {
-      const detection = currentPageDetections.find((d) => d.id === id);
-      if (!detection) return;
-
-      // Apply optimistic update
-      const optimistic = createOptimisticMoveAndResize(
-        detection,
-        newBounds.x,
-        newBounds.y,
-        newBounds.width,
-        newBounds.height
-      );
-      updateDetectionLocally(optimistic);
-
-      // Sync to server
-      moveAndResizeDetection(id, newBounds.x, newBounds.y, newBounds.width, newBounds.height);
-    },
-    [currentPageDetections, updateDetectionLocally, moveAndResizeDetection]
-  );
-
-  const handleCreateDetection = useCallback(
-    async (
-      bounds: { x: number; y: number; width: number; height: number },
-      detectionClass: DetectionClass
-    ) => {
-      const response = await createDetection(
-        bounds.x,
-        bounds.y,
-        bounds.width,
-        bounds.height,
-        detectionClass
-      );
-
-      // Select the new detection if created successfully
-      if (response.success && response.detection_id) {
-        setSelectedIds(new Set([response.detection_id]));
-      }
-    },
-    [createDetection]
-  );
-
-  const handleVerifyDetection = useCallback(
-    (id: string) => {
-      const detection = currentPageDetections.find((d) => d.id === id);
-      if (!detection) return;
-
-      // Apply optimistic update
-      const optimistic = createOptimisticVerify(detection);
-      updateDetectionLocally(optimistic);
-
-      // Sync to server
-      verifyDetection(id);
-    },
-    [currentPageDetections, updateDetectionLocally, verifyDetection]
-  );
-
-  const handleVerifySelected = useCallback(() => {
-    selectedIds.forEach((id) => {
-      handleVerifyDetection(id);
-    });
-  }, [selectedIds, handleVerifyDetection]);
-
-  const handleDeleteSelected = useCallback(() => {
-    if (selectedIds.size === 0) return;
-
-    selectedIds.forEach((id) => {
-      const detection = currentPageDetections.find((d) => d.id === id);
-      if (!detection) return;
-
-      // Apply optimistic update
-      const optimistic = createOptimisticDelete(detection);
-      updateDetectionLocally(optimistic);
-
-      // Sync to server
-      deleteDetection(id);
-    });
-
-    // Clear selection after delete
-    setSelectedIds(new Set());
-  }, [selectedIds, currentPageDetections, updateDetectionLocally, deleteDetection]);
-
-  // ============================================================================
-  // Zoom Handlers
-  // ============================================================================
-
-  const handleZoomIn = useCallback(() => {
-    setTransform((prev) => ({
-      ...prev,
-      scale: Math.min(MAX_SCALE, prev.scale * ZOOM_STEP),
-    }));
-  }, []);
-
-  const handleZoomOut = useCallback(() => {
-    setTransform((prev) => ({
-      ...prev,
-      scale: Math.max(MIN_SCALE, prev.scale / ZOOM_STEP),
-    }));
-  }, []);
-
-  const handleZoomReset = useCallback(() => {
-    setTransform(DEFAULT_TRANSFORM);
-  }, []);
+  }, [selectedIds, canUndo, canRedo, undo, redo, hasUnsavedChanges, isValidating, handleValidate, handleVerifySelected, handleDeleteSelected, handleZoomIn, handleZoomOut, handleZoomReset]);
 
   // ============================================================================
   // Approval Handler
@@ -675,9 +1062,10 @@ export default function DetectionEditor({
     for (const detection of allCurrentPageDetections) {
       if (detection.status === 'deleted') continue;
       const areaSf = detection.area_sf || 0;
-      const cls = detection.class;
+      // Cast to AllDetectionClasses to handle legacy 'building'/'exterior_wall' values from DB
+      const cls = detection.class as AllDetectionClasses;
 
-      if (cls === 'building' || cls === 'exterior_wall') {
+      if (cls === 'building' || cls === 'exterior_wall' || cls === 'siding') {
         buildingAreaSf += areaSf;
       } else if (cls === 'roof') {
         roofAreaSf += areaSf;
@@ -728,6 +1116,30 @@ export default function DetectionEditor({
     return allCurrentPageDetections.filter((d) => d.status !== 'deleted');
   }, [allCurrentPageDetections]);
 
+  // Compute selected detections from both selection systems (Set-based and single-ID)
+  const selectedDetections = useMemo(() => {
+    const ids = selectedIds.size > 0
+      ? Array.from(selectedIds)
+      : selectedDetectionId
+        ? [selectedDetectionId]
+        : [];
+    return currentPageDetections.filter((d) => ids.includes(d.id));
+  }, [selectedIds, selectedDetectionId, currentPageDetections]);
+
+  // Debug: Log when visibleDetections changes
+  useEffect(() => {
+    if (visibleDetections.length > 0) {
+      const sample = visibleDetections[0];
+      console.log('[DetectionEditor] visibleDetections UPDATED - sample:', {
+        id: sample.id,
+        class: sample.class,
+        pixel_width: sample.pixel_width,
+        pixel_height: sample.pixel_height,
+        total_count: visibleDetections.length,
+      });
+    }
+  }, [visibleDetections]);
+
   // ============================================================================
   // Render
   // ============================================================================
@@ -761,11 +1173,20 @@ export default function DetectionEditor({
             isApproving={isApproving}
             onGenerateMarkup={handleGenerateMarkup}
             isGeneratingMarkup={isGeneratingMarkup}
+            // Local-first editing props
+            hasUnsavedChanges={hasUnsavedChanges}
+            canUndo={canUndo}
+            canRedo={canRedo}
+            onUndo={undo}
+            onRedo={redo}
+            onValidate={handleValidate}
+            onReset={handleReset}
+            isValidating={isValidating}
           />
 
-          <div className="flex-1 flex overflow-hidden">
-            {/* Canvas Area */}
-            <div className="flex-1 relative">
+          <div className="flex-1 flex overflow-hidden min-h-0">
+            {/* Canvas Area - flex-1 with min-h-0 allows proper flex shrinking */}
+            <div ref={canvasContainerRef} className="flex-1 relative min-h-0">
               {/* Markup View Mode */}
               {showMarkup && markupUrl ? (
                 <div className="absolute inset-0 flex flex-col bg-gray-900">
@@ -830,32 +1251,23 @@ export default function DetectionEditor({
                     </div>
                   </div>
                 </div>
-              ) : canvasImageUrl ? (
-                <DetectionCanvas
-                  imageUrl={canvasImageUrl}
-                  imageWidth={imageDimensions.width}
-                  imageHeight={imageDimensions.height}
-                  detections={visibleDetections}
-                  overlayDetections={overlayDetections}
-                  selectedIds={selectedIds}
-                  hoveredId={hoveredId}
-                  toolMode={toolMode}
-                  createClass={createClass}
-                  transform={transform}
-                  onTransformChange={setTransform}
-                  onSelect={handleSelect}
-                  onClearSelection={handleClearSelection}
-                  onHover={handleHover}
-                  onMoveDetection={handleMoveDetection}
-                  onResizeDetection={handleResizeDetection}
-                  onCreateDetection={handleCreateDetection}
-                  onVerifyDetection={handleVerifyDetection}
-                  showDimensions={showDimensions}
-                  showArea={showArea}
-                  showMarkupOverlay={showMarkupOverlay}
-                  showSidingOverlay={showSidingOverlay}
-                  pageId={currentPageId || undefined}
-                />
+              ) : currentPage ? (
+                <div className="absolute inset-0">
+                  <KonvaDetectionCanvas
+                    page={currentPage}
+                    detections={visibleDetections}
+                    selectedDetectionId={selectedDetectionId}
+                    toolMode={toolMode}
+                    activeClass={createClass}
+                    onSelectionChange={setSelectedDetectionId}
+                    onDetectionMove={handleDetectionMove}
+                    onDetectionResize={handleDetectionResize}
+                    onDetectionCreate={handleDetectionCreate}
+                    onDetectionPolygonUpdate={handleDetectionPolygonUpdate}
+                    containerWidth={canvasContainerSize.width}
+                    containerHeight={canvasContainerSize.height}
+                  />
+                </div>
               ) : (
                 <div className="flex items-center justify-center h-full">
                   <p className="text-gray-500 dark:text-gray-400">
@@ -985,7 +1397,7 @@ export default function DetectionEditor({
               )}
             </div>
 
-            {/* Sidebar */}
+            {/* Sidebar - pages, detection list, and selection properties */}
             <DetectionSidebar
               pages={pages}
               currentPageId={currentPageId}
@@ -999,9 +1411,45 @@ export default function DetectionEditor({
               showDeleted={showDeleted}
               onShowDeletedChange={setShowDeleted}
               jobId={jobId}
+              selectedDetections={selectedDetections}
+              onClassChange={handleClassChange}
             />
           </div>
         </>
+      )}
+
+      {/* Draft Recovery Modal */}
+      {showDraftRecovery && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
+          <div className="bg-white dark:bg-gray-900 rounded-lg shadow-xl max-w-md w-full mx-4 p-6">
+            <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-2">
+              Unsaved Changes Found
+            </h2>
+            <p className="text-gray-600 dark:text-gray-400 mb-4">
+              You have unsaved detection edits from{' '}
+              {draftTimestamp
+                ? new Date(draftTimestamp).toLocaleString()
+                : 'a previous session'}
+              . Would you like to restore them?
+            </p>
+            <div className="flex gap-3 justify-end">
+              <button
+                type="button"
+                onClick={handleDiscardDrafts}
+                className="px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 rounded-md transition-colors"
+              >
+                Discard
+              </button>
+              <button
+                type="button"
+                onClick={handleRestoreDrafts}
+                className="px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-md transition-colors"
+              >
+                Restore
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
