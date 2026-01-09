@@ -9,9 +9,11 @@ import type {
   DetectionClass,
   ToolMode,
   PolygonPoint,
+  MarkupType,
 } from '@/lib/types/extraction';
 import { DETECTION_CLASS_COLORS } from '@/lib/types/extraction';
 import KonvaDetectionPolygon, { type PolygonUpdatePayload } from './KonvaDetectionPolygon';
+import KonvaDetectionLine, { type LineUpdatePayload } from './KonvaDetectionLine';
 import {
   calculateFitScale,
   calculateCenterOffset,
@@ -27,13 +29,32 @@ import {
 // Types
 // =============================================================================
 
+export interface CalibrationPoint {
+  x: number;
+  y: number;
+}
+
+export interface CalibrationData {
+  pointA: CalibrationPoint;
+  pointB: CalibrationPoint;
+  pixelDistance: number;
+}
+
+interface CalibrationState {
+  isCalibrating: boolean;
+  pointA: CalibrationPoint | null;
+  pointB: CalibrationPoint | null;
+  pixelDistance: number | null;
+}
+
 export interface KonvaDetectionCanvasProps {
   page: ExtractionPage;
   detections: ExtractionDetection[];
   selectedDetectionId: string | null;
+  selectedIds: Set<string>;
   toolMode: ToolMode;
   activeClass: DetectionClass;
-  onSelectionChange: (id: string | null) => void;
+  onSelectionChange: (id: string | null, addToSelection?: boolean) => void;
   onDetectionMove: (
     detection: ExtractionDetection,
     newPosition: { pixel_x: number; pixel_y: number }
@@ -58,11 +79,17 @@ export interface KonvaDetectionCanvasProps {
     perimeter_lf?: number;
     real_width_ft?: number;
     real_height_ft?: number;
+    markup_type?: MarkupType;
   }) => void;
   onDetectionPolygonUpdate?: (
     detection: ExtractionDetection,
     updates: PolygonUpdatePayload
   ) => void;
+  onDetectionLineUpdate?: (
+    detection: ExtractionDetection,
+    updates: LineUpdatePayload
+  ) => void;
+  onCalibrationComplete?: (data: CalibrationData) => void;
   containerWidth: number;
   containerHeight: number;
 }
@@ -77,6 +104,9 @@ const ZOOM_FACTOR = 1.1;
 const CLOSE_THRESHOLD = 15; // Pixels to detect "near starting point"
 const MIN_POLYGON_POINTS = 3;
 
+// Classes appropriate for linear measurements (lines) - measured in LF, not SF
+const LINEAR_CLASSES: DetectionClass[] = ['trim', 'fascia', 'gutter', 'eave', 'rake', 'ridge', 'soffit'];
+
 // =============================================================================
 // Component
 // =============================================================================
@@ -85,6 +115,7 @@ export default function KonvaDetectionCanvas({
   page,
   detections,
   selectedDetectionId,
+  selectedIds,
   toolMode,
   activeClass,
   onSelectionChange,
@@ -92,6 +123,8 @@ export default function KonvaDetectionCanvas({
   onDetectionResize,
   onDetectionCreate,
   onDetectionPolygonUpdate,
+  onDetectionLineUpdate,
+  onCalibrationComplete,
   containerWidth,
   containerHeight,
 }: KonvaDetectionCanvasProps) {
@@ -114,6 +147,18 @@ export default function KonvaDetectionCanvas({
 
   // Hover state
   const [hoveredId, setHoveredId] = useState<string | null>(null);
+
+  // Calibration state
+  const [calibrationState, setCalibrationState] = useState<CalibrationState>({
+    isCalibrating: false,
+    pointA: null,
+    pointB: null,
+    pixelDistance: null,
+  });
+  const [calibrationMousePos, setCalibrationMousePos] = useState<CalibrationPoint | null>(null);
+
+  // Line drawing state (2-point line for LF measurements)
+  const [lineStartPoint, setLineStartPoint] = useState<PolygonPoint | null>(null);
 
   // Get image dimensions
   const imageWidth = page.original_width || 1920;
@@ -266,6 +311,17 @@ export default function KonvaDetectionCanvas({
     setIsNearStart(false);
   }, []);
 
+  // Reset calibration state
+  const resetCalibration = useCallback(() => {
+    setCalibrationState({
+      isCalibrating: false,
+      pointA: null,
+      pointB: null,
+      pixelDistance: null,
+    });
+    setCalibrationMousePos(null);
+  }, []);
+
   const handleStageMouseDown = useCallback(
     (e: Konva.KonvaEventObject<MouseEvent | TouchEvent>) => {
       // Only handle clicks on the stage/image itself
@@ -275,7 +331,64 @@ export default function KonvaDetectionCanvas({
 
       // Clear selection when clicking on empty space (in select mode)
       if (toolMode === 'select') {
-        onSelectionChange(null);
+        onSelectionChange(null, false);
+        return;
+      }
+
+      // Calibration mode - click two points to measure pixel distance
+      // IMPORTANT: We need distance in IMAGE coordinates, not canvas coordinates
+      if (toolMode === 'calibrate') {
+        const stage = stageRef.current;
+        if (!stage) return;
+
+        // Get pointer position in screen/canvas coordinates
+        const pointer = stage.getPointerPosition();
+        if (!pointer) return;
+
+        // Transform screen coordinates to image coordinates
+        // Formula: imageCoord = (screenCoord - stagePosition) / scale
+        const imageX = (pointer.x - position.x) / scale;
+        const imageY = (pointer.y - position.y) / scale;
+        const imagePoint = { x: imageX, y: imageY };
+
+        console.log('[Calibration] Screen point:', pointer);
+        console.log('[Calibration] Scale:', scale, 'Position:', position);
+        console.log('[Calibration] Image point:', imagePoint);
+
+        if (!calibrationState.pointA) {
+          // First click - store point A in IMAGE coordinates
+          setCalibrationState({
+            isCalibrating: true,
+            pointA: imagePoint,
+            pointB: null,
+            pixelDistance: null,
+          });
+        } else {
+          // Second click - calculate distance in IMAGE coordinates
+          const dx = imagePoint.x - calibrationState.pointA.x;
+          const dy = imagePoint.y - calibrationState.pointA.y;
+          const pixelDistance = Math.sqrt(dx * dx + dy * dy);
+
+          console.log('[Calibration] Distance in IMAGE pixels:', pixelDistance);
+
+          // Update state with final values
+          setCalibrationState({
+            isCalibrating: true,
+            pointA: calibrationState.pointA,
+            pointB: imagePoint,
+            pixelDistance,
+          });
+
+          // Call the completion callback with IMAGE pixel distance
+          onCalibrationComplete?.({
+            pointA: calibrationState.pointA,
+            pointB: imagePoint,
+            pixelDistance,
+          });
+
+          // Reset calibration state after callback
+          resetCalibration();
+        }
         return;
       }
 
@@ -306,23 +419,92 @@ export default function KonvaDetectionCanvas({
           }
         }
       }
+
+      // Line mode - two clicks to draw a line measurement
+      if (toolMode === 'line') {
+        const stage = stageRef.current;
+        if (!stage) return;
+
+        const pointer = stage.getPointerPosition();
+        if (!pointer) return;
+
+        // Transform to image coordinates
+        const imageX = (pointer.x - position.x) / scale;
+        const imageY = (pointer.y - position.y) / scale;
+        const imagePoint = { x: imageX, y: imageY };
+
+        if (!lineStartPoint) {
+          // First click - set start point
+          setLineStartPoint(imagePoint);
+        } else {
+          // Second click - create line detection
+          const dx = imagePoint.x - lineStartPoint.x;
+          const dy = imagePoint.y - lineStartPoint.y;
+          const pixelLength = Math.sqrt(dx * dx + dy * dy);
+          const lengthLf = pixelLength / scaleRatio;
+
+          // For lines, use activeClass if it's a linear class, otherwise default to 'siding'
+          const lineClass = LINEAR_CLASSES.includes(activeClass) ? activeClass : 'trim';
+
+          onDetectionCreate({
+            pixel_x: (lineStartPoint.x + imagePoint.x) / 2,
+            pixel_y: (lineStartPoint.y + imagePoint.y) / 2,
+            pixel_width: Math.abs(dx),
+            pixel_height: Math.abs(dy),
+            class: lineClass,
+            polygon_points: [lineStartPoint, imagePoint],
+            markup_type: 'line',
+            perimeter_lf: lengthLf,
+            area_sf: 0,
+            real_width_ft: Math.abs(dx) / scaleRatio,
+            real_height_ft: Math.abs(dy) / scaleRatio,
+          });
+
+          setLineStartPoint(null);
+        }
+        return;
+      }
     },
-    [toolMode, onSelectionChange, isDrawingPolygon, drawingPoints.length, isNearStart, completePolygon]
+    [toolMode, onSelectionChange, isDrawingPolygon, drawingPoints.length, isNearStart, completePolygon, calibrationState.pointA, onCalibrationComplete, resetCalibration, position, scale, lineStartPoint, scaleRatio, activeClass, onDetectionCreate]
   );
 
   const handleStageMouseMove = useCallback(
     (e: Konva.KonvaEventObject<MouseEvent | TouchEvent>) => {
-      if (toolMode !== 'create') return;
-
       const stage = stageRef.current;
       if (!stage) return;
 
-      // Use getRelativePointerPosition() for consistent coordinate system
+      // Handle calibration mode mouse move - use screen coords + manual transform
+      // to match the click handler (must use same coordinate system)
+      if (toolMode === 'calibrate' && calibrationState.pointA) {
+        const pointer = stage.getPointerPosition();
+        if (pointer) {
+          // Transform to image coordinates (same formula as click handler)
+          const imageX = (pointer.x - position.x) / scale;
+          const imageY = (pointer.y - position.y) / scale;
+          setCalibrationMousePos({ x: imageX, y: imageY });
+        }
+        return;
+      }
+
+      // Handle line mode mouse move
+      if (toolMode === 'line' && lineStartPoint) {
+        const pointer = stage.getPointerPosition();
+        if (pointer) {
+          const imageX = (pointer.x - position.x) / scale;
+          const imageY = (pointer.y - position.y) / scale;
+          setCalibrationMousePos({ x: imageX, y: imageY }); // Reuse for line preview
+        }
+        return;
+      }
+
+      // For other modes, use getRelativePointerPosition (works for polygon drawing)
       const pointer = stage.getRelativePointerPosition();
       if (!pointer) return;
 
-      // Pointer is now directly in image-pixel coordinates
       const currentPoint = { x: pointer.x, y: pointer.y };
+
+      // Handle create mode mouse move
+      if (toolMode !== 'create') return;
 
       setMousePosition(currentPoint);
 
@@ -333,7 +515,7 @@ export default function KonvaDetectionCanvas({
         setIsNearStart(false);
       }
     },
-    [toolMode, isDrawingPolygon, drawingPoints, isPointNearStart]
+    [toolMode, isDrawingPolygon, drawingPoints, isPointNearStart, calibrationState.pointA, position, scale, lineStartPoint]
   );
 
   const handleStageDoubleClick = useCallback(
@@ -349,27 +531,38 @@ export default function KonvaDetectionCanvas({
     [toolMode, isDrawingPolygon, drawingPoints.length, completePolygon]
   );
 
-  // Escape key to cancel drawing
+  // Escape key to cancel drawing, calibration, or line drawing
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && isDrawingPolygon) {
-        e.preventDefault();
-        cancelDrawing();
+      if (e.key === 'Escape') {
+        if (isDrawingPolygon) {
+          e.preventDefault();
+          cancelDrawing();
+        }
+        if (calibrationState.isCalibrating || calibrationState.pointA) {
+          e.preventDefault();
+          resetCalibration();
+        }
+        if (lineStartPoint) {
+          e.preventDefault();
+          setLineStartPoint(null);
+          setCalibrationMousePos(null);
+        }
       }
     };
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isDrawingPolygon, cancelDrawing]);
+  }, [isDrawingPolygon, cancelDrawing, calibrationState.isCalibrating, calibrationState.pointA, resetCalibration, lineStartPoint]);
 
   // ==========================================================================
   // Detection Handlers
   // ==========================================================================
 
   const handleDetectionSelect = useCallback(
-    (id: string) => {
+    (id: string, addToSelection: boolean) => {
       if (toolMode === 'select' || toolMode === 'verify') {
-        onSelectionChange(id);
+        onSelectionChange(id, addToSelection);
       }
     },
     [toolMode, onSelectionChange]
@@ -380,6 +573,13 @@ export default function KonvaDetectionCanvas({
       onDetectionPolygonUpdate?.(detection, updates);
     },
     [onDetectionPolygonUpdate]
+  );
+
+  const handleLineUpdate = useCallback(
+    (detection: ExtractionDetection, updates: LineUpdatePayload) => {
+      onDetectionLineUpdate?.(detection, updates);
+    },
+    [onDetectionLineUpdate]
   );
 
   // ==========================================================================
@@ -394,10 +594,15 @@ export default function KonvaDetectionCanvas({
 
   const getCursor = () => {
     if (isDrawingPolygon) return 'crosshair';
+    if (lineStartPoint) return 'crosshair';
     switch (toolMode) {
       case 'pan':
         return 'grab';
       case 'create':
+        return 'crosshair';
+      case 'line':
+        return 'crosshair';
+      case 'calibrate':
         return 'crosshair';
       case 'verify':
         return 'pointer';
@@ -462,23 +667,45 @@ export default function KonvaDetectionCanvas({
             />
           )}
 
-          {/* Detection Polygons */}
-          {sortedDetections.map((detection) => (
-            <KonvaDetectionPolygon
-              key={detection.id}
-              detection={detection}
-              isSelected={detection.id === selectedDetectionId}
-              isHovered={detection.id === hoveredId}
-              scale={scale}
-              scaleRatio={scaleRatio}
-              onSelect={handleDetectionSelect}
-              onHoverStart={setHoveredId}
-              onHoverEnd={() => setHoveredId(null)}
-              onPolygonUpdate={handlePolygonUpdate}
-              showArea={true}
-              draggable={toolMode === 'select'}
-            />
-          ))}
+          {/* Detection Polygons (filter out lines) */}
+          {sortedDetections
+            .filter((d) => d.markup_type !== 'line')
+            .map((detection) => (
+              <KonvaDetectionPolygon
+                key={detection.id}
+                detection={detection}
+                isSelected={selectedIds.has(detection.id)}
+                isHovered={detection.id === hoveredId}
+                scale={scale}
+                scaleRatio={scaleRatio}
+                onSelect={handleDetectionSelect}
+                onHoverStart={setHoveredId}
+                onHoverEnd={() => setHoveredId(null)}
+                onPolygonUpdate={handlePolygonUpdate}
+                showArea={true}
+                draggable={toolMode === 'select'}
+              />
+            ))}
+
+          {/* Detection Lines */}
+          {sortedDetections
+            .filter((d) => d.markup_type === 'line')
+            .map((detection) => (
+              <KonvaDetectionLine
+                key={detection.id}
+                detection={detection}
+                isSelected={selectedIds.has(detection.id)}
+                isHovered={detection.id === hoveredId}
+                scale={scale}
+                scaleRatio={scaleRatio}
+                onSelect={handleDetectionSelect}
+                onHoverStart={setHoveredId}
+                onHoverEnd={() => setHoveredId(null)}
+                onLineUpdate={handleLineUpdate}
+                showLength={true}
+                draggable={toolMode === 'select'}
+              />
+            ))}
 
           {/* Point-by-Point Polygon Drawing Preview */}
           {isDrawingPolygon && drawingPoints.length > 0 && (
@@ -543,6 +770,110 @@ export default function KonvaDetectionCanvas({
                   shadowOpacity={idx === 0 && isNearStart ? 0.8 : 0}
                 />
               ))}
+            </>
+          )}
+
+          {/* Calibration Line Overlay */}
+          {toolMode === 'calibrate' && calibrationState.pointA && (
+            <>
+              {/* Point A marker */}
+              <Circle
+                x={calibrationState.pointA.x}
+                y={calibrationState.pointA.y}
+                radius={6 / scale}
+                fill="#FF00FF"
+                stroke="#FFFFFF"
+                strokeWidth={2 / scale}
+                listening={false}
+              />
+
+              {/* Preview line from Point A to mouse position */}
+              {calibrationMousePos && !calibrationState.pointB && (
+                <Line
+                  points={[
+                    calibrationState.pointA.x,
+                    calibrationState.pointA.y,
+                    calibrationMousePos.x,
+                    calibrationMousePos.y,
+                  ]}
+                  stroke="#FF00FF"
+                  strokeWidth={3 / scale}
+                  dash={[10 / scale, 5 / scale]}
+                  listening={false}
+                />
+              )}
+
+              {/* Final line and Point B (when completed) */}
+              {calibrationState.pointB && (
+                <>
+                  <Line
+                    points={[
+                      calibrationState.pointA.x,
+                      calibrationState.pointA.y,
+                      calibrationState.pointB.x,
+                      calibrationState.pointB.y,
+                    ]}
+                    stroke="#FF00FF"
+                    strokeWidth={3 / scale}
+                    dash={[10 / scale, 5 / scale]}
+                    listening={false}
+                  />
+                  <Circle
+                    x={calibrationState.pointB.x}
+                    y={calibrationState.pointB.y}
+                    radius={6 / scale}
+                    fill="#FF00FF"
+                    stroke="#FFFFFF"
+                    strokeWidth={2 / scale}
+                    listening={false}
+                  />
+                </>
+              )}
+            </>
+          )}
+
+          {/* Line Drawing Preview */}
+          {toolMode === 'line' && lineStartPoint && (
+            <>
+              {/* Start point marker */}
+              <Circle
+                x={lineStartPoint.x}
+                y={lineStartPoint.y}
+                radius={6 / scale}
+                fill={drawingColor}
+                stroke="#FFFFFF"
+                strokeWidth={2 / scale}
+                listening={false}
+              />
+
+              {/* Preview line from start to mouse position */}
+              {calibrationMousePos && (
+                <>
+                  <Line
+                    points={[
+                      lineStartPoint.x,
+                      lineStartPoint.y,
+                      calibrationMousePos.x,
+                      calibrationMousePos.y,
+                    ]}
+                    stroke={drawingColor}
+                    strokeWidth={3 / scale}
+                    dash={[10 / scale, 5 / scale]}
+                    lineCap="round"
+                    listening={false}
+                  />
+                  <Circle
+                    x={calibrationMousePos.x}
+                    y={calibrationMousePos.y}
+                    radius={5 / scale}
+                    fill={drawingColor}
+                    stroke="#FFFFFF"
+                    strokeWidth={1.5 / scale}
+                    opacity={0.7}
+                    listening={false}
+                  />
+                </>
+              )}
             </>
           )}
         </Layer>

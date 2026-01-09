@@ -16,7 +16,7 @@ export interface KonvaDetectionRectProps {
   isSelected: boolean;
   isHovered: boolean;
   scale: number; // Current viewport scale for sizing labels/handles
-  onSelect: (id: string) => void;
+  onSelect: (id: string, addToSelection: boolean) => void;
   onHoverStart: (id: string) => void;
   onHoverEnd: () => void;
   onDragEnd: (detection: ExtractionDetection, newPosition: { pixel_x: number; pixel_y: number }) => void;
@@ -112,10 +112,12 @@ export default function KonvaDetectionRect({
     );
   }
 
-  // Handle click to select (works for both mouse and touch)
+  // Handle click to select (works for both mouse and touch, with multi-select support)
   const handleClick = (e: Konva.KonvaEventObject<MouseEvent | TouchEvent>) => {
     e.cancelBubble = true;
-    onSelect(detection.id);
+    // Check for Cmd (Mac) or Ctrl (Windows) modifier for multi-select
+    const addToSelection = e.evt.metaKey || e.evt.ctrlKey;
+    onSelect(detection.id, addToSelection);
   };
 
   // Handle drag end - convert back to center coordinates

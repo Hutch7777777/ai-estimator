@@ -135,6 +135,20 @@ export function formatArea(areaSf: number): string {
 }
 
 /**
+ * Format length with "LF" suffix.
+ * Example: 12.5 -> "12.5 LF"
+ * Example: 100.0 -> "100 LF"
+ */
+export function formatLength(lengthLf: number): string {
+  // For short lengths, show one decimal place
+  if (lengthLf < 10) {
+    return `${lengthLf.toFixed(1)} LF`;
+  }
+  // For longer lengths, show whole number
+  return `${Math.round(lengthLf)} LF`;
+}
+
+/**
  * Format dimension label with width × height notation.
  * Example: (3.5, 4.25) -> "3'-6" × 4'-3""
  */

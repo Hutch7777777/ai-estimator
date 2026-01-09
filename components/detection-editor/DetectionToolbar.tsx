@@ -2,16 +2,13 @@
 
 import React, { memo } from 'react';
 import {
-  MousePointer2,
-  Square,
-  Hand,
-  CheckCircle,
   ZoomIn,
   ZoomOut,
   RotateCcw,
   Loader2,
   AlertCircle,
   Check,
+  CheckCircle,
   X,
   Camera,
   Undo2,
@@ -63,16 +60,6 @@ export interface DetectionToolbarProps {
 // Constants
 // =============================================================================
 
-// Keyboard shortcuts are handled in the parent component
-// S = Select, D = Draw, P = Pan, V = Verify
-
-const TOOLS: { mode: ToolMode; icon: typeof MousePointer2; label: string; shortcut: string }[] = [
-  { mode: 'select', icon: MousePointer2, label: 'Select & Edit', shortcut: 'S' },
-  { mode: 'create', icon: Square, label: 'Draw Detection', shortcut: 'D' },
-  { mode: 'pan', icon: Hand, label: 'Pan Canvas', shortcut: 'P' },
-  { mode: 'verify', icon: CheckCircle, label: 'Quick Verify', shortcut: 'V' },
-];
-
 const DETECTION_CLASSES: { value: DetectionClass; label: string }[] = [
   { value: 'siding', label: 'Siding' },
   { value: 'window', label: 'Window' },
@@ -85,46 +72,6 @@ const DETECTION_CLASSES: { value: DetectionClass; label: string }[] = [
 // =============================================================================
 // Helper Components
 // =============================================================================
-
-interface ToolButtonProps {
-  mode: ToolMode;
-  icon: typeof MousePointer2;
-  label: string;
-  shortcut: string;
-  isActive: boolean;
-  onClick: () => void;
-}
-
-const ToolButton = memo(function ToolButton({
-  mode,
-  icon: Icon,
-  label,
-  shortcut,
-  isActive,
-  onClick,
-}: ToolButtonProps) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={`
-        relative group flex items-center gap-2 px-3 py-2 rounded-md transition-colors
-        ${
-          isActive
-            ? 'bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300'
-            : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800'
-        }
-      `}
-      title={`${label} (${shortcut})`}
-    >
-      <Icon className="w-5 h-5" />
-      <span className="hidden sm:inline text-sm font-medium">{label}</span>
-      <span className="absolute -bottom-6 left-1/2 -translate-x-1/2 px-1.5 py-0.5 text-xs bg-gray-800 text-white rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none">
-        {shortcut}
-      </span>
-    </button>
-  );
-});
 
 interface ClassSelectorProps {
   value: DetectionClass;
@@ -212,21 +159,6 @@ const DetectionToolbar = memo(function DetectionToolbar({
 
   return (
     <div className="h-14 bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700 flex items-center px-4 gap-4">
-      {/* Tool Selection Group */}
-      <div className="flex items-center gap-1 border-r border-gray-200 dark:border-gray-700 pr-4">
-        {TOOLS.map((tool) => (
-          <ToolButton
-            key={tool.mode}
-            mode={tool.mode}
-            icon={tool.icon}
-            label={tool.label}
-            shortcut={tool.shortcut}
-            isActive={toolMode === tool.mode}
-            onClick={() => onToolModeChange(tool.mode)}
-          />
-        ))}
-      </div>
-
       {/* Class Selector (only in create mode) */}
       {toolMode === 'create' && (
         <div className="border-r border-gray-200 dark:border-gray-700 pr-4">

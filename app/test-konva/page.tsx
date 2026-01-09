@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useRef, useEffect, useCallback } from 'react';
+import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { MousePointer2, Plus, Move, CheckCircle } from 'lucide-react';
 import KonvaDetectionCanvas from '@/components/detection-editor/KonvaDetectionCanvas';
 import { calculateRealWorldMeasurements } from '@/lib/utils/coordinates';
@@ -195,6 +195,10 @@ export default function TestKonvaPage() {
   const [toolMode, setToolMode] = useState<ToolMode>('select');
   const [activeClass, setActiveClass] = useState<DetectionClass>('window');
   const [selectedDetectionId, setSelectedDetectionId] = useState<string | null>(null);
+  // Derive selectedIds Set from single selection for multi-select compatibility
+  const selectedIds = useMemo(() => {
+    return selectedDetectionId ? new Set([selectedDetectionId]) : new Set<string>();
+  }, [selectedDetectionId]);
   const [detections, setDetections] = useState<ExtractionDetection[]>(initialMockDetections);
   const [logs, setLogs] = useState<string[]>([]);
 
@@ -230,9 +234,10 @@ export default function TestKonvaPage() {
   // Handlers
   // ==========================================================================
 
-  const handleSelectionChange = (id: string | null) => {
+  const handleSelectionChange = (id: string | null, addToSelection?: boolean) => {
+    // Test page uses single selection for simplicity
     setSelectedDetectionId(id);
-    log(`Selection changed: ${id || 'none'}`);
+    log(`Selection changed: ${id || 'none'}${addToSelection ? ' (multi-select)' : ''}`);
   };
 
   const handleDetectionMove = (
@@ -491,6 +496,7 @@ export default function TestKonvaPage() {
             page={mockPage}
             detections={detections}
             selectedDetectionId={selectedDetectionId}
+            selectedIds={selectedIds}
             toolMode={toolMode}
             activeClass={activeClass}
             onSelectionChange={handleSelectionChange}

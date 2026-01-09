@@ -94,7 +94,7 @@ const PropertiesPanel = memo(function PropertiesPanel({
           </div>
 
           {/* Measurements */}
-          <SelectionProperties selectedDetections={selectedDetections} />
+          <SelectionProperties selectedDetections={selectedDetections} pixelsPerFoot={currentPage?.scale_ratio || 64} />
 
           {/* Future: Material Assignment
           <div className="space-y-2">

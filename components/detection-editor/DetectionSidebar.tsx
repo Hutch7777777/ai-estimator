@@ -18,6 +18,7 @@ import {
   Ruler,
   Loader2,
   SlidersHorizontal,
+  RotateCcw,
 } from 'lucide-react';
 import type {
   ExtractionPage,
@@ -33,6 +34,8 @@ import { DETECTION_CLASS_COLORS, CONFIDENCE_THRESHOLDS } from '@/lib/types/extra
 import { getPhase4Data, calculateLinearElements } from '@/lib/api/extractionApi';
 import ClassSelector from './PropertiesPanel/ClassSelector';
 import SelectionProperties from './PropertiesPanel/SelectionProperties';
+import MaterialAssignment from './PropertiesPanel/MaterialAssignment';
+import NotesField from './PropertiesPanel/NotesField';
 
 // =============================================================================
 // Types
@@ -54,6 +57,11 @@ export interface DetectionSidebarProps {
   // Selection properties section
   selectedDetections: ExtractionDetection[];
   onClassChange: (detectionIds: string[], newClass: DetectionClass) => void;
+  onStatusChange: (detectionIds: string[], newStatus: DetectionStatus) => void;
+  onMaterialAssign: (detectionIds: string[], materialId: string | null) => void;
+  onNotesChange: (detectionIds: string[], notes: string) => void;
+  // Scale for dynamic measurement calculation
+  pixelsPerFoot: number;
 }
 
 type TabType = 'pages' | 'detections' | 'properties' | 'totals';
@@ -114,6 +122,21 @@ function formatArea(sf: number | null): string {
 function formatLinearFeet(lf: number | null): string {
   if (lf === null || lf === 0) return '-';
   return `${lf.toFixed(1)} LF`;
+}
+
+/**
+ * Calculate real-world measurements from pixel dimensions using scale ratio.
+ * This ensures measurements update dynamically when scale is recalibrated.
+ */
+function calculateMeasurementsFromPixels(
+  detection: ExtractionDetection,
+  pixelsPerFoot: number
+): { widthFt: number; heightFt: number; areaSf: number; perimeterLf: number } {
+  const widthFt = (detection.pixel_width || 0) / pixelsPerFoot;
+  const heightFt = (detection.pixel_height || 0) / pixelsPerFoot;
+  const areaSf = widthFt * heightFt;
+  const perimeterLf = 2 * (widthFt + heightFt);
+  return { widthFt, heightFt, areaSf, perimeterLf };
 }
 
 // =============================================================================
@@ -188,6 +211,7 @@ interface DetectionItemProps {
   onSelect: (addToSelection: boolean) => void;
   onHoverStart: () => void;
   onHoverEnd: () => void;
+  pixelsPerFoot: number;
 }
 
 const DetectionItem = memo(function DetectionItem({
@@ -197,10 +221,14 @@ const DetectionItem = memo(function DetectionItem({
   onSelect,
   onHoverStart,
   onHoverEnd,
+  pixelsPerFoot,
 }: DetectionItemProps) {
   const color = DETECTION_CLASS_COLORS[detection.class] || DETECTION_CLASS_COLORS[''];
   const isLowConfidence = detection.confidence < CONFIDENCE_THRESHOLDS.medium;
   const isDeleted = detection.status === 'deleted';
+
+  // Calculate measurements dynamically from pixel dimensions
+  const { widthFt, heightFt, areaSf } = calculateMeasurementsFromPixels(detection, pixelsPerFoot);
 
   return (
     <button
@@ -225,13 +253,13 @@ const DetectionItem = memo(function DetectionItem({
         #{index + 1}
       </span>
 
-      {/* Dimensions */}
+      {/* Dimensions - calculated from pixel dimensions and current scale */}
       <div className="flex-1 min-w-0">
         <div className="text-sm text-gray-900 dark:text-gray-100 truncate">
-          {formatDimension(detection.real_width_ft)} × {formatDimension(detection.real_height_ft)}
+          {formatDimension(widthFt)} × {formatDimension(heightFt)}
         </div>
         <div className="text-xs text-gray-500 dark:text-gray-400">
-          {formatArea(detection.area_sf)}
+          {formatArea(areaSf)}
         </div>
       </div>
 
@@ -262,6 +290,7 @@ interface DetectionGroupProps {
   selectedIds: Set<string>;
   onDetectionSelect: (id: string, addToSelection: boolean) => void;
   onDetectionHover: (id: string | null) => void;
+  pixelsPerFoot: number;
 }
 
 const DetectionGroup = memo(function DetectionGroup({
@@ -272,6 +301,7 @@ const DetectionGroup = memo(function DetectionGroup({
   selectedIds,
   onDetectionSelect,
   onDetectionHover,
+  pixelsPerFoot,
 }: DetectionGroupProps) {
   const color = DETECTION_CLASS_COLORS[detectionClass] || DETECTION_CLASS_COLORS[''];
   const verifiedCount = detections.filter((d) => d.status === 'verified').length;
@@ -313,6 +343,7 @@ const DetectionGroup = memo(function DetectionGroup({
               onSelect={(add) => onDetectionSelect(detection.id, add)}
               onHoverStart={() => onDetectionHover(detection.id)}
               onHoverEnd={() => onDetectionHover(null)}
+              pixelsPerFoot={pixelsPerFoot}
             />
           ))}
         </div>
@@ -372,6 +403,10 @@ const DetectionSidebar = memo(function DetectionSidebar({
   jobId,
   selectedDetections,
   onClassChange,
+  onStatusChange,
+  onMaterialAssign,
+  onNotesChange,
+  pixelsPerFoot,
 }: DetectionSidebarProps) {
   const [activeTab, setActiveTab] = useState<TabType>('detections');
   const [expandedClasses, setExpandedClasses] = useState<Set<AllDetectionClasses>>(
@@ -611,6 +646,7 @@ const DetectionSidebar = memo(function DetectionSidebar({
                   selectedIds={selectedIds}
                   onDetectionSelect={onDetectionSelect}
                   onDetectionHover={onDetectionHover}
+                  pixelsPerFoot={pixelsPerFoot}
                 />
               ))}
               {groupedDetections.size === 0 && (
@@ -657,7 +693,68 @@ const DetectionSidebar = memo(function DetectionSidebar({
                 </div>
 
                 {/* Selection Properties (status, measurements) */}
-                <SelectionProperties selectedDetections={selectedDetections} />
+                <SelectionProperties selectedDetections={selectedDetections} pixelsPerFoot={pixelsPerFoot} />
+
+                {/* Quick Actions */}
+                <div className="space-y-2">
+                  <span className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                    Actions
+                  </span>
+                  <div className="flex gap-2">
+                    {/* Verify Button */}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const ids = selectedDetections.map((d) => d.id);
+                        onStatusChange(ids, 'verified');
+                      }}
+                      disabled={selectedDetections.every((d) => d.status === 'verified')}
+                      className="flex-1 flex items-center justify-center gap-1 px-2 py-1.5 text-xs font-medium rounded-md border border-green-300 dark:border-green-700 text-green-700 dark:text-green-400 hover:bg-green-50 dark:hover:bg-green-900/20 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                    >
+                      <Check className="w-3.5 h-3.5" />
+                      Verify
+                    </button>
+
+                    {/* Reset Button */}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const ids = selectedDetections.map((d) => d.id);
+                        onStatusChange(ids, 'auto');
+                      }}
+                      disabled={selectedDetections.every((d) => d.status === 'auto')}
+                      className="flex-1 flex items-center justify-center gap-1 px-2 py-1.5 text-xs font-medium rounded-md border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                    >
+                      <RotateCcw className="w-3.5 h-3.5" />
+                      Reset
+                    </button>
+
+                    {/* Delete Button */}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const ids = selectedDetections.map((d) => d.id);
+                        onStatusChange(ids, 'deleted');
+                      }}
+                      className="flex-1 flex items-center justify-center gap-1 px-2 py-1.5 text-xs font-medium rounded-md border border-red-300 dark:border-red-700 text-red-700 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                      Delete
+                    </button>
+                  </div>
+                </div>
+
+                {/* Material Assignment */}
+                <MaterialAssignment
+                  selectedDetections={selectedDetections}
+                  onMaterialAssign={onMaterialAssign}
+                />
+
+                {/* Notes Field */}
+                <NotesField
+                  selectedDetections={selectedDetections}
+                  onNotesChange={onNotesChange}
+                />
 
                 {/* Selected Items List (for multi-select context) */}
                 {selectedDetections.length > 1 && (

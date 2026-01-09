@@ -12,6 +12,7 @@ import {
   getPolygonBoundingBox,
   getPolygonCentroid,
   calculatePolygonMeasurements,
+  calculatePolygonAreaSf,
   findClosestEdge,
   canRemovePoint,
 } from '@/lib/utils/polygonUtils';
@@ -38,7 +39,7 @@ export interface KonvaDetectionPolygonProps {
   isHovered: boolean;
   scale: number; // Current viewport scale for sizing labels/handles
   scaleRatio: number; // Pixels per foot for measurement calculations
-  onSelect: (id: string) => void;
+  onSelect: (id: string, addToSelection: boolean) => void;
   onHoverStart: (id: string) => void;
   onHoverEnd: () => void;
   onPolygonUpdate: (detection: ExtractionDetection, updates: PolygonUpdatePayload) => void;
@@ -148,8 +149,24 @@ export default function KonvaDetectionPolygon({
   const bbox = useMemo(() => getPolygonBoundingBox(localPoints), [localPoints]);
   const centroid = useMemo(() => getPolygonCentroid(localPoints), [localPoints]);
 
+  // Calculate area dynamically from pixel dimensions and current scale
+  // This ensures labels update immediately after calibration without needing a data refresh
+  const calculatedAreaSf = useMemo(() => {
+    if (scaleRatio <= 0) return 0;
+
+    // Use localPoints (current polygon shape) for calculation
+    if (localPoints.length >= 3) {
+      return calculatePolygonAreaSf(localPoints, scaleRatio);
+    }
+
+    // Fallback for rectangles (no polygon_points)
+    const widthFt = detection.pixel_width / scaleRatio;
+    const heightFt = detection.pixel_height / scaleRatio;
+    return widthFt * heightFt;
+  }, [localPoints, detection.pixel_width, detection.pixel_height, scaleRatio]);
+
   // Check if polygon is large enough to show area label
-  const showAreaLabel = showArea && detection.area_sf !== null && bbox.width > 40 && bbox.height > 30;
+  const showAreaLabel = showArea && calculatedAreaSf > 0 && bbox.width > 40 && bbox.height > 30;
 
   // Derive effective scale ratio from detection's own measurements to avoid mismatch
   // This ensures moving/resizing doesn't incorrectly change area calculations
@@ -164,10 +181,12 @@ export default function KonvaDetectionPolygon({
   // Handlers
   // ==========================================================================
 
-  // Handle click to select
+  // Handle click to select (with multi-select support via Cmd/Ctrl)
   const handleClick = useCallback((e: Konva.KonvaEventObject<MouseEvent | TouchEvent>) => {
     e.cancelBubble = true;
-    onSelect(detection.id);
+    // Check for Cmd (Mac) or Ctrl (Windows) modifier for multi-select
+    const addToSelection = e.evt.metaKey || e.evt.ctrlKey;
+    onSelect(detection.id, addToSelection);
   }, [detection.id, onSelect]);
 
   // Handle corner drag - update local state for smooth visual feedback
@@ -478,18 +497,18 @@ export default function KonvaDetectionPolygon({
           }}
           onMouseLeave={(e) => {
             const container = e.target.getStage()?.container();
-            if (container) container.style.cursor = 'default';
+            if (container) container.style.cursor = '';
           }}
         />
       ))}
 
-      {/* Area Label (centered in polygon) */}
-      {showAreaLabel && detection.area_sf !== null && (
+      {/* Area Label (centered in polygon) - calculated dynamically from pixels + scale */}
+      {showAreaLabel && (
         <Text
           x={centroid.x - bbox.width / 2}
           y={centroid.y - fontSize / 2}
           width={bbox.width}
-          text={formatArea(detection.area_sf)}
+          text={formatArea(calculatedAreaSf)}
           fontSize={fontSize * 1.1}
           fontFamily="system-ui, sans-serif"
           fontStyle="bold"

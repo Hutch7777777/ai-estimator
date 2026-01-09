@@ -18,14 +18,18 @@ import type {
   ViewTransform,
   ToolMode,
   DetectionClass,
+  DetectionStatus,
   AllDetectionClasses,
   ExtractionDetection,
   PolygonPoint,
+  MarkupType,
 } from '@/lib/types/extraction';
 import DetectionToolbar from './DetectionToolbar';
-import KonvaDetectionCanvas from './KonvaDetectionCanvas';
+import MarkupToolbar from './MarkupToolbar';
+import KonvaDetectionCanvas, { type CalibrationData } from './KonvaDetectionCanvas';
 import type { PolygonUpdatePayload } from './KonvaDetectionPolygon';
 import DetectionSidebar from './DetectionSidebar';
+import CalibrationModal from './CalibrationModal';
 
 // =============================================================================
 // Types
@@ -210,6 +214,93 @@ export default function DetectionEditor({
   // Siding polygon overlay state
   const [showSidingOverlay, setShowSidingOverlay] = useState(false);
 
+  // Calibration state (for scale calibration modal)
+  const [calibrationData, setCalibrationData] = useState<CalibrationData | null>(null);
+  const [showCalibrationModal, setShowCalibrationModal] = useState(false);
+
+  // Handle calibration complete - receives data from canvas and opens modal
+  const handleCalibrationComplete = useCallback((data: CalibrationData) => {
+    setCalibrationData(data);
+    setShowCalibrationModal(true);
+    // Switch back to select mode after calibration
+    setToolMode('select');
+  }, []);
+
+  // Handle scale application from calibration modal
+  const handleApplyScale = useCallback(
+    async (pixelsPerFoot: number) => {
+      console.log('[DetectionEditor] handleApplyScale called:', {
+        pixelsPerFoot,
+        currentPageId,
+      });
+
+      if (!currentPageId) {
+        console.error('[DetectionEditor] No current page ID');
+        toast.error('No page selected');
+        return;
+      }
+
+      try {
+        // Use direct fetch to bypass Supabase client type issues
+        const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+        const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+
+        if (!url || !key) {
+          throw new Error('Missing Supabase environment variables');
+        }
+
+        console.log('[DetectionEditor] Saving scale via direct fetch:', {
+          pageId: currentPageId,
+          pixelsPerFoot,
+        });
+
+        const response = await fetch(
+          `${url}/rest/v1/extraction_pages?id=eq.${currentPageId}`,
+          {
+            method: 'PATCH',
+            headers: {
+              'apikey': key,
+              'Authorization': `Bearer ${key}`,
+              'Content-Type': 'application/json',
+              'Prefer': 'return=representation',
+            },
+            body: JSON.stringify({ scale_ratio: pixelsPerFoot }),
+          }
+        );
+
+        console.log('[DetectionEditor] Response status:', response.status);
+
+        if (!response.ok) {
+          const errorText = await response.text();
+          console.error('[DetectionEditor] Failed to save scale:', errorText);
+          toast.error('Failed to save scale', {
+            description: `HTTP ${response.status}: ${errorText}`,
+          });
+          return;
+        }
+
+        const data = await response.json();
+        console.log('[DetectionEditor] Scale saved successfully:', data);
+
+        toast.success('Scale calibrated successfully', {
+          description: `New scale: ${pixelsPerFoot.toFixed(1)} px/ft`,
+        });
+
+        // Refresh data to get updated scale
+        await refresh();
+      } catch (err) {
+        console.error('[DetectionEditor] Error saving scale:', err);
+        toast.error('Failed to save scale', {
+          description: err instanceof Error ? err.message : 'Unknown error',
+        });
+      } finally {
+        setShowCalibrationModal(false);
+        setCalibrationData(null);
+      }
+    },
+    [currentPageId, refresh]
+  );
+
   // Track image dimensions
   const [imageDimensions, setImageDimensions] = useState({
     width: DEFAULT_IMAGE_WIDTH,
@@ -358,6 +449,23 @@ export default function DetectionEditor({
     setSelectedIds(new Set());
   }, []);
 
+  // Handler for canvas selection changes (wrapper for KonvaDetectionCanvas)
+  const handleCanvasSelect = useCallback(
+    (id: string | null, addToSelection: boolean = false) => {
+      if (id === null) {
+        // Clear selection when clicking empty canvas
+        setSelectedIds(new Set());
+        setSelectedDetectionId(null);
+      } else {
+        // Use existing handleSelect logic for single/multi-select
+        handleSelect(id, addToSelection);
+        // Also update legacy selectedDetectionId for compatibility
+        setSelectedDetectionId(id);
+      }
+    },
+    [handleSelect]
+  );
+
   const handleHover = useCallback((id: string | null) => {
     setHoveredId(id);
   }, []);
@@ -484,6 +592,7 @@ export default function DetectionEditor({
       perimeter_lf?: number;
       real_width_ft?: number;
       real_height_ft?: number;
+      markup_type?: MarkupType;
     }) => {
       // Use pre-calculated measurements if provided (polygon), otherwise calculate from bounding box
       const measurements = newCoords.area_sf !== undefined
@@ -529,6 +638,7 @@ export default function DetectionEditor({
         edited_at: new Date().toISOString(),
         original_bbox: null,
         polygon_points: newCoords.polygon_points || null,
+        markup_type: newCoords.markup_type || 'polygon',
       };
 
       // Add to local state only - no server sync in local-first mode
@@ -633,6 +743,83 @@ export default function DetectionEditor({
 
       console.log(
         `[DetectionEditor] Changed class to '${newClass}' for ${detectionIds.length} detection(s)`
+      );
+    },
+    [currentPageDetections, updateDetectionLocally]
+  );
+
+  // Handle status change from Properties panel (verify, delete, reset)
+  const handleStatusChange = useCallback(
+    (detectionIds: string[], newStatus: DetectionStatus) => {
+      if (detectionIds.length === 0) return;
+
+      detectionIds.forEach((id) => {
+        const detection = currentPageDetections.find((d) => d.id === id);
+        if (!detection) return;
+
+        // Update detection with new status
+        updateDetectionLocally({
+          ...detection,
+          status: newStatus,
+          edited_at: new Date().toISOString(),
+        });
+      });
+
+      // Clear selection after delete
+      if (newStatus === 'deleted') {
+        setSelectedIds(new Set());
+      }
+
+      console.log(
+        `[DetectionEditor] Changed status to '${newStatus}' for ${detectionIds.length} detection(s)`
+      );
+    },
+    [currentPageDetections, updateDetectionLocally]
+  );
+
+  // Handle material assignment from Properties panel
+  // Local-first: Only updates local state, no sync to server
+  const handleMaterialAssign = useCallback(
+    (detectionIds: string[], materialId: string | null) => {
+      if (detectionIds.length === 0) return;
+
+      detectionIds.forEach((id) => {
+        const detection = currentPageDetections.find((d) => d.id === id);
+        if (detection) {
+          updateDetectionLocally({
+            ...detection,
+            assigned_material_id: materialId,
+            edited_at: new Date().toISOString(),
+          });
+        }
+      });
+
+      console.log(
+        `[DetectionEditor] Assigned material '${materialId}' to ${detectionIds.length} detection(s)`
+      );
+    },
+    [currentPageDetections, updateDetectionLocally]
+  );
+
+  // Handle notes change from Properties panel
+  // Local-first: Only updates local state, no sync to server
+  const handleNotesChange = useCallback(
+    (detectionIds: string[], notes: string) => {
+      if (detectionIds.length === 0) return;
+
+      detectionIds.forEach((id) => {
+        const detection = currentPageDetections.find((d) => d.id === id);
+        if (detection) {
+          updateDetectionLocally({
+            ...detection,
+            notes,
+            edited_at: new Date().toISOString(),
+          });
+        }
+      });
+
+      console.log(
+        `[DetectionEditor] Updated notes for ${detectionIds.length} detection(s)`
       );
     },
     [currentPageDetections, updateDetectionLocally]
@@ -843,6 +1030,11 @@ export default function DetectionEditor({
       if (key === 'd') {
         e.preventDefault();
         setToolMode('create');
+        return;
+      }
+      if (key === 'l') {
+        e.preventDefault();
+        setToolMode('line');
         return;
       }
       if (key === 'p') {
@@ -1185,6 +1377,13 @@ export default function DetectionEditor({
           />
 
           <div className="flex-1 flex overflow-hidden min-h-0">
+            {/* Left Markup Toolbar */}
+            <MarkupToolbar
+              activeMode={toolMode}
+              onModeChange={setToolMode}
+              disabled={loading || isValidating}
+            />
+
             {/* Canvas Area - flex-1 with min-h-0 allows proper flex shrinking */}
             <div ref={canvasContainerRef} className="flex-1 relative min-h-0">
               {/* Markup View Mode */}
@@ -1257,13 +1456,15 @@ export default function DetectionEditor({
                     page={currentPage}
                     detections={visibleDetections}
                     selectedDetectionId={selectedDetectionId}
+                    selectedIds={selectedIds}
                     toolMode={toolMode}
                     activeClass={createClass}
-                    onSelectionChange={setSelectedDetectionId}
+                    onSelectionChange={handleCanvasSelect}
                     onDetectionMove={handleDetectionMove}
                     onDetectionResize={handleDetectionResize}
                     onDetectionCreate={handleDetectionCreate}
                     onDetectionPolygonUpdate={handleDetectionPolygonUpdate}
+                    onCalibrationComplete={handleCalibrationComplete}
                     containerWidth={canvasContainerSize.width}
                     containerHeight={canvasContainerSize.height}
                   />
@@ -1413,6 +1614,10 @@ export default function DetectionEditor({
               jobId={jobId}
               selectedDetections={selectedDetections}
               onClassChange={handleClassChange}
+              onStatusChange={handleStatusChange}
+              onMaterialAssign={handleMaterialAssign}
+              onNotesChange={handleNotesChange}
+              pixelsPerFoot={currentPage?.scale_ratio || 64}
             />
           </div>
         </>
@@ -1451,6 +1656,18 @@ export default function DetectionEditor({
           </div>
         </div>
       )}
+
+      {/* Calibration Modal */}
+      <CalibrationModal
+        isOpen={showCalibrationModal}
+        onClose={() => {
+          setShowCalibrationModal(false);
+          setCalibrationData(null);
+        }}
+        pixelDistance={calibrationData?.pixelDistance || 0}
+        currentScaleRatio={currentPage?.scale_ratio || null}
+        onApplyScale={handleApplyScale}
+      />
     </div>
   );
 }

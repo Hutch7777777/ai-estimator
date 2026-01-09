@@ -22,6 +22,14 @@ export type DetectionClass =
   | 'siding'    // Facade/wall area - replaces exterior_wall in UI
   | 'roof'
   | 'gable'
+  // Linear measurement classes (measured in LF)
+  | 'trim'
+  | 'fascia'
+  | 'gutter'
+  | 'eave'
+  | 'rake'
+  | 'ridge'
+  | 'soffit'
   | '';
 
 // Internal classes - used for calculations but not user-selectable
@@ -58,9 +66,12 @@ export type EditType =
   | 'create'
   | 'batch';
 
-export type ToolMode = 'select' | 'create' | 'pan' | 'verify';
+export type ToolMode = 'select' | 'create' | 'pan' | 'verify' | 'calibrate' | 'line';
 
 export type ResizeHandle = 'nw' | 'n' | 'ne' | 'w' | 'e' | 'sw' | 's' | 'se';
+
+// Markup type for different detection shapes
+export type MarkupType = 'polygon' | 'line' | 'point';
 
 // =============================================================================
 // Database Entity Interfaces
@@ -141,8 +152,15 @@ export interface ExtractionDetection {
   // The pixel_x/y/width/height fields become the bounding box of the polygon
   polygon_points?: Array<{ x: number; y: number }> | null;
 
+  // Markup type support (polygon = area, line = linear measurement, point = count marker)
+  markup_type?: MarkupType;
+  marker_label?: string | null;
+
   // Product assignment (for Properties Panel)
   assigned_material_id?: string | null;
+
+  // User notes/comments
+  notes?: string | null;
 }
 
 /** Material/product details for assigned detections */
@@ -301,6 +319,15 @@ export const DETECTION_CLASS_COLORS: Record<DetectionClass | InternalDetectionCl
   siding: '#10B981',         // Emerald
   roof: '#EF4444',           // Red
   gable: '#EC4899',          // Pink
+  // Linear measurement classes (LF)
+  trim: '#8B5CF6',           // Violet
+  fascia: '#F97316',         // Orange
+  gutter: '#06B6D4',         // Cyan
+  eave: '#84CC16',           // Lime
+  rake: '#EC4899',           // Pink
+  ridge: '#EF4444',          // Red
+  soffit: '#14B8A6',         // Teal
+  // Internal classes
   building: '#8B5CF6',       // Purple (internal)
   exterior_wall: '#10B981',  // Same as siding (legacy compatibility)
   '': '#6B7280',             // Gray - unclassified
@@ -308,12 +335,21 @@ export const DETECTION_CLASS_COLORS: Record<DetectionClass | InternalDetectionCl
 
 /** Classes that users can select in the UI dropdown */
 export const USER_SELECTABLE_CLASSES: DetectionClass[] = [
+  // Area classes (SF)
   'siding',
   'window',
   'door',
   'garage',
   'roof',
   'gable',
+  // Linear classes (LF)
+  'trim',
+  'fascia',
+  'gutter',
+  'eave',
+  'rake',
+  'ridge',
+  'soffit',
 ];
 
 export const CONFIDENCE_THRESHOLDS = {
