@@ -15,7 +15,6 @@ import {
   ArrowRight,
   Calendar,
 } from "lucide-react";
-import { createClient } from "@/lib/supabase/client";
 import { useOrganization } from "@/lib/hooks/useOrganization";
 import Link from "next/link";
 
@@ -58,46 +57,33 @@ export function DashboardOverview() {
     }
 
     loadDashboardData();
-
-    // Subscribe to realtime changes for live stats updates
-    const supabase = createClient();
-    const channel = supabase
-      .channel("dashboard-projects")
-      .on(
-        "postgres_changes",
-        {
-          event: "*",
-          schema: "public",
-          table: "projects",
-        },
-        () => {
-          // Reload dashboard data when any project changes
-          loadDashboardData();
-        }
-      )
-      .subscribe();
-
-    // Cleanup subscription
-    return () => {
-      supabase.removeChannel(channel);
-    };
   }, [organization]);
 
   const loadDashboardData = async () => {
     if (!organization) return;
 
-    const supabase = createClient();
-
     try {
-      // Fetch all projects for this organization
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const { data: projects, error } = await (supabase as any)
-        .from("projects")
-        .select("*")
-        .eq("organization_id", organization.id)
-        .order("created_at", { ascending: false });
+      const url = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/rest/v1/projects?select=*&organization_id=eq.${organization.id}&order=created_at.desc`;
+      console.log('[DashboardOverview] Fetching projects with URL:', url);
 
-      if (error) throw error;
+      // Use direct fetch since Supabase JS client has issues
+      const response = await fetch(
+        url,
+        {
+          headers: {
+            'apikey': process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+            'Authorization': `Bearer ${process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY}`
+          }
+        }
+      );
+
+      if (!response.ok) {
+        const errorBody = await response.text();
+        console.error('Supabase error:', response.status, errorBody);
+        throw new Error(`HTTP ${response.status}: ${errorBody}`);
+      }
+
+      const projects = await response.json();
 
       if (projects) {
         // Calculate statistics

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { X, Ruler } from 'lucide-react';
 
 // =============================================================================
@@ -14,8 +14,6 @@ interface CalibrationModalProps {
   currentScaleRatio: number | null;
   onApplyScale: (pixelsPerFoot: number) => void;
 }
-
-type Unit = 'feet' | 'inches';
 
 // =============================================================================
 // Helper Functions
@@ -41,18 +39,10 @@ function estimateScaleNotation(pixelsPerFoot: number): string | null {
   ];
 
   // Find closest matching scale by comparing ratios
-  // At 100 DPI, 1 inch = 100 pixels, so scale_ratio ≈ 100 / ratio * something
-  // Actually scale_ratio is pixels per foot directly
-
-  // For a rough match, we compare against typical ranges
   let closest = scales[0];
   let minDiff = Infinity;
 
   for (const scale of scales) {
-    // Typical px/ft values for each scale at common DPIs
-    // At 100 DPI: 1/4" scale = approx 100/(48/12) = 25 px/ft
-    // At 300 DPI: 1/4" scale = approx 300/(48/12) = 75 px/ft
-    // This is complex - let's just show the ratio
     const diff = Math.abs(pixelsPerFoot - scale.ratio);
     if (diff < minDiff) {
       minDiff = diff;
@@ -68,6 +58,19 @@ function estimateScaleNotation(pixelsPerFoot: number): string | null {
   return null;
 }
 
+/**
+ * Format feet and inches for display.
+ * Examples: "8' 6\"", "8'", "6\""
+ */
+function formatMeasurement(feet: string, inches: string): string {
+  const ft = parseInt(feet) || 0;
+  const inch = parseInt(inches) || 0;
+  if (ft > 0 && inch > 0) return `${ft}' ${inch}"`;
+  if (ft > 0) return `${ft}'`;
+  if (inch > 0) return `${inch}"`;
+  return '0';
+}
+
 // =============================================================================
 // Component
 // =============================================================================
@@ -79,31 +82,40 @@ export default function CalibrationModal({
   currentScaleRatio,
   onApplyScale,
 }: CalibrationModalProps) {
-  const [value, setValue] = useState<string>('');
-  const [unit, setUnit] = useState<Unit>('feet');
+  const [feet, setFeet] = useState<string>('');
+  const [inches, setInches] = useState<string>('');
+  const feetInputRef = useRef<HTMLInputElement>(null);
 
   // Reset form when modal opens
   useEffect(() => {
     if (isOpen) {
-      setValue('');
-      setUnit('feet');
+      setFeet('');
+      setInches('');
+      // Focus the feet input after a short delay to ensure modal is rendered
+      setTimeout(() => {
+        feetInputRef.current?.focus();
+      }, 50);
     }
   }, [isOpen]);
 
+  // Calculate total feet from both inputs
+  const totalFeet = useMemo(() => {
+    const ft = parseFloat(feet) || 0;
+    const inch = parseFloat(inches) || 0;
+    return ft + (inch / 12);
+  }, [feet, inches]);
+
   // Calculate new scale based on input
   const newScale = useMemo(() => {
-    const numValue = parseFloat(value);
-    if (!numValue || numValue <= 0 || !pixelDistance) return null;
+    if (totalFeet <= 0 || !pixelDistance) return null;
 
-    // Convert to feet
-    const feet = unit === 'inches' ? numValue / 12 : numValue;
-    const pixelsPerFoot = pixelDistance / feet;
+    const pixelsPerFoot = pixelDistance / totalFeet;
 
     return {
       pixelsPerFoot,
       notation: estimateScaleNotation(pixelsPerFoot),
     };
-  }, [value, unit, pixelDistance]);
+  }, [totalFeet, pixelDistance]);
 
   const handleApply = () => {
     if (newScale) {
@@ -158,31 +170,51 @@ export default function CalibrationModal({
             </span>
           </div>
 
-          {/* Measurement input */}
+          {/* Measurement input - Feet and Inches */}
           <div className="space-y-2">
             <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
               Enter the real-world measurement:
             </label>
-            <div className="flex gap-2">
-              <input
-                type="number"
-                value={value}
-                onChange={(e) => setValue(e.target.value)}
-                placeholder="e.g., 3"
-                min="0"
-                step="0.1"
-                autoFocus
-                className="flex-1 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-              />
-              <select
-                value={unit}
-                onChange={(e) => setUnit(e.target.value as Unit)}
-                className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-              >
-                <option value="feet">feet</option>
-                <option value="inches">inches</option>
-              </select>
+            <div className="flex gap-3">
+              {/* Feet input */}
+              <div className="flex-1">
+                <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1">
+                  Feet
+                </label>
+                <input
+                  ref={feetInputRef}
+                  type="number"
+                  value={feet}
+                  onChange={(e) => setFeet(e.target.value)}
+                  placeholder="0"
+                  min="0"
+                  step="1"
+                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                />
+              </div>
+              {/* Inches input */}
+              <div className="w-24">
+                <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1">
+                  Inches
+                </label>
+                <input
+                  type="number"
+                  value={inches}
+                  onChange={(e) => setInches(e.target.value)}
+                  placeholder="0"
+                  min="0"
+                  max="11"
+                  step="1"
+                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                />
+              </div>
             </div>
+            {/* Display formatted measurement */}
+            {totalFeet > 0 && (
+              <div className="text-sm text-gray-500 dark:text-gray-400">
+                = {formatMeasurement(feet, inches)} ({totalFeet.toFixed(2)} ft)
+              </div>
+            )}
           </div>
 
           {/* Scale info panel */}

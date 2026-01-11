@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useCallback, useEffect, useMemo, useRef } from 'react';
-import { Loader2, AlertCircle, RefreshCw, Eye, EyeOff, X, Layers, Home } from 'lucide-react';
+import { Loader2, AlertCircle, RefreshCw, Eye, EyeOff, X, Layers } from 'lucide-react';
 import { toast } from 'sonner';
 import {
   useExtractionData,
@@ -135,7 +135,6 @@ export default function DetectionEditor({
     currentPageId,
     setCurrentPageId,
     currentPageDetections,
-    allCurrentPageDetections,
     elevationCalcs,
     currentElevationCalcs,
     jobTotals,
@@ -208,11 +207,8 @@ export default function DetectionEditor({
   const [markupUrl, setMarkupUrl] = useState<string | null>(null);
   const [showMarkup, setShowMarkup] = useState(false);
 
-  // Canvas-based markup overlay state
-  const [showMarkupOverlay, setShowMarkupOverlay] = useState(false);
-
-  // Siding polygon overlay state
-  const [showSidingOverlay, setShowSidingOverlay] = useState(false);
+  // Show original/unmarked plans (hides all detections)
+  const [showOriginalOnly, setShowOriginalOnly] = useState(false);
 
   // Calibration state (for scale calibration modal)
   const [calibrationData, setCalibrationData] = useState<CalibrationData | null>(null);
@@ -1039,6 +1035,11 @@ export default function DetectionEditor({
       }
       if (key === 'p') {
         e.preventDefault();
+        setToolMode('point');
+        return;
+      }
+      if (key === 'h') {
+        e.preventDefault();
         setToolMode('pan');
         return;
       }
@@ -1218,95 +1219,26 @@ export default function DetectionEditor({
     setShowMarkup(false);
   }, []);
 
-  // Toggle canvas-based markup overlay
-  const handleToggleMarkupOverlay = useCallback(() => {
-    setShowMarkupOverlay((prev) => !prev);
+  // Toggle original/unmarked view (hides all detections)
+  const handleToggleOriginalOnly = useCallback(() => {
+    setShowOriginalOnly((prev) => !prev);
   }, []);
-
-  // Toggle siding polygon overlay
-  const handleToggleSidingOverlay = useCallback(() => {
-    setShowSidingOverlay((prev) => !prev);
-  }, []);
-
-  // Compute markup overlay summary from ALL detections (including building/exterior_wall)
-  const markupOverlaySummary = useMemo(() => {
-    if (!showMarkupOverlay) return null;
-
-    // Debug: log detection classes and areas - use allCurrentPageDetections to include building class
-    console.log('[MarkupOverlay] Computing summary from', allCurrentPageDetections.length, 'detections (all classes)');
-    const classCounts = allCurrentPageDetections.reduce((acc, d) => {
-      if (d.status !== 'deleted') {
-        acc[d.class] = (acc[d.class] || 0) + 1;
-      }
-      return acc;
-    }, {} as Record<string, number>);
-    console.log('[MarkupOverlay] Class counts:', classCounts);
-
-    let buildingAreaSf = 0;
-    let roofAreaSf = 0;
-    let windowAreaSf = 0;
-    let doorAreaSf = 0;
-    let garageAreaSf = 0;
-    let windowCount = 0;
-    let doorCount = 0;
-    let garageCount = 0;
-
-    for (const detection of allCurrentPageDetections) {
-      if (detection.status === 'deleted') continue;
-      const areaSf = detection.area_sf || 0;
-      // Cast to AllDetectionClasses to handle legacy 'building'/'exterior_wall' values from DB
-      const cls = detection.class as AllDetectionClasses;
-
-      if (cls === 'building' || cls === 'exterior_wall' || cls === 'siding') {
-        buildingAreaSf += areaSf;
-      } else if (cls === 'roof') {
-        roofAreaSf += areaSf;
-      } else if (cls === 'window') {
-        windowAreaSf += areaSf;
-        windowCount++;
-      } else if (cls === 'door') {
-        doorAreaSf += areaSf;
-        doorCount++;
-      } else if (cls === 'garage') {
-        garageAreaSf += areaSf;
-        garageCount++;
-      }
-    }
-
-    const grossFacadeSf = buildingAreaSf - roofAreaSf;
-    const openingsSf = windowAreaSf + doorAreaSf + garageAreaSf;
-    const netSidingSf = grossFacadeSf - openingsSf;
-
-    return {
-      buildingAreaSf: Math.round(buildingAreaSf),
-      roofAreaSf: Math.round(roofAreaSf),
-      grossFacadeSf: Math.round(grossFacadeSf),
-      windowAreaSf: Math.round(windowAreaSf),
-      doorAreaSf: Math.round(doorAreaSf),
-      garageAreaSf: Math.round(garageAreaSf),
-      openingsSf: Math.round(openingsSf),
-      netSidingSf: Math.round(netSidingSf),
-      windowCount,
-      doorCount,
-      garageCount,
-    };
-  }, [showMarkupOverlay, allCurrentPageDetections]);
 
   // ============================================================================
   // Filtered Detections for Canvas
   // ============================================================================
 
   const visibleDetections = useMemo(() => {
-    if (showDeleted) {
-      return currentPageDetections;
+    // Hide all detections when showing original/unmarked view
+    if (showOriginalOnly) {
+      return [];
     }
-    return currentPageDetections.filter((d) => d.status !== 'deleted');
-  }, [currentPageDetections, showDeleted]);
-
-  // All detections for overlay (includes building/exterior_wall for colored fills)
-  const overlayDetections = useMemo(() => {
-    return allCurrentPageDetections.filter((d) => d.status !== 'deleted');
-  }, [allCurrentPageDetections]);
+    // Filter out roof detections - they belong on roof plans, not elevations
+    if (showDeleted) {
+      return currentPageDetections.filter((d) => d.class !== 'roof');
+    }
+    return currentPageDetections.filter((d) => d.status !== 'deleted' && d.class !== 'roof');
+  }, [currentPageDetections, showDeleted, showOriginalOnly]);
 
   // Compute selected detections from both selection systems (Set-based and single-ID)
   const selectedDetections = useMemo(() => {
@@ -1489,112 +1421,30 @@ export default function DetectionEditor({
                 </button>
               )}
 
-              {/* Canvas Markup Overlay Toggle Button */}
+              {/* Show Original / Unmarked Plans Toggle Button */}
               {!showMarkup && (
                 <button
                   type="button"
-                  onClick={handleToggleMarkupOverlay}
+                  onClick={handleToggleOriginalOnly}
                   className={`absolute top-4 ${markupUrl ? 'right-36' : 'right-4'} flex items-center gap-2 px-3 py-2 text-sm font-medium rounded-lg shadow-lg transition-colors z-10 ${
-                    showMarkupOverlay
-                      ? 'bg-purple-600 hover:bg-purple-700 text-white'
+                    showOriginalOnly
+                      ? 'bg-amber-600 hover:bg-amber-700 text-white'
                       : 'bg-gray-700 hover:bg-gray-600 text-white'
                   }`}
-                  title="Toggle colored overlay showing facade calculations"
+                  title="Toggle between marked and unmarked plans"
                 >
-                  <Layers className="w-4 h-4" />
-                  {showMarkupOverlay ? 'Hide Overlay' : 'Show Overlay'}
+                  {showOriginalOnly ? (
+                    <>
+                      <Layers className="w-4 h-4" />
+                      Show Detections
+                    </>
+                  ) : (
+                    <>
+                      <EyeOff className="w-4 h-4" />
+                      Show Original
+                    </>
+                  )}
                 </button>
-              )}
-
-              {/* Siding Polygon Overlay Toggle Button */}
-              {!showMarkup && (
-                <button
-                  type="button"
-                  onClick={handleToggleSidingOverlay}
-                  className={`absolute top-4 ${markupUrl ? 'right-[17rem]' : 'right-[9.5rem]'} flex items-center gap-2 px-3 py-2 text-sm font-medium rounded-lg shadow-lg transition-colors z-10 ${
-                    showSidingOverlay
-                      ? 'bg-blue-600 hover:bg-blue-700 text-white'
-                      : 'bg-gray-700 hover:bg-gray-600 text-white'
-                  }`}
-                  title="Toggle siding polygon overlay showing net siding area"
-                >
-                  <Home className="w-4 h-4" />
-                  {showSidingOverlay ? 'Hide Siding' : 'Show Siding'}
-                </button>
-              )}
-
-              {/* Floating Summary Panel when markup overlay is active */}
-              {showMarkupOverlay && markupOverlaySummary && !showMarkup && (
-                <div className="absolute bottom-4 left-4 bg-gray-900/95 backdrop-blur-sm text-white rounded-lg shadow-2xl border border-gray-700 z-10 min-w-[280px]">
-                  <div className="px-4 py-3 border-b border-gray-700 flex items-center justify-between">
-                    <h3 className="font-semibold text-sm">Facade Calculation</h3>
-                    <div className="flex items-center gap-1.5">
-                      <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
-                      <span className="text-xs text-gray-400">Live</span>
-                    </div>
-                  </div>
-                  <div className="px-4 py-3 space-y-2 text-sm">
-                    {/* Building Area */}
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <div className="w-3 h-3 rounded-sm" style={{ backgroundColor: 'rgba(59, 130, 246, 0.8)' }} />
-                        <span className="text-gray-300">Building Area</span>
-                      </div>
-                      <span className="font-mono">{markupOverlaySummary.buildingAreaSf.toLocaleString()} SF</span>
-                    </div>
-                    {/* Roof Area (subtract) */}
-                    <div className="flex items-center justify-between text-red-400">
-                      <div className="flex items-center gap-2">
-                        <div className="w-3 h-3 rounded-sm" style={{ backgroundColor: 'rgba(220, 53, 69, 0.8)' }} />
-                        <span>− Roof Area</span>
-                      </div>
-                      <span className="font-mono">−{markupOverlaySummary.roofAreaSf.toLocaleString()} SF</span>
-                    </div>
-                    {/* Gross Facade (subtotal) */}
-                    <div className="flex items-center justify-between pt-1 border-t border-gray-700">
-                      <span className="text-gray-300 font-medium">Gross Facade</span>
-                      <span className="font-mono font-medium">{markupOverlaySummary.grossFacadeSf.toLocaleString()} SF</span>
-                    </div>
-                    {/* Openings */}
-                    <div className="space-y-1 pl-2 text-xs">
-                      <div className="flex items-center justify-between text-orange-400">
-                        <div className="flex items-center gap-2">
-                          <div className="w-2 h-2 rounded-sm" style={{ backgroundColor: 'rgba(249, 115, 22, 0.8)' }} />
-                          <span>− Windows ({markupOverlaySummary.windowCount})</span>
-                        </div>
-                        <span className="font-mono">−{markupOverlaySummary.windowAreaSf.toLocaleString()} SF</span>
-                      </div>
-                      <div className="flex items-center justify-between text-green-400">
-                        <div className="flex items-center gap-2">
-                          <div className="w-2 h-2 rounded-sm" style={{ backgroundColor: 'rgba(34, 197, 94, 0.8)' }} />
-                          <span>− Doors ({markupOverlaySummary.doorCount})</span>
-                        </div>
-                        <span className="font-mono">−{markupOverlaySummary.doorAreaSf.toLocaleString()} SF</span>
-                      </div>
-                      <div className="flex items-center justify-between text-yellow-400">
-                        <div className="flex items-center gap-2">
-                          <div className="w-2 h-2 rounded-sm" style={{ backgroundColor: 'rgba(234, 179, 8, 0.8)' }} />
-                          <span>− Garages ({markupOverlaySummary.garageCount})</span>
-                        </div>
-                        <span className="font-mono">−{markupOverlaySummary.garageAreaSf.toLocaleString()} SF</span>
-                      </div>
-                    </div>
-                    {/* Total Openings */}
-                    <div className="flex items-center justify-between text-gray-400 text-xs">
-                      <span>Total Openings</span>
-                      <span className="font-mono">−{markupOverlaySummary.openingsSf.toLocaleString()} SF</span>
-                    </div>
-                    {/* Net Siding (final result) */}
-                    <div className="flex items-center justify-between pt-2 border-t border-gray-600 text-base">
-                      <span className="font-bold text-white">Net Siding Area</span>
-                      <span className="font-mono font-bold text-green-400">{markupOverlaySummary.netSidingSf.toLocaleString()} SF</span>
-                    </div>
-                  </div>
-                  {/* Legend */}
-                  <div className="px-4 py-2 border-t border-gray-700 text-xs text-gray-500">
-                    Formula: Building − Roof − Openings = Net Siding
-                  </div>
-                </div>
               )}
             </div>
 

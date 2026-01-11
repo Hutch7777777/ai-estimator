@@ -27,18 +27,32 @@ export function createClient() {
     return browserClient;
   }
 
-  browserClient = createBrowserClient<Database>(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-  );
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+
+  console.log('[createClient] Creating singleton with:', {
+    url: url ? `${url.substring(0, 30)}...` : 'UNDEFINED',
+    keyExists: !!key
+  });
+
+  if (!url || !key) {
+    console.error('[createClient] Missing Supabase credentials!');
+    throw new Error('Supabase configuration missing. Check NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY.');
+  }
+
+  browserClient = createBrowserClient<Database>(url, key);
 
   return browserClient;
 }
 
 // For rare cases where a fresh client is explicitly needed (e.g., testing)
 export function createFreshClient() {
-  return createBrowserClient<Database>(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-  );
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+
+  if (!url || !key) {
+    throw new Error('Supabase configuration missing. Check NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY.');
+  }
+
+  return createBrowserClient<Database>(url, key);
 }

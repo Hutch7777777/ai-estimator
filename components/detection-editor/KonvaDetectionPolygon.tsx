@@ -109,10 +109,14 @@ export default function KonvaDetectionPolygon({
   const [localPoints, setLocalPoints] = useState<PolygonPoint[]>(initialPoints);
   const [isDraggingCorner, setIsDraggingCorner] = useState(false);
   const [isDraggingShape, setIsDraggingShape] = useState(false);
+  const [isDraggingEdge, setIsDraggingEdge] = useState<number | null>(null);
   const [hoveredEdgeIndex, setHoveredEdgeIndex] = useState<number | null>(null);
 
   // Ref to track local edits - prevents useEffect from resetting points before parent updates
   const lastLocalEditRef = useRef<PolygonPoint[] | null>(null);
+
+  // Ref to track edge drag start position and original points
+  const edgeDragStartRef = useRef<{ startX: number; startY: number; startPoints: PolygonPoint[] } | null>(null);
 
   // Sync local state with detection prop changes (when not dragging)
   useEffect(() => {
@@ -129,10 +133,10 @@ export default function KonvaDetectionPolygon({
     }
 
     // Only sync from props if not currently dragging AND we didn't just make a local edit
-    if (!isDraggingCorner && !isDraggingShape && !lastLocalEditRef.current) {
+    if (!isDraggingCorner && !isDraggingShape && isDraggingEdge === null && !lastLocalEditRef.current) {
       setLocalPoints(propsPoints);
     }
-  }, [detection.id, detection.polygon_points, isDraggingCorner, isDraggingShape]);
+  }, [detection.id, detection.polygon_points, isDraggingCorner, isDraggingShape, isDraggingEdge]);
 
   const color = getClassColor(detection.class);
   const lowConfidence = isLowConfidence(detection.confidence);
@@ -293,10 +297,10 @@ export default function KonvaDetectionPolygon({
     // Reset group position (we'll bake the offset into points)
     group.position({ x: 0, y: 0 });
 
-    // IMPORTANT: Don't process shape drag if we were dragging a corner
-    // Both events can fire when dragging a corner handle
-    if (isDraggingCorner) {
-      console.log('=== SHAPE DRAG END (IGNORED - corner drag in progress) ===');
+    // IMPORTANT: Don't process shape drag if we were dragging a corner or edge
+    // Both events can fire when dragging a corner/edge handle
+    if (isDraggingCorner || isDraggingEdge !== null) {
+      console.log('=== SHAPE DRAG END (IGNORED - corner/edge drag in progress) ===');
       return;
     }
 
@@ -329,7 +333,31 @@ export default function KonvaDetectionPolygon({
       polygon_points: newPoints,
       ...measurements,
     });
-  }, [localPoints, isDraggingCorner, detection, onPolygonUpdate, getEffectiveScaleRatio]);
+  }, [localPoints, isDraggingCorner, isDraggingEdge, detection, onPolygonUpdate, getEffectiveScaleRatio]);
+
+  // Handle edge drag end - move both vertices of the edge together
+  const handleEdgeDragEnd = useCallback(() => {
+    console.log('=== EDGE DRAG END ===');
+    console.log('Final localPoints:', JSON.stringify(localPoints));
+
+    // Track this local edit so useEffect doesn't reset it
+    // Must be set BEFORE calling parent update to prevent race condition
+    lastLocalEditRef.current = localPoints;
+
+    setIsDraggingEdge(null);
+
+    // Calculate new measurements using effective scale ratio
+    const effectiveScaleRatio = getEffectiveScaleRatio();
+    const measurements = calculatePolygonMeasurements(localPoints, effectiveScaleRatio);
+
+    console.log('Edge drag measurements:', measurements);
+
+    // Update parent with new polygon points and measurements
+    onPolygonUpdate(detection, {
+      polygon_points: localPoints,
+      ...measurements,
+    });
+  }, [localPoints, detection, onPolygonUpdate, getEffectiveScaleRatio]);
 
   // Handle click on edge to add point
   const handleEdgeClick = useCallback((edgeIndex: number, e: Konva.KonvaEventObject<MouseEvent>) => {
@@ -416,7 +444,7 @@ export default function KonvaDetectionPolygon({
     <Group
       id={detection.id}
       name={`detection-${detection.id}`}
-      draggable={draggable && isSelected && !isDraggingCorner}
+      draggable={draggable && isSelected && !isDraggingCorner && isDraggingEdge === null}
       onDragStart={handleShapeDragStart}
       onDragEnd={handleShapeDragEnd}
     >
@@ -457,6 +485,94 @@ export default function KonvaDetectionPolygon({
             onMouseEnter={() => setHoveredEdgeIndex(index)}
             onMouseLeave={() => setHoveredEdgeIndex(null)}
             listening={true}
+          />
+        );
+      })}
+
+      {/* Draggable Edge Lines (only when selected) - for resizing by dragging edges */}
+      {isSelected && localPoints.length >= 2 && localPoints.map((point, index) => {
+        const nextPoint = localPoints[(index + 1) % localPoints.length];
+        // Determine if edge is more vertical or horizontal for cursor
+        const isVertical = Math.abs(nextPoint.x - point.x) < Math.abs(nextPoint.y - point.y);
+
+        return (
+          <Line
+            key={`edge-drag-${index}`}
+            points={[point.x, point.y, nextPoint.x, nextPoint.y]}
+            stroke="transparent"
+            strokeWidth={edgeClickWidth}
+            hitStrokeWidth={edgeClickWidth}
+            draggable
+            onMouseEnter={(e) => {
+              const stage = e.target.getStage();
+              if (stage && isDraggingEdge === null) {
+                stage.container().style.cursor = isVertical ? 'ew-resize' : 'ns-resize';
+              }
+            }}
+            onMouseLeave={(e) => {
+              const stage = e.target.getStage();
+              if (stage && isDraggingEdge === null) {
+                stage.container().style.cursor = '';
+              }
+            }}
+            onDragStart={(e) => {
+              e.cancelBubble = true;
+              setIsDraggingEdge(index);
+              // Store the starting position and original points
+              edgeDragStartRef.current = {
+                startX: e.target.x(),
+                startY: e.target.y(),
+                startPoints: [...localPoints],
+              };
+            }}
+            onDragMove={(e) => {
+              e.cancelBubble = true;
+
+              if (!edgeDragStartRef.current) return;
+
+              const line = e.target;
+              const stage = line.getStage();
+              const scale = stage?.scaleX() || 1;
+
+              // Calculate delta from start position (not from 0)
+              const dx = (line.x() - edgeDragStartRef.current.startX) / scale;
+              const dy = (line.y() - edgeDragStartRef.current.startY) / scale;
+
+              // Get the two vertex indices for this edge
+              const idx1 = index;
+              const idx2 = (index + 1) % localPoints.length;
+
+              // Apply delta to the ORIGINAL start points (not current points)
+              const startPoints = edgeDragStartRef.current.startPoints;
+              const newPoints = [...localPoints];
+              newPoints[idx1] = {
+                x: startPoints[idx1].x + dx,
+                y: startPoints[idx1].y + dy
+              };
+              newPoints[idx2] = {
+                x: startPoints[idx2].x + dx,
+                y: startPoints[idx2].y + dy
+              };
+
+              setLocalPoints(newPoints);
+            }}
+            onDragEnd={(e) => {
+              e.cancelBubble = true;
+
+              // Reset the line position for next drag
+              e.target.x(0);
+              e.target.y(0);
+
+              // Clear the drag start ref
+              edgeDragStartRef.current = null;
+
+              handleEdgeDragEnd();
+
+              const stage = e.target.getStage();
+              if (stage) {
+                stage.container().style.cursor = '';
+              }
+            }}
           />
         );
       })}
@@ -541,43 +657,6 @@ export default function KonvaDetectionPolygon({
             padding={labelPadding}
           />
         </Label>
-      )}
-
-      {/* Status Indicator (top-right of bounding box) */}
-      {detection.status === 'verified' && (
-        <Rect
-          x={bbox.maxX - handleRadius * 2 - labelPadding}
-          y={bbox.minY + labelPadding}
-          width={handleRadius * 2}
-          height={handleRadius * 2}
-          fill="#10B981"
-          cornerRadius={handleRadius}
-          listening={false}
-        />
-      )}
-
-      {detection.status === 'edited' && (
-        <Rect
-          x={bbox.maxX - handleRadius * 2 - labelPadding}
-          y={bbox.minY + labelPadding}
-          width={handleRadius * 2}
-          height={handleRadius * 2}
-          fill="#3B82F6"
-          cornerRadius={handleRadius}
-          listening={false}
-        />
-      )}
-
-      {detection.status === 'auto' && lowConfidence && (
-        <Rect
-          x={bbox.maxX - handleRadius * 2 - labelPadding}
-          y={bbox.minY + labelPadding}
-          width={handleRadius * 2}
-          height={handleRadius * 2}
-          fill="#F59E0B"
-          cornerRadius={2 / scale}
-          listening={false}
-        />
       )}
     </Group>
   );

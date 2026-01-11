@@ -1,4 +1,4 @@
-import { createClient } from "./client";
+// Using direct fetch for storage operations due to Supabase client issues
 
 const BUCKET_NAME = "project-pdfs";
 
@@ -12,33 +12,38 @@ export async function uploadProjectPdf(
   projectId: string,
   file: File
 ): Promise<{ url: string | null; error?: string }> {
-  const supabase = createClient();
-
   try {
     // Create a unique filename: projectId/timestamp_originalname.pdf
     const timestamp = Date.now();
     const sanitizedName = file.name.replace(/[^a-zA-Z0-9.-]/g, "_");
     const filePath = `${projectId}/${timestamp}_${sanitizedName}`;
 
-    // Upload the file
-    const { data, error } = await (supabase as any).storage
-      .from(BUCKET_NAME)
-      .upload(filePath, file, {
-        cacheControl: "3600",
-        upsert: false,
-      });
+    // Upload the file using direct fetch to Supabase Storage API
+    const response = await fetch(
+      `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/${BUCKET_NAME}/${filePath}`,
+      {
+        method: 'POST',
+        headers: {
+          'apikey': process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+          'Authorization': `Bearer ${process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY}`,
+          'Content-Type': file.type,
+          'Cache-Control': '3600',
+          'x-upsert': 'false'
+        },
+        body: file
+      }
+    );
 
-    if (error) {
-      console.error("Error uploading PDF:", error);
-      return { url: null, error: error.message };
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error("Error uploading PDF:", errorText);
+      return { url: null, error: `Upload failed: ${response.statusText}` };
     }
 
-    // Get the public URL
-    const { data: urlData } = (supabase as any).storage
-      .from(BUCKET_NAME)
-      .getPublicUrl(filePath);
+    // Construct the public URL
+    const publicUrl = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/${BUCKET_NAME}/${filePath}`;
 
-    return { url: urlData.publicUrl };
+    return { url: publicUrl };
   } catch (error) {
     console.error("Error uploading PDF:", error);
     return { url: null, error: String(error) };
@@ -79,30 +84,50 @@ export async function downloadProjectPdf(
 export async function deleteProjectPdfs(
   projectId: string
 ): Promise<{ success: boolean; error?: string }> {
-  const supabase = createClient();
-
   try {
     // List all files in the project folder
-    const { data: files, error: listError } = await (supabase as any).storage
-      .from(BUCKET_NAME)
-      .list(projectId);
+    const listResponse = await fetch(
+      `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/list/${BUCKET_NAME}`,
+      {
+        method: 'POST',
+        headers: {
+          'apikey': process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+          'Authorization': `Bearer ${process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ prefix: projectId })
+      }
+    );
 
-    if (listError) {
-      return { success: false, error: listError.message };
+    if (!listResponse.ok) {
+      const errorText = await listResponse.text();
+      return { success: false, error: `List failed: ${errorText}` };
     }
+
+    const files = await listResponse.json();
 
     if (!files || files.length === 0) {
       return { success: true }; // No files to delete
     }
 
     // Delete all files
-    const filePaths = files.map((f: any) => `${projectId}/${f.name}`);
-    const { error: deleteError } = await (supabase as any).storage
-      .from(BUCKET_NAME)
-      .remove(filePaths);
+    const filePaths = files.map((f: { name: string }) => `${projectId}/${f.name}`);
+    const deleteResponse = await fetch(
+      `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/${BUCKET_NAME}`,
+      {
+        method: 'DELETE',
+        headers: {
+          'apikey': process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+          'Authorization': `Bearer ${process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ prefixes: filePaths })
+      }
+    );
 
-    if (deleteError) {
-      return { success: false, error: deleteError.message };
+    if (!deleteResponse.ok) {
+      const errorText = await deleteResponse.text();
+      return { success: false, error: `Delete failed: ${errorText}` };
     }
 
     return { success: true };

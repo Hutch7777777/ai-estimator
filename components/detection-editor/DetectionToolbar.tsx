@@ -1,6 +1,7 @@
 'use client';
 
 import React, { memo } from 'react';
+import Link from 'next/link';
 import {
   ZoomIn,
   ZoomOut,
@@ -14,9 +15,11 @@ import {
   Undo2,
   Redo2,
   Save,
+  ArrowLeft,
 } from 'lucide-react';
 import type { ToolMode, DetectionClass } from '@/lib/types/extraction';
 import { DETECTION_CLASS_COLORS } from '@/lib/types/extraction';
+import { UserMenu } from '@/components/layout/UserMenu';
 
 // =============================================================================
 // Types
@@ -159,6 +162,15 @@ const DetectionToolbar = memo(function DetectionToolbar({
 
   return (
     <div className="h-14 bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700 flex items-center px-4 gap-4">
+      {/* Dashboard Link */}
+      <Link
+        href="/project"
+        className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors border-r border-gray-200 dark:border-gray-700 pr-4 mr-0"
+      >
+        <ArrowLeft className="w-4 h-4" />
+        <span className="hidden sm:inline">Dashboard</span>
+      </Link>
+
       {/* Class Selector (only in create mode) */}
       {toolMode === 'create' && (
         <div className="border-r border-gray-200 dark:border-gray-700 pr-4">
@@ -385,6 +397,11 @@ const DetectionToolbar = memo(function DetectionToolbar({
           )}
         </button>
       )}
+
+      {/* User Menu */}
+      <div className="ml-2 pl-4 border-l border-gray-200 dark:border-gray-700">
+        <UserMenu />
+      </div>
     </div>
   );
 });

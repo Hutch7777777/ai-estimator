@@ -1,4 +1,5 @@
-import { createClient } from "./client";
+// Using direct fetch instead of Supabase client due to client issues
+// (Supabase JS client queries build but never execute HTTP requests)
 import {
   Polygon,
   CountMarker,
@@ -204,19 +205,23 @@ export async function saveMarkups(
   projectId: string,
   data: MarkupData
 ): Promise<{ success: boolean; error?: string }> {
-  const supabase = createClient();
-
   try {
     // Delete existing markups for this project
-    // Note: cad_manual_markups table is not in the typed schema, using type assertion
-    const { error: deleteError } = await (supabase as any)
-      .from("cad_manual_markups")
-      .delete()
-      .eq("project_id", projectId);
+    const deleteResponse = await fetch(
+      `${process.env.NEXT_PUBLIC_SUPABASE_URL}/rest/v1/cad_manual_markups?project_id=eq.${projectId}`,
+      {
+        method: 'DELETE',
+        headers: {
+          'apikey': process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+          'Authorization': `Bearer ${process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY}`
+        }
+      }
+    );
 
-    if (deleteError) {
-      console.error("Error deleting existing markups:", deleteError);
-      return { success: false, error: deleteError.message };
+    if (!deleteResponse.ok) {
+      const errorText = await deleteResponse.text();
+      console.error("Error deleting existing markups:", errorText);
+      return { success: false, error: `Delete failed: ${deleteResponse.statusText}` };
     }
 
     // Prepare all rows
@@ -231,14 +236,23 @@ export async function saveMarkups(
     }
 
     // Insert all markups
-    // Note: cad_manual_markups table is not in the typed schema, using type assertion
-    const { error: insertError } = await (supabase as any)
-      .from("cad_manual_markups")
-      .insert(rows);
+    const insertResponse = await fetch(
+      `${process.env.NEXT_PUBLIC_SUPABASE_URL}/rest/v1/cad_manual_markups`,
+      {
+        method: 'POST',
+        headers: {
+          'apikey': process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+          'Authorization': `Bearer ${process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(rows)
+      }
+    );
 
-    if (insertError) {
-      console.error("Error inserting markups:", insertError);
-      return { success: false, error: insertError.message };
+    if (!insertResponse.ok) {
+      const errorText = await insertResponse.text();
+      console.error("Error inserting markups:", errorText);
+      return { success: false, error: `Insert failed: ${insertResponse.statusText}` };
     }
 
     return { success: true };
@@ -254,21 +268,24 @@ export async function saveMarkups(
 export async function loadMarkups(
   projectId: string
 ): Promise<{ data: MarkupData | null; error?: string }> {
-  const supabase = createClient();
-
   try {
-    // Note: cad_manual_markups table is not in the typed schema, using type assertion
-    const { data: rows, error } = await (supabase as any)
-      .from("cad_manual_markups")
-      .select("*")
-      .eq("project_id", projectId)
-      .order("page_number", { ascending: true })
-      .order("created_at", { ascending: true });
+    const response = await fetch(
+      `${process.env.NEXT_PUBLIC_SUPABASE_URL}/rest/v1/cad_manual_markups?project_id=eq.${projectId}&select=*&order=page_number.asc,created_at.asc`,
+      {
+        headers: {
+          'apikey': process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+          'Authorization': `Bearer ${process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY}`
+        }
+      }
+    );
 
-    if (error) {
-      console.error("Error loading markups:", error);
-      return { data: null, error: error.message };
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error("Error loading markups:", errorText);
+      return { data: null, error: `Load failed: ${response.statusText}` };
     }
+
+    const rows = await response.json();
 
     if (!rows || rows.length === 0) {
       return { data: { polygons: [], markers: [], measurements: [] } };
@@ -306,18 +323,22 @@ export async function loadMarkups(
 export async function deleteAllMarkups(
   projectId: string
 ): Promise<{ success: boolean; error?: string }> {
-  const supabase = createClient();
-
   try {
-    // Note: cad_manual_markups table is not in the typed schema, using type assertion
-    const { error } = await (supabase as any)
-      .from("cad_manual_markups")
-      .delete()
-      .eq("project_id", projectId);
+    const response = await fetch(
+      `${process.env.NEXT_PUBLIC_SUPABASE_URL}/rest/v1/cad_manual_markups?project_id=eq.${projectId}`,
+      {
+        method: 'DELETE',
+        headers: {
+          'apikey': process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+          'Authorization': `Bearer ${process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY}`
+        }
+      }
+    );
 
-    if (error) {
-      console.error("Error deleting markups:", error);
-      return { success: false, error: error.message };
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error("Error deleting markups:", errorText);
+      return { success: false, error: `Delete failed: ${response.statusText}` };
     }
 
     return { success: true };
@@ -333,18 +354,26 @@ export async function deleteAllMarkups(
 export async function getMarkupCount(
   projectId: string
 ): Promise<{ count: number; error?: string }> {
-  const supabase = createClient();
-
   try {
-    // Note: cad_manual_markups table is not in the typed schema, using type assertion
-    const { count, error } = await (supabase as any)
-      .from("cad_manual_markups")
-      .select("*", { count: "exact", head: true })
-      .eq("project_id", projectId);
+    const response = await fetch(
+      `${process.env.NEXT_PUBLIC_SUPABASE_URL}/rest/v1/cad_manual_markups?project_id=eq.${projectId}&select=id`,
+      {
+        method: 'HEAD',
+        headers: {
+          'apikey': process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+          'Authorization': `Bearer ${process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY}`,
+          'Prefer': 'count=exact'
+        }
+      }
+    );
 
-    if (error) {
-      return { count: 0, error: error.message };
+    if (!response.ok) {
+      return { count: 0, error: `Count failed: ${response.statusText}` };
     }
+
+    const contentRange = response.headers.get('content-range');
+    // Format: "0-9/100" or "*/100" for count-only
+    const count = contentRange ? parseInt(contentRange.split('/')[1]) : 0;
 
     return { count: count || 0 };
   } catch (error) {

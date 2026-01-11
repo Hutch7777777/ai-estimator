@@ -123,7 +123,7 @@ const PropertiesPanel = memo(function PropertiesPanel({
           </span>
         </div>
         <div className="flex-1 overflow-y-auto">
-          <PageTotals detections={allDetections} />
+          <PageTotals detections={allDetections} scaleRatio={currentPage?.scale_ratio} />
         </div>
       </div>
     </div>

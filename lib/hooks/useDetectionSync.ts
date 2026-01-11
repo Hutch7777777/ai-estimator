@@ -105,6 +105,7 @@ export interface ValidationDetection {
   detection_index: number;
   matched_tag: string | null;
   polygon_points?: Array<{ x: number; y: number }> | null;
+  markup_type?: 'polygon' | 'line' | 'point';
 }
 
 export interface ValidationRequest {
@@ -509,6 +510,7 @@ export async function validateDetections(
         detection_index: d.detection_index,
         matched_tag: d.matched_tag,
         polygon_points: d.polygon_points ?? null,
+        markup_type: d.markup_type,
       })),
     };
 

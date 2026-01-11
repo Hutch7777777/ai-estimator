@@ -2,11 +2,12 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { ArrowLeft, BarChart3, Pencil } from "lucide-react";
+import { ArrowLeft, BarChart3, Pencil, Layers } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ProjectForm } from "@/components/project-form/ProjectForm";
 import { ProjectsTable } from "@/components/projects/ProjectsTable";
 import { DashboardOverview } from "@/components/dashboard/DashboardOverview";
+import { ExtractionsTable } from "@/components/dashboard/ExtractionsTable";
 import { CADMarkupStep } from "@/components/cad-markup";
 import { UserMenu } from "@/components/layout/UserMenu";
 
@@ -48,7 +49,7 @@ export default function ProjectDashboard() {
 
         {/* Tabs */}
         <Tabs value={activeTab} onValueChange={handleTabChange} className="space-y-6">
-          <TabsList className="grid w-full max-w-3xl grid-cols-4 h-12">
+          <TabsList className="grid w-full max-w-4xl grid-cols-5 h-12">
             <TabsTrigger value="overview" className="text-base">
               <BarChart3 className="mr-2 h-4 w-4" />
               Overview
@@ -59,6 +60,10 @@ export default function ProjectDashboard() {
             <TabsTrigger value="cad" className="text-base">
               <Pencil className="mr-2 h-4 w-4" />
               PDF Markups
+            </TabsTrigger>
+            <TabsTrigger value="extractions" className="text-base">
+              <Layers className="mr-2 h-4 w-4" />
+              Extractions
             </TabsTrigger>
             <TabsTrigger value="past" className="text-base">
               Past Projects
@@ -74,8 +79,11 @@ export default function ProjectDashboard() {
           </TabsContent>
 
           <TabsContent value="cad" className="space-y-6">
-            {(() => { console.log('[ProjectDashboard] Rendering CAD tab content'); return null; })()}
             <CADMarkupStep />
+          </TabsContent>
+
+          <TabsContent value="extractions" className="space-y-6">
+            <ExtractionsTable />
           </TabsContent>
 
           <TabsContent value="past" className="space-y-6">

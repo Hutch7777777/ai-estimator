@@ -14,6 +14,7 @@ import type {
 import { DETECTION_CLASS_COLORS } from '@/lib/types/extraction';
 import KonvaDetectionPolygon, { type PolygonUpdatePayload } from './KonvaDetectionPolygon';
 import KonvaDetectionLine, { type LineUpdatePayload } from './KonvaDetectionLine';
+import KonvaDetectionPoint, { type PointUpdatePayload } from './KonvaDetectionPoint';
 import {
   calculateFitScale,
   calculateCenterOffset,
@@ -89,6 +90,10 @@ export interface KonvaDetectionCanvasProps {
     detection: ExtractionDetection,
     updates: LineUpdatePayload
   ) => void;
+  onDetectionPointUpdate?: (
+    detection: ExtractionDetection,
+    updates: PointUpdatePayload
+  ) => void;
   onCalibrationComplete?: (data: CalibrationData) => void;
   containerWidth: number;
   containerHeight: number;
@@ -105,7 +110,7 @@ const CLOSE_THRESHOLD = 15; // Pixels to detect "near starting point"
 const MIN_POLYGON_POINTS = 3;
 
 // Classes appropriate for linear measurements (lines) - measured in LF, not SF
-const LINEAR_CLASSES: DetectionClass[] = ['trim', 'fascia', 'gutter', 'eave', 'rake', 'ridge', 'soffit'];
+const LINEAR_CLASSES: DetectionClass[] = ['trim', 'fascia', 'gutter', 'eave', 'rake', 'ridge', 'soffit', 'valley'];
 
 // =============================================================================
 // Component
@@ -124,6 +129,7 @@ export default function KonvaDetectionCanvas({
   onDetectionCreate,
   onDetectionPolygonUpdate,
   onDetectionLineUpdate,
+  onDetectionPointUpdate,
   onCalibrationComplete,
   containerWidth,
   containerHeight,
@@ -464,6 +470,30 @@ export default function KonvaDetectionCanvas({
         }
         return;
       }
+
+      // Point mode - single click to place a marker
+      if (toolMode === 'point') {
+        const stage = stageRef.current;
+        if (!stage) return;
+
+        const pointer = stage.getPointerPosition();
+        if (!pointer) return;
+
+        // Transform to image coordinates
+        const imageX = (pointer.x - position.x) / scale;
+        const imageY = (pointer.y - position.y) / scale;
+
+        // Create point detection
+        onDetectionCreate({
+          pixel_x: imageX,
+          pixel_y: imageY,
+          pixel_width: 0,
+          pixel_height: 0,
+          class: activeClass,
+          markup_type: 'point',
+        });
+        return;
+      }
     },
     [toolMode, onSelectionChange, isDrawingPolygon, drawingPoints.length, isNearStart, completePolygon, calibrationState.pointA, onCalibrationComplete, resetCalibration, position, scale, lineStartPoint, scaleRatio, activeClass, onDetectionCreate]
   );
@@ -582,6 +612,13 @@ export default function KonvaDetectionCanvas({
     [onDetectionLineUpdate]
   );
 
+  const handlePointUpdate = useCallback(
+    (detection: ExtractionDetection, updates: PointUpdatePayload) => {
+      onDetectionPointUpdate?.(detection, updates);
+    },
+    [onDetectionPointUpdate]
+  );
+
   // ==========================================================================
   // Drawing Color for Polygon Preview
   // ==========================================================================
@@ -601,6 +638,8 @@ export default function KonvaDetectionCanvas({
       case 'create':
         return 'crosshair';
       case 'line':
+        return 'crosshair';
+      case 'point':
         return 'crosshair';
       case 'calibrate':
         return 'crosshair';
@@ -667,9 +706,9 @@ export default function KonvaDetectionCanvas({
             />
           )}
 
-          {/* Detection Polygons (filter out lines) */}
+          {/* Detection Polygons (filter out lines and points) */}
           {sortedDetections
-            .filter((d) => d.markup_type !== 'line')
+            .filter((d) => d.markup_type !== 'line' && d.markup_type !== 'point')
             .map((detection) => (
               <KonvaDetectionPolygon
                 key={detection.id}
@@ -703,6 +742,24 @@ export default function KonvaDetectionCanvas({
                 onHoverEnd={() => setHoveredId(null)}
                 onLineUpdate={handleLineUpdate}
                 showLength={true}
+                draggable={toolMode === 'select'}
+              />
+            ))}
+
+          {/* Detection Points (Count Markers) */}
+          {sortedDetections
+            .filter((d) => d.markup_type === 'point')
+            .map((detection) => (
+              <KonvaDetectionPoint
+                key={detection.id}
+                detection={detection}
+                isSelected={selectedIds.has(detection.id)}
+                isHovered={detection.id === hoveredId}
+                scale={scale}
+                onSelect={handleDetectionSelect}
+                onHoverStart={setHoveredId}
+                onHoverEnd={() => setHoveredId(null)}
+                onPointUpdate={handlePointUpdate}
                 draggable={toolMode === 'select'}
               />
             ))}

@@ -13,10 +13,6 @@ import {
   AlertTriangle,
   Trash2,
   Pencil,
-  Building2,
-  CornerDownRight,
-  Ruler,
-  Loader2,
   SlidersHorizontal,
   RotateCcw,
 } from 'lucide-react';
@@ -28,14 +24,19 @@ import type {
   DetectionClass,
   AllDetectionClasses,
   DetectionStatus,
-  Phase4Data,
 } from '@/lib/types/extraction';
 import { DETECTION_CLASS_COLORS, CONFIDENCE_THRESHOLDS } from '@/lib/types/extraction';
-import { getPhase4Data, calculateLinearElements } from '@/lib/api/extractionApi';
 import ClassSelector from './PropertiesPanel/ClassSelector';
 import SelectionProperties from './PropertiesPanel/SelectionProperties';
 import MaterialAssignment from './PropertiesPanel/MaterialAssignment';
 import NotesField from './PropertiesPanel/NotesField';
+import {
+  getClassDerivedMeasurements,
+  rectToPolygonPoints,
+  calculateBuildingMeasurements,
+  calculateLineMeasurements,
+  calculateAreaMeasurements,
+} from '@/lib/utils/polygonUtils';
 
 // =============================================================================
 // Types
@@ -414,11 +415,6 @@ const DetectionSidebar = memo(function DetectionSidebar({
   );
   const [filterStatus, setFilterStatus] = useState<DetectionStatus | 'all'>('all');
 
-  // Phase 4 Enhanced Data state
-  const [phase4Data, setPhase4Data] = useState<Phase4Data | null>(null);
-  const [phase4Loading, setPhase4Loading] = useState(false);
-  const [phase4Expanded, setPhase4Expanded] = useState(true);
-
   // Auto-switch to Properties tab when selection changes from empty to non-empty
   const prevSelectedCountRef = useRef(0);
   useEffect(() => {
@@ -427,43 +423,6 @@ const DetectionSidebar = memo(function DetectionSidebar({
     }
     prevSelectedCountRef.current = selectedDetections.length;
   }, [selectedDetections.length]);
-
-  // Load Phase 4 data when jobId changes or tab switches to totals
-  useEffect(() => {
-    if (!jobId || activeTab !== 'totals') return;
-
-    const loadPhase4 = async () => {
-      setPhase4Loading(true);
-      try {
-        const data = await getPhase4Data(jobId);
-        setPhase4Data(data);
-      } catch (err) {
-        console.error('DetectionSidebar: Error loading Phase 4 data:', err);
-      } finally {
-        setPhase4Loading(false);
-      }
-    };
-
-    // Only load if we don't have data yet
-    if (!phase4Data) {
-      loadPhase4();
-    }
-  }, [jobId, activeTab, phase4Data]);
-
-  // Handler to manually trigger Phase 4 calculation
-  const handleCalculatePhase4 = async () => {
-    if (!jobId) return;
-
-    setPhase4Loading(true);
-    try {
-      const data = await calculateLinearElements(jobId);
-      setPhase4Data(data);
-    } catch (err) {
-      console.error('DetectionSidebar: Error calculating Phase 4 data:', err);
-    } finally {
-      setPhase4Loading(false);
-    }
-  };
 
   // Group detections by page for counts
   const detectionCountsByPage = useMemo(() => {
@@ -537,6 +496,188 @@ const DetectionSidebar = memo(function DetectionSidebar({
   const totalDetections = detections.filter(
     (d) => d.page_id === currentPageId && d.status !== 'deleted'
   ).length;
+
+  // Get current page for scale ratio
+  const currentPage = useMemo(() => {
+    return pages.find((p) => p.id === currentPageId) || null;
+  }, [pages, currentPageId]);
+
+  // Calculate live derived measurements from current page detections (HOVER-style)
+  const liveDerivedTotals = useMemo(() => {
+    if (!currentPage?.scale_ratio || currentPage.scale_ratio <= 0) {
+      return null;
+    }
+
+    const scaleRatio = currentPage.scale_ratio;
+    // Filter out roof detections - they belong on roof plans, not elevations
+    const pageDetections = detections.filter(
+      (d) => d.page_id === currentPage.id && d.status !== 'deleted' && d.class !== 'roof'
+    );
+
+    const totals = {
+      // FACADE (building/exterior wall)
+      buildingCount: 0,
+      buildingAreaSf: 0,
+      buildingPerimeterLf: 0,
+      buildingLevelStarterLf: 0,
+      // WINDOWS
+      windowCount: 0,
+      windowAreaSf: 0,
+      windowPerimeterLf: 0,
+      windowHeadLf: 0,
+      windowJambLf: 0,
+      windowSillLf: 0,
+      // DOORS
+      doorCount: 0,
+      doorAreaSf: 0,
+      doorPerimeterLf: 0,
+      doorHeadLf: 0,
+      doorJambLf: 0,
+      // GARAGES
+      garageCount: 0,
+      garageAreaSf: 0,
+      garagePerimeterLf: 0,
+      garageHeadLf: 0,
+      garageJambLf: 0,
+      // GABLES
+      gableCount: 0,
+      gableAreaSf: 0,
+      gableRakeLf: 0,
+      // CORNERS
+      insideCornerCount: 0,
+      insideCornerLf: 0,
+      outsideCornerCount: 0,
+      outsideCornerLf: 0,
+      // ROOFLINE (line-type measurements)
+      eavesCount: 0,
+      eavesLf: 0,
+      rakesCount: 0,
+      rakesLf: 0,
+      ridgeCount: 0,
+      ridgeLf: 0,
+      valleyCount: 0,
+      valleyLf: 0,
+      // SOFFIT (area)
+      soffitCount: 0,
+      soffitAreaSf: 0,
+      // FASCIA (line)
+      fasciaCount: 0,
+      fasciaLf: 0,
+      // GUTTERS
+      gutterCount: 0,
+      gutterLf: 0,
+      downspoutCount: 0,
+      // SIDING (net area = building - openings)
+      sidingNetSf: 0,
+    };
+
+    // Track total openings for net siding calculation
+    let totalOpeningsSf = 0;
+
+    for (const detection of pageDetections) {
+      // Cast to string for comparison with classes that may not be in DetectionClass type
+      const cls = detection.class as string;
+
+      // Get polygon points (use existing or convert from bounding box)
+      const points = detection.polygon_points && detection.polygon_points.length > 0
+        ? detection.polygon_points
+        : rectToPolygonPoints({
+            pixel_x: detection.pixel_x,
+            pixel_y: detection.pixel_y,
+            pixel_width: detection.pixel_width,
+            pixel_height: detection.pixel_height,
+          });
+
+      // Building/Facade class (handle both underscore and space versions)
+      if (cls === 'building' || cls === 'exterior_wall' || cls === 'exterior wall') {
+        const buildingMeasurements = calculateBuildingMeasurements(points, scaleRatio);
+        totals.buildingCount++;
+        totals.buildingAreaSf += buildingMeasurements.area_sf;
+        totals.buildingPerimeterLf += buildingMeasurements.perimeter_lf;
+        totals.buildingLevelStarterLf += buildingMeasurements.level_starter_lf;
+        continue;
+      }
+
+      // Window/Door/Garage/Gable derived measurements
+      const derived = getClassDerivedMeasurements(cls, points, scaleRatio);
+      const areaMeasurement = calculateAreaMeasurements(points, scaleRatio);
+
+      if (cls === 'window' && derived && 'head_lf' in derived) {
+        totals.windowCount++;
+        totals.windowAreaSf += areaMeasurement.area_sf;
+        totals.windowPerimeterLf += areaMeasurement.perimeter_lf;
+        totals.windowHeadLf += derived.head_lf;
+        totals.windowJambLf += derived.jamb_lf;
+        totals.windowSillLf += (derived as { sill_lf?: number }).sill_lf || 0;
+        totalOpeningsSf += areaMeasurement.area_sf;
+      } else if (cls === 'door' && derived && 'head_lf' in derived) {
+        totals.doorCount++;
+        totals.doorAreaSf += areaMeasurement.area_sf;
+        totals.doorPerimeterLf += areaMeasurement.perimeter_lf;
+        totals.doorHeadLf += derived.head_lf;
+        totals.doorJambLf += derived.jamb_lf;
+        totalOpeningsSf += areaMeasurement.area_sf;
+      } else if (cls === 'garage' && derived && 'head_lf' in derived) {
+        totals.garageCount++;
+        totals.garageAreaSf += areaMeasurement.area_sf;
+        totals.garagePerimeterLf += areaMeasurement.perimeter_lf;
+        totals.garageHeadLf += derived.head_lf;
+        totals.garageJambLf += derived.jamb_lf;
+        totalOpeningsSf += areaMeasurement.area_sf;
+      } else if (cls === 'gable' && derived && 'rake_lf' in derived) {
+        totals.gableCount++;
+        totals.gableAreaSf += areaMeasurement.area_sf;
+        totals.gableRakeLf += derived.rake_lf;
+      } else if (cls === 'siding') {
+        // Siding zones are handled by the overlay, not individual totals
+      } else if (cls === 'soffit') {
+        totals.soffitCount++;
+        totals.soffitAreaSf += areaMeasurement.area_sf;
+      } else if (cls === 'inside_corner' || cls === 'inside corner') {
+        const lineMeasurement = calculateLineMeasurements(points, scaleRatio);
+        totals.insideCornerCount++;
+        totals.insideCornerLf += lineMeasurement.length_lf;
+      } else if (cls === 'outside_corner' || cls === 'outside corner') {
+        const lineMeasurement = calculateLineMeasurements(points, scaleRatio);
+        totals.outsideCornerCount++;
+        totals.outsideCornerLf += lineMeasurement.length_lf;
+      } else if (cls === 'fascia') {
+        const lineMeasurement = calculateLineMeasurements(points, scaleRatio);
+        totals.fasciaCount++;
+        totals.fasciaLf += lineMeasurement.length_lf;
+      } else if (cls === 'gutter') {
+        const lineMeasurement = calculateLineMeasurements(points, scaleRatio);
+        totals.gutterCount++;
+        totals.gutterLf += lineMeasurement.length_lf;
+      } else if (cls === 'downspout') {
+        totals.downspoutCount++;
+      }
+
+      // Line-type detections (roof elements)
+      if (cls === 'eave' || cls === 'roof_eave') {
+        const lineMeasurement = calculateLineMeasurements(points, scaleRatio);
+        totals.eavesCount++;
+        totals.eavesLf += lineMeasurement.length_lf;
+      } else if (cls === 'rake' || cls === 'roof_rake') {
+        const lineMeasurement = calculateLineMeasurements(points, scaleRatio);
+        totals.rakesCount++;
+        totals.rakesLf += lineMeasurement.length_lf;
+      } else if (cls === 'ridge' || cls === 'roof_ridge') {
+        const lineMeasurement = calculateLineMeasurements(points, scaleRatio);
+        totals.ridgeCount++;
+        totals.ridgeLf += lineMeasurement.length_lf;
+      } else if (cls === 'valley' || cls === 'roof_valley') {
+        const lineMeasurement = calculateLineMeasurements(points, scaleRatio);
+        totals.valleyCount++;
+        totals.valleyLf += lineMeasurement.length_lf;
+      }
+    }
+
+    // Calculate net siding (building area minus openings)
+    totals.sidingNetSf = Math.max(0, totals.buildingAreaSf - totalOpeningsSf);
+
+    return totals;
+  }, [detections, currentPage]);
 
   return (
     <div className="w-72 h-full bg-white dark:bg-gray-900 border-l border-gray-200 dark:border-gray-700 flex flex-col">
@@ -783,6 +924,262 @@ const DetectionSidebar = memo(function DetectionSidebar({
         {/* Totals Tab */}
         {activeTab === 'totals' && (
           <div className="p-3 space-y-4">
+            {/* Live Derived Measurements (calculated from current detections - HOVER style) */}
+            {liveDerivedTotals && (
+              <div className="space-y-3">
+                <div className="flex items-center gap-2">
+                  <h3 className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                    Live Calculations
+                  </h3>
+                  <span className="text-xs text-gray-400 dark:text-gray-500">(Current Page)</span>
+                </div>
+
+                {/* Facade Summary (HOVER-style) */}
+                {liveDerivedTotals.buildingAreaSf > 0 && (
+                  <div className="bg-blue-50 dark:bg-blue-900/20 rounded-lg p-3 space-y-2">
+                    <div className="text-xs font-semibold text-blue-700 dark:text-blue-300 uppercase">
+                      Facade Summary
+                    </div>
+                    <div className="grid grid-cols-2 gap-x-4 text-xs text-gray-600 dark:text-gray-400">
+                      <span>Gross Area:</span>
+                      <span className="text-right font-mono font-medium">{liveDerivedTotals.buildingAreaSf.toFixed(1)} SF</span>
+                      <span>Net Siding:</span>
+                      <span className="text-right font-mono font-medium text-green-600 dark:text-green-400">{liveDerivedTotals.sidingNetSf.toFixed(1)} SF</span>
+                      <span>Perimeter:</span>
+                      <span className="text-right font-mono">{liveDerivedTotals.buildingPerimeterLf.toFixed(1)} LF</span>
+                      <span>Level Starter:</span>
+                      <span className="text-right font-mono">{liveDerivedTotals.buildingLevelStarterLf.toFixed(1)} LF</span>
+                    </div>
+                  </div>
+                )}
+
+                <div className="bg-green-50 dark:bg-green-900/20 rounded-lg p-3 space-y-3">
+                  {/* Windows */}
+                  {liveDerivedTotals.windowCount > 0 && (
+                    <div className="space-y-1">
+                      <div className="text-xs font-medium text-blue-600 dark:text-blue-400">
+                        Windows ({liveDerivedTotals.windowCount}) — {liveDerivedTotals.windowAreaSf.toFixed(1)} SF
+                      </div>
+                      <div className="grid grid-cols-2 gap-x-4 text-xs text-gray-600 dark:text-gray-400 pl-2">
+                        <span>Perimeter:</span>
+                        <span className="text-right font-mono">{liveDerivedTotals.windowPerimeterLf.toFixed(1)} LF</span>
+                        <span>Head:</span>
+                        <span className="text-right font-mono">{liveDerivedTotals.windowHeadLf.toFixed(1)} LF</span>
+                        <span>Jamb:</span>
+                        <span className="text-right font-mono">{liveDerivedTotals.windowJambLf.toFixed(1)} LF</span>
+                        <span>Sill:</span>
+                        <span className="text-right font-mono">{liveDerivedTotals.windowSillLf.toFixed(1)} LF</span>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Doors */}
+                  {liveDerivedTotals.doorCount > 0 && (
+                    <div className="space-y-1">
+                      <div className="text-xs font-medium text-green-600 dark:text-green-400">
+                        Doors ({liveDerivedTotals.doorCount}) — {liveDerivedTotals.doorAreaSf.toFixed(1)} SF
+                      </div>
+                      <div className="grid grid-cols-2 gap-x-4 text-xs text-gray-600 dark:text-gray-400 pl-2">
+                        <span>Perimeter:</span>
+                        <span className="text-right font-mono">{liveDerivedTotals.doorPerimeterLf.toFixed(1)} LF</span>
+                        <span>Head:</span>
+                        <span className="text-right font-mono">{liveDerivedTotals.doorHeadLf.toFixed(1)} LF</span>
+                        <span>Jamb:</span>
+                        <span className="text-right font-mono">{liveDerivedTotals.doorJambLf.toFixed(1)} LF</span>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Garages */}
+                  {liveDerivedTotals.garageCount > 0 && (
+                    <div className="space-y-1">
+                      <div className="text-xs font-medium text-orange-600 dark:text-orange-400">
+                        Garages ({liveDerivedTotals.garageCount}) — {liveDerivedTotals.garageAreaSf.toFixed(1)} SF
+                      </div>
+                      <div className="grid grid-cols-2 gap-x-4 text-xs text-gray-600 dark:text-gray-400 pl-2">
+                        <span>Perimeter:</span>
+                        <span className="text-right font-mono">{liveDerivedTotals.garagePerimeterLf.toFixed(1)} LF</span>
+                        <span>Head:</span>
+                        <span className="text-right font-mono">{liveDerivedTotals.garageHeadLf.toFixed(1)} LF</span>
+                        <span>Jamb:</span>
+                        <span className="text-right font-mono">{liveDerivedTotals.garageJambLf.toFixed(1)} LF</span>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Opening Totals */}
+                  {(liveDerivedTotals.windowCount > 0 || liveDerivedTotals.doorCount > 0 || liveDerivedTotals.garageCount > 0) && (
+                    <div className="border-t border-green-200 dark:border-green-800 pt-2 mt-2">
+                      <div className="grid grid-cols-2 gap-x-4 text-xs">
+                        <span className="text-gray-500 dark:text-gray-400">Total Opening Area:</span>
+                        <span className="text-right font-mono font-medium text-gray-700 dark:text-gray-300">{(liveDerivedTotals.windowAreaSf + liveDerivedTotals.doorAreaSf + liveDerivedTotals.garageAreaSf).toFixed(1)} SF</span>
+                        <span className="text-gray-500 dark:text-gray-400">Total Opening Perim:</span>
+                        <span className="text-right font-mono font-medium text-gray-700 dark:text-gray-300">{(liveDerivedTotals.windowPerimeterLf + liveDerivedTotals.doorPerimeterLf + liveDerivedTotals.garagePerimeterLf).toFixed(1)} LF</span>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* TRIM SUMMARY */}
+                {(liveDerivedTotals.windowHeadLf > 0 || liveDerivedTotals.doorHeadLf > 0 || liveDerivedTotals.garageHeadLf > 0) && (
+                  <div className="bg-amber-50 dark:bg-amber-900/20 rounded-lg p-3 space-y-2">
+                    <div className="text-xs font-semibold text-amber-700 dark:text-amber-300 uppercase">
+                      Trim Summary
+                    </div>
+                    <div className="grid grid-cols-2 gap-x-4 text-xs text-gray-600 dark:text-gray-400">
+                      <span>Total Head:</span>
+                      <span className="text-right font-mono">{(liveDerivedTotals.windowHeadLf + liveDerivedTotals.doorHeadLf + liveDerivedTotals.garageHeadLf).toFixed(1)} LF</span>
+                      <span>Total Jamb:</span>
+                      <span className="text-right font-mono">{(liveDerivedTotals.windowJambLf + liveDerivedTotals.doorJambLf + liveDerivedTotals.garageJambLf).toFixed(1)} LF</span>
+                      <span>Total Sill:</span>
+                      <span className="text-right font-mono">{liveDerivedTotals.windowSillLf.toFixed(1)} LF</span>
+                    </div>
+                    <div className="border-t border-amber-200 dark:border-amber-800 pt-2 mt-1">
+                      <div className="grid grid-cols-2 gap-x-4 text-xs">
+                        <span className="font-medium text-amber-700 dark:text-amber-300">Total Trim:</span>
+                        <span className="text-right font-mono font-medium text-amber-700 dark:text-amber-300">{(liveDerivedTotals.windowHeadLf + liveDerivedTotals.doorHeadLf + liveDerivedTotals.garageHeadLf + liveDerivedTotals.windowJambLf + liveDerivedTotals.doorJambLf + liveDerivedTotals.garageJambLf + liveDerivedTotals.windowSillLf).toFixed(1)} LF</span>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Gables */}
+                {liveDerivedTotals.gableCount > 0 && (
+                  <div className="bg-purple-50 dark:bg-purple-900/20 rounded-lg p-3 space-y-2">
+                    <div className="text-xs font-medium text-purple-600 dark:text-purple-400">
+                      Gables ({liveDerivedTotals.gableCount}) — {liveDerivedTotals.gableAreaSf.toFixed(1)} SF
+                    </div>
+                    <div className="grid grid-cols-2 gap-x-4 text-xs text-gray-600 dark:text-gray-400 pl-2">
+                      <span>Rake:</span>
+                      <span className="text-right font-mono">{liveDerivedTotals.gableRakeLf.toFixed(1)} LF</span>
+                    </div>
+                  </div>
+                )}
+
+                {/* Corners */}
+                {(liveDerivedTotals.insideCornerCount > 0 || liveDerivedTotals.outsideCornerCount > 0) && (
+                  <div className="bg-gray-50 dark:bg-gray-800/50 rounded-lg p-3 space-y-2">
+                    <div className="text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase">
+                      Corners
+                    </div>
+                    <div className="grid grid-cols-2 gap-x-4 text-xs text-gray-600 dark:text-gray-400">
+                      {liveDerivedTotals.insideCornerCount > 0 && (
+                        <>
+                          <span>Inside ({liveDerivedTotals.insideCornerCount}):</span>
+                          <span className="text-right font-mono">{liveDerivedTotals.insideCornerLf.toFixed(1)} LF</span>
+                        </>
+                      )}
+                      {liveDerivedTotals.outsideCornerCount > 0 && (
+                        <>
+                          <span>Outside ({liveDerivedTotals.outsideCornerCount}):</span>
+                          <span className="text-right font-mono">{liveDerivedTotals.outsideCornerLf.toFixed(1)} LF</span>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {/* Soffit & Fascia */}
+                {(liveDerivedTotals.soffitAreaSf > 0 || liveDerivedTotals.fasciaLf > 0) && (
+                  <div className="bg-teal-50 dark:bg-teal-900/20 rounded-lg p-3 space-y-2">
+                    <div className="text-xs font-semibold text-teal-700 dark:text-teal-300 uppercase">
+                      Soffit & Fascia
+                    </div>
+                    <div className="grid grid-cols-2 gap-x-4 text-xs text-gray-600 dark:text-gray-400">
+                      {liveDerivedTotals.soffitAreaSf > 0 && (
+                        <>
+                          <span>Soffit ({liveDerivedTotals.soffitCount}):</span>
+                          <span className="text-right font-mono">{liveDerivedTotals.soffitAreaSf.toFixed(1)} SF</span>
+                        </>
+                      )}
+                      {liveDerivedTotals.fasciaLf > 0 && (
+                        <>
+                          <span>Fascia ({liveDerivedTotals.fasciaCount}):</span>
+                          <span className="text-right font-mono">{liveDerivedTotals.fasciaLf.toFixed(1)} LF</span>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {/* Roofline */}
+                {(liveDerivedTotals.eavesLf > 0 || liveDerivedTotals.rakesLf > 0 || liveDerivedTotals.ridgeLf > 0 || liveDerivedTotals.valleyLf > 0) && (
+                  <div className="bg-slate-50 dark:bg-slate-800/50 rounded-lg p-3 space-y-2">
+                    <div className="text-xs font-semibold text-slate-700 dark:text-slate-300 uppercase">
+                      Roofline
+                    </div>
+                    <div className="grid grid-cols-2 gap-x-4 text-xs text-gray-600 dark:text-gray-400">
+                      {liveDerivedTotals.eavesLf > 0 && (
+                        <>
+                          <span>Eaves ({liveDerivedTotals.eavesCount}):</span>
+                          <span className="text-right font-mono">{liveDerivedTotals.eavesLf.toFixed(1)} LF</span>
+                        </>
+                      )}
+                      {liveDerivedTotals.rakesLf > 0 && (
+                        <>
+                          <span>Rakes ({liveDerivedTotals.rakesCount}):</span>
+                          <span className="text-right font-mono">{liveDerivedTotals.rakesLf.toFixed(1)} LF</span>
+                        </>
+                      )}
+                      {liveDerivedTotals.ridgeLf > 0 && (
+                        <>
+                          <span>Ridge ({liveDerivedTotals.ridgeCount}):</span>
+                          <span className="text-right font-mono">{liveDerivedTotals.ridgeLf.toFixed(1)} LF</span>
+                        </>
+                      )}
+                      {liveDerivedTotals.valleyLf > 0 && (
+                        <>
+                          <span>Valley ({liveDerivedTotals.valleyCount}):</span>
+                          <span className="text-right font-mono">{liveDerivedTotals.valleyLf.toFixed(1)} LF</span>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {/* Gutters */}
+                {(liveDerivedTotals.gutterLf > 0 || liveDerivedTotals.downspoutCount > 0) && (
+                  <div className="bg-cyan-50 dark:bg-cyan-900/20 rounded-lg p-3 space-y-2">
+                    <div className="text-xs font-semibold text-cyan-700 dark:text-cyan-300 uppercase">
+                      Gutters
+                    </div>
+                    <div className="grid grid-cols-2 gap-x-4 text-xs text-gray-600 dark:text-gray-400">
+                      {liveDerivedTotals.gutterLf > 0 && (
+                        <>
+                          <span>Gutters ({liveDerivedTotals.gutterCount}):</span>
+                          <span className="text-right font-mono">{liveDerivedTotals.gutterLf.toFixed(1)} LF</span>
+                        </>
+                      )}
+                      {liveDerivedTotals.downspoutCount > 0 && (
+                        <>
+                          <span>Downspouts:</span>
+                          <span className="text-right font-mono">{liveDerivedTotals.downspoutCount}</span>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {/* Show if no applicable detections */}
+                {liveDerivedTotals.buildingAreaSf === 0 &&
+                  liveDerivedTotals.windowCount === 0 &&
+                  liveDerivedTotals.doorCount === 0 &&
+                  liveDerivedTotals.garageCount === 0 &&
+                  liveDerivedTotals.gableCount === 0 && (
+                    <div className="text-xs text-gray-500 dark:text-gray-400 text-center py-2">
+                      No detections on this page
+                    </div>
+                  )}
+              </div>
+            )}
+
+            {/* Show message if no scale is set */}
+            {!liveDerivedTotals && currentPage && (
+              <div className="text-xs text-yellow-600 dark:text-yellow-500 bg-yellow-50 dark:bg-yellow-900/20 rounded-lg p-3">
+                ⚠️ Calibrate scale to see live measurements
+              </div>
+            )}
+
             {/* Elevation Totals */}
             {elevationCalcs && (
               <div className="space-y-1">
@@ -853,166 +1250,6 @@ const DetectionSidebar = memo(function DetectionSidebar({
                 <p className="text-xs mt-1">Verify detections to generate totals</p>
               </div>
             )}
-
-            {/* Phase 4 Enhanced Calculations */}
-            <div className="space-y-1">
-              <button
-                type="button"
-                onClick={() => setPhase4Expanded(!phase4Expanded)}
-                className="w-full flex items-center justify-between text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-2 hover:text-gray-700 dark:hover:text-gray-300"
-              >
-                <span className="flex items-center gap-2">
-                  Enhanced Calculations (Phase 4)
-                  {phase4Data?.wall_heights && (
-                    <span
-                      className={`
-                        text-[10px] px-1.5 py-0.5 rounded font-medium normal-case
-                        ${phase4Data.wall_heights.source === 'ocr'
-                          ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400'
-                          : 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400'
-                        }
-                      `}
-                    >
-                      {phase4Data.wall_heights.source === 'ocr' ? 'OCR' : 'Estimated'}
-                    </span>
-                  )}
-                </span>
-                {phase4Expanded ? (
-                  <ChevronDown className="w-4 h-4" />
-                ) : (
-                  <ChevronRight className="w-4 h-4" />
-                )}
-              </button>
-
-              {phase4Expanded && (
-                <div className="bg-purple-50 dark:bg-purple-900/20 rounded-lg p-3 space-y-3">
-                  {phase4Loading ? (
-                    <div className="flex items-center justify-center py-4">
-                      <Loader2 className="w-4 h-4 animate-spin mr-2 text-purple-600" />
-                      <span className="text-sm text-gray-500">Loading...</span>
-                    </div>
-                  ) : phase4Data ? (
-                    <>
-                      {/* Wall Heights */}
-                      {phase4Data.wall_heights && (
-                        <div className="space-y-1">
-                          <div className="flex items-center gap-1.5 text-xs font-medium text-purple-700 dark:text-purple-400">
-                            <Building2 className="w-3 h-3" />
-                            Wall Heights
-                          </div>
-                          <div className="space-y-0.5 pl-4">
-                            <TotalsRow label="1st Floor" value={phase4Data.wall_heights.first_floor_ft} unit="ft" />
-                            {phase4Data.wall_heights.second_floor_ft !== null && (
-                              <TotalsRow label="2nd Floor" value={phase4Data.wall_heights.second_floor_ft} unit="ft" />
-                            )}
-                            <TotalsRow label="Total Height" value={phase4Data.wall_heights.total_wall_height_ft} unit="ft" highlight />
-                            <TotalsRow label="Stories" value={phase4Data.wall_heights.story_count} />
-                          </div>
-                        </div>
-                      )}
-
-                      {/* Corner Calculations */}
-                      {phase4Data.corners && (
-                        <div className="space-y-1">
-                          <div className="flex items-center gap-1.5 text-xs font-medium text-purple-700 dark:text-purple-400">
-                            <CornerDownRight className="w-3 h-3" />
-                            Corner Details
-                          </div>
-                          <div className="space-y-0.5 pl-4">
-                            <TotalsRow
-                              label="Outside Corners"
-                              value={`${phase4Data.corners.outside_corners_count} (${phase4Data.corners.outside_corners_lf.toFixed(0)} LF)`}
-                            />
-                            <TotalsRow
-                              label="Inside Corners"
-                              value={`${phase4Data.corners.inside_corners_count} (${phase4Data.corners.inside_corners_lf.toFixed(0)} LF)`}
-                            />
-                            <TotalsRow label="Total Corner LF" value={phase4Data.corners.total_corner_lf} unit="LF" highlight />
-                            <TotalsRow label="Corner Posts" value={`${phase4Data.corners.corner_posts_needed} pcs`} />
-                            <TotalsRow label="J-Channel" value={`${phase4Data.corners.j_channel_pieces_needed} pcs`} />
-                          </div>
-                        </div>
-                      )}
-
-                      {/* Perimeter Elements */}
-                      {phase4Data.perimeter && (
-                        <div className="space-y-1">
-                          <div className="flex items-center gap-1.5 text-xs font-medium text-purple-700 dark:text-purple-400">
-                            <Ruler className="w-3 h-3" />
-                            Perimeter Elements
-                          </div>
-                          <div className="space-y-0.5 pl-4">
-                            <TotalsRow label="Building Perimeter" value={phase4Data.perimeter.building_perimeter_lf} unit="LF" highlight />
-                            <TotalsRow
-                              label="Starter Strip"
-                              value={`${phase4Data.perimeter.starter_strip_lf.toFixed(0)} LF (${phase4Data.perimeter.starter_strip_pieces} pcs)`}
-                            />
-                            {phase4Data.perimeter.water_table_lf > 0 && (
-                              <TotalsRow label="Water Table" value={phase4Data.perimeter.water_table_lf} unit="LF" />
-                            )}
-                            {phase4Data.perimeter.band_board_lf > 0 && (
-                              <TotalsRow label="Band Board" value={phase4Data.perimeter.band_board_lf} unit="LF" />
-                            )}
-                            {phase4Data.perimeter.frieze_board_lf > 0 && (
-                              <TotalsRow label="Frieze Board" value={phase4Data.perimeter.frieze_board_lf} unit="LF" />
-                            )}
-                          </div>
-                        </div>
-                      )}
-
-                      {/* Trim Totals */}
-                      {phase4Data.trim_totals && (
-                        <div className="space-y-1">
-                          <div className="text-xs font-medium text-purple-700 dark:text-purple-400">
-                            Trim Perimeters
-                          </div>
-                          <div className="space-y-0.5 pl-4">
-                            <TotalsRow label="Window Perimeter" value={phase4Data.trim_totals.window_perimeter_lf} unit="LF" />
-                            <TotalsRow label="Door Perimeter" value={phase4Data.trim_totals.door_perimeter_lf} unit="LF" />
-                            {phase4Data.trim_totals.gable_rake_lf > 0 && (
-                              <TotalsRow label="Gable Rake" value={phase4Data.trim_totals.gable_rake_lf} unit="LF" />
-                            )}
-                          </div>
-                        </div>
-                      )}
-
-                      {/* Show message if phase4Data exists but has no sections */}
-                      {!phase4Data.wall_heights && !phase4Data.corners && !phase4Data.perimeter && !phase4Data.trim_totals && (
-                        <div className="text-center py-2">
-                          <p className="text-sm text-gray-500 dark:text-gray-400">
-                            No enhanced calculation data available yet.
-                          </p>
-                        </div>
-                      )}
-                    </>
-                  ) : (
-                    <div className="text-center py-4">
-                      <p className="text-sm text-gray-500 dark:text-gray-400 mb-3">
-                        Enhanced calculations not yet generated.
-                      </p>
-                      <button
-                        type="button"
-                        onClick={handleCalculatePhase4}
-                        disabled={phase4Loading}
-                        className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-purple-700 dark:text-purple-400 bg-purple-100 dark:bg-purple-900/30 rounded-md hover:bg-purple-200 dark:hover:bg-purple-900/50 disabled:opacity-50"
-                      >
-                        {phase4Loading ? (
-                          <>
-                            <Loader2 className="w-4 h-4 animate-spin" />
-                            Calculating...
-                          </>
-                        ) : (
-                          <>
-                            <Calculator className="w-4 h-4" />
-                            Calculate Now
-                          </>
-                        )}
-                      </button>
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
           </div>
         )}
       </div>

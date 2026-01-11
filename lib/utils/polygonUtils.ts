@@ -371,3 +371,325 @@ export function isValidPolygon(points: PolygonPoint[]): boolean {
 export function canRemovePoint(points: PolygonPoint[]): boolean {
   return points.length > 3;
 }
+
+// =============================================================================
+// Class-Specific Derived Measurements
+// =============================================================================
+
+export interface WindowDerivedMeasurements {
+  head_lf: number;      // Top horizontal edge
+  sill_lf: number;      // Bottom horizontal edge
+  jamb_lf: number;      // Left + right vertical edges combined
+  perimeter_lf: number; // Total perimeter
+}
+
+export interface DoorDerivedMeasurements {
+  head_lf: number;      // Top horizontal edge
+  jamb_lf: number;      // Left + right vertical edges combined
+  perimeter_lf: number; // Total perimeter (no sill - door touches floor)
+}
+
+export interface GarageDerivedMeasurements {
+  head_lf: number;      // Top horizontal edge
+  jamb_lf: number;      // Left + right vertical edges combined
+  perimeter_lf: number;
+}
+
+export interface GableDerivedMeasurements {
+  rake_lf: number;      // Two sloped edges combined (excludes bottom)
+  base_lf: number;      // Bottom horizontal edge (for reference)
+}
+
+/**
+ * Calculate distance between two points (exported version)
+ */
+export function distanceBetweenPoints(p1: PolygonPoint, p2: PolygonPoint): number {
+  const dx = p2.x - p1.x;
+  const dy = p2.y - p1.y;
+  return Math.sqrt(dx * dx + dy * dy);
+}
+
+/**
+ * Calculate derived measurements for a WINDOW (4-point polygon)
+ * Identifies head (top), sill (bottom), and jambs (sides) by Y-coordinate
+ */
+export function calculateWindowMeasurements(
+  points: PolygonPoint[],
+  scaleRatio: number
+): WindowDerivedMeasurements {
+  if (points.length !== 4) {
+    // Fallback for non-4-point shapes: use bounding box approximation
+    const bbox = getPolygonBoundingBox(points);
+    const widthFt = bbox.width / scaleRatio;
+    const heightFt = bbox.height / scaleRatio;
+    return {
+      head_lf: widthFt,
+      sill_lf: widthFt,
+      jamb_lf: heightFt * 2,
+      perimeter_lf: (widthFt + heightFt) * 2,
+    };
+  }
+
+  // Sort points by Y coordinate (lowest Y = top in image coordinates)
+  const sortedByY = [...points].sort((a, b) => a.y - b.y);
+
+  // Top 2 points form the HEAD edge
+  const topPoints = sortedByY.slice(0, 2);
+  // Bottom 2 points form the SILL edge
+  const bottomPoints = sortedByY.slice(2, 4);
+
+  // Sort each pair by X to get left-to-right order
+  topPoints.sort((a, b) => a.x - b.x);
+  bottomPoints.sort((a, b) => a.x - b.x);
+
+  // Calculate edge lengths in pixels
+  const headPx = distanceBetweenPoints(topPoints[0], topPoints[1]);
+  const sillPx = distanceBetweenPoints(bottomPoints[0], bottomPoints[1]);
+  const leftJambPx = distanceBetweenPoints(topPoints[0], bottomPoints[0]);
+  const rightJambPx = distanceBetweenPoints(topPoints[1], bottomPoints[1]);
+
+  // Convert to feet
+  const head_lf = headPx / scaleRatio;
+  const sill_lf = sillPx / scaleRatio;
+  const jamb_lf = (leftJambPx + rightJambPx) / scaleRatio;
+  const perimeter_lf = head_lf + sill_lf + jamb_lf;
+
+  return {
+    head_lf: Math.round(head_lf * 100) / 100,
+    sill_lf: Math.round(sill_lf * 100) / 100,
+    jamb_lf: Math.round(jamb_lf * 100) / 100,
+    perimeter_lf: Math.round(perimeter_lf * 100) / 100,
+  };
+}
+
+/**
+ * Calculate derived measurements for a DOOR (4-point polygon)
+ * Similar to window but no sill measurement (door touches floor)
+ */
+export function calculateDoorMeasurements(
+  points: PolygonPoint[],
+  scaleRatio: number
+): DoorDerivedMeasurements {
+  if (points.length !== 4) {
+    const bbox = getPolygonBoundingBox(points);
+    const widthFt = bbox.width / scaleRatio;
+    const heightFt = bbox.height / scaleRatio;
+    return {
+      head_lf: widthFt,
+      jamb_lf: heightFt * 2,
+      perimeter_lf: widthFt + (heightFt * 2),
+    };
+  }
+
+  const sortedByY = [...points].sort((a, b) => a.y - b.y);
+  const topPoints = sortedByY.slice(0, 2).sort((a, b) => a.x - b.x);
+  const bottomPoints = sortedByY.slice(2, 4).sort((a, b) => a.x - b.x);
+
+  const headPx = distanceBetweenPoints(topPoints[0], topPoints[1]);
+  const leftJambPx = distanceBetweenPoints(topPoints[0], bottomPoints[0]);
+  const rightJambPx = distanceBetweenPoints(topPoints[1], bottomPoints[1]);
+
+  const head_lf = headPx / scaleRatio;
+  const jamb_lf = (leftJambPx + rightJambPx) / scaleRatio;
+
+  return {
+    head_lf: Math.round(head_lf * 100) / 100,
+    jamb_lf: Math.round(jamb_lf * 100) / 100,
+    perimeter_lf: Math.round((head_lf + jamb_lf) * 100) / 100,
+  };
+}
+
+/**
+ * Calculate derived measurements for a GARAGE (4-point polygon)
+ * Similar to door
+ */
+export function calculateGarageMeasurements(
+  points: PolygonPoint[],
+  scaleRatio: number
+): GarageDerivedMeasurements {
+  const doorMeasurements = calculateDoorMeasurements(points, scaleRatio);
+  return {
+    head_lf: doorMeasurements.head_lf,
+    jamb_lf: doorMeasurements.jamb_lf,
+    perimeter_lf: doorMeasurements.perimeter_lf,
+  };
+}
+
+/**
+ * Calculate derived measurements for a GABLE (3-point triangle)
+ * Rake = the two sloped edges (excludes the bottom horizontal edge)
+ */
+export function calculateGableMeasurements(
+  points: PolygonPoint[],
+  scaleRatio: number
+): GableDerivedMeasurements {
+  if (points.length !== 3) {
+    // Fallback for non-triangle: use bounding box approximation
+    const bbox = getPolygonBoundingBox(points);
+    const halfBase = bbox.width / 2;
+    const height = bbox.height;
+    const rakeSide = Math.sqrt(halfBase * halfBase + height * height);
+    return {
+      rake_lf: Math.round(((rakeSide * 2) / scaleRatio) * 100) / 100,
+      base_lf: Math.round((bbox.width / scaleRatio) * 100) / 100,
+    };
+  }
+
+  // Sort points by Y coordinate (lowest Y = peak/top)
+  const sortedByY = [...points].sort((a, b) => a.y - b.y);
+
+  // Peak is the point with lowest Y (top of triangle)
+  const peak = sortedByY[0];
+  // Bottom two points form the base edge
+  const basePoint1 = sortedByY[1];
+  const basePoint2 = sortedByY[2];
+
+  // Calculate edge lengths in pixels
+  const basePx = distanceBetweenPoints(basePoint1, basePoint2);
+  const leftRakePx = distanceBetweenPoints(peak, basePoint1);
+  const rightRakePx = distanceBetweenPoints(peak, basePoint2);
+
+  // Convert to feet
+  const rake_lf = (leftRakePx + rightRakePx) / scaleRatio;
+  const base_lf = basePx / scaleRatio;
+
+  return {
+    rake_lf: Math.round(rake_lf * 100) / 100,
+    base_lf: Math.round(base_lf * 100) / 100,
+  };
+}
+
+/**
+ * Get derived measurements for any detection based on its class
+ * Returns null for classes that don't have derived measurements
+ */
+export function getClassDerivedMeasurements(
+  detectionClass: string,
+  points: PolygonPoint[] | null | undefined,
+  scaleRatio: number
+): WindowDerivedMeasurements | DoorDerivedMeasurements | GarageDerivedMeasurements | GableDerivedMeasurements | null {
+  if (!points || points.length < 3 || scaleRatio <= 0) return null;
+
+  switch (detectionClass) {
+    case 'window':
+      return calculateWindowMeasurements(points, scaleRatio);
+    case 'door':
+      return calculateDoorMeasurements(points, scaleRatio);
+    case 'garage':
+      return calculateGarageMeasurements(points, scaleRatio);
+    case 'gable':
+      return calculateGableMeasurements(points, scaleRatio);
+    default:
+      return null;
+  }
+}
+
+// =============================================================================
+// Building/Facade Measurements
+// =============================================================================
+
+export interface BuildingDerivedMeasurements {
+  area_sf: number;           // Total facade area
+  perimeter_lf: number;      // Total perimeter
+  level_starter_lf: number;  // Bottom edge (for starter strip)
+}
+
+export interface LineMeasurements {
+  length_lf: number;         // Total length for line-type detections
+}
+
+/**
+ * Calculate measurements for a BUILDING/FACADE polygon
+ * Includes area, perimeter, and level starter (bottom edge)
+ */
+export function calculateBuildingMeasurements(
+  points: PolygonPoint[],
+  scaleRatio: number
+): BuildingDerivedMeasurements {
+  if (!points || points.length < 3 || scaleRatio <= 0) {
+    return { area_sf: 0, perimeter_lf: 0, level_starter_lf: 0 };
+  }
+
+  // Calculate area using existing function
+  const areaPx = calculatePolygonArea(points);
+  const area_sf = areaPx / (scaleRatio * scaleRatio);
+
+  // Calculate perimeter
+  let perimeterPx = 0;
+  for (let i = 0; i < points.length; i++) {
+    const p1 = points[i];
+    const p2 = points[(i + 1) % points.length];
+    perimeterPx += distanceBetweenPoints(p1, p2);
+  }
+  const perimeter_lf = perimeterPx / scaleRatio;
+
+  // Find bottom edge (level starter) - edge with highest average Y
+  let bottomEdgeLength = 0;
+  let maxAvgY = -Infinity;
+
+  for (let i = 0; i < points.length; i++) {
+    const p1 = points[i];
+    const p2 = points[(i + 1) % points.length];
+    const avgY = (p1.y + p2.y) / 2;
+    const edgeLength = distanceBetweenPoints(p1, p2);
+
+    // Check if this edge is more horizontal (width > height difference)
+    const isHorizontal = Math.abs(p2.x - p1.x) > Math.abs(p2.y - p1.y);
+
+    if (isHorizontal && avgY > maxAvgY) {
+      maxAvgY = avgY;
+      bottomEdgeLength = edgeLength;
+    }
+  }
+
+  const level_starter_lf = bottomEdgeLength / scaleRatio;
+
+  return {
+    area_sf: Math.round(area_sf * 100) / 100,
+    perimeter_lf: Math.round(perimeter_lf * 100) / 100,
+    level_starter_lf: Math.round(level_starter_lf * 100) / 100,
+  };
+}
+
+/**
+ * Calculate length for LINE-type detections (eave, rake, ridge, fascia, trim)
+ * Uses polygon_points as a polyline (not closed polygon)
+ */
+export function calculateLineMeasurements(
+  points: PolygonPoint[],
+  scaleRatio: number
+): LineMeasurements {
+  if (!points || points.length < 2 || scaleRatio <= 0) {
+    return { length_lf: 0 };
+  }
+
+  let totalLengthPx = 0;
+  for (let i = 0; i < points.length - 1; i++) {
+    totalLengthPx += distanceBetweenPoints(points[i], points[i + 1]);
+  }
+
+  return {
+    length_lf: Math.round((totalLengthPx / scaleRatio) * 100) / 100,
+  };
+}
+
+/**
+ * Calculate area for polygon-type detections (soffit, siding zones)
+ */
+export function calculateAreaMeasurements(
+  points: PolygonPoint[],
+  scaleRatio: number
+): { area_sf: number; perimeter_lf: number } {
+  if (!points || points.length < 3 || scaleRatio <= 0) {
+    return { area_sf: 0, perimeter_lf: 0 };
+  }
+
+  const areaPx = calculatePolygonArea(points);
+  const area_sf = areaPx / (scaleRatio * scaleRatio);
+  const perimeter_lf = calculatePolygonPerimeterLf(points, scaleRatio);
+
+  return {
+    area_sf: Math.round(area_sf * 100) / 100,
+    perimeter_lf: Math.round(perimeter_lf * 100) / 100,
+  };
+}

@@ -30,6 +30,14 @@ export type DetectionClass =
   | 'rake'
   | 'ridge'
   | 'soffit'
+  | 'valley'
+  // Point classes (count only)
+  | 'vent'
+  | 'flashing'
+  | 'downspout'
+  | 'outlet'
+  | 'hose_bib'
+  | 'light_fixture'
   | '';
 
 // Internal classes - used for calculations but not user-selectable
@@ -53,6 +61,7 @@ export type ElevationName = 'front' | 'rear' | 'left' | 'right';
 export type JobStatus =
   | 'converting'
   | 'classifying'
+  | 'classified'  // Pages classified, ready for user review
   | 'processing'
   | 'complete'
   | 'failed';
@@ -66,7 +75,7 @@ export type EditType =
   | 'create'
   | 'batch';
 
-export type ToolMode = 'select' | 'create' | 'pan' | 'verify' | 'calibrate' | 'line';
+export type ToolMode = 'select' | 'create' | 'pan' | 'verify' | 'calibrate' | 'line' | 'point';
 
 export type ResizeHandle = 'nw' | 'n' | 'ne' | 'w' | 'e' | 'sw' | 's' | 'se';
 
@@ -327,6 +336,14 @@ export const DETECTION_CLASS_COLORS: Record<DetectionClass | InternalDetectionCl
   rake: '#EC4899',           // Pink
   ridge: '#EF4444',          // Red
   soffit: '#14B8A6',         // Teal
+  valley: '#7C3AED',         // Purple
+  // Point classes (count only)
+  vent: '#0EA5E9',           // Sky blue
+  flashing: '#F97316',       // Orange
+  downspout: '#06B6D4',      // Cyan
+  outlet: '#FACC15',         // Yellow
+  hose_bib: '#22C55E',       // Green
+  light_fixture: '#FBBF24',  // Amber
   // Internal classes
   building: '#8B5CF6',       // Purple (internal)
   exterior_wall: '#10B981',  // Same as siding (legacy compatibility)
@@ -350,6 +367,14 @@ export const USER_SELECTABLE_CLASSES: DetectionClass[] = [
   'rake',
   'ridge',
   'soffit',
+  'valley',
+  // Point classes (count only)
+  'vent',
+  'flashing',
+  'downspout',
+  'outlet',
+  'hose_bib',
+  'light_fixture',
 ];
 
 export const CONFIDENCE_THRESHOLDS = {

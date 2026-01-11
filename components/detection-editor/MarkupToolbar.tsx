@@ -1,7 +1,7 @@
 'use client';
 
 import React, { memo } from 'react';
-import { MousePointer2, Pentagon, Hand, Ruler, Minus } from 'lucide-react';
+import { MousePointer2, Pentagon, Hand, Ruler, Minus, MapPin } from 'lucide-react';
 import type { ToolMode } from '@/lib/types/extraction';
 
 // =============================================================================
@@ -29,6 +29,7 @@ const TOOLS: ToolDefinition[] = [
   { id: 'select', icon: MousePointer2, label: 'Select & Edit', shortcut: 'V' },
   { id: 'create', icon: Pentagon, label: 'Draw Detection', shortcut: 'D' },
   { id: 'line', icon: Minus, label: 'Draw Line (LF)', shortcut: 'L' },
+  { id: 'point', icon: MapPin, label: 'Place Marker (Count)', shortcut: 'P' },
   { id: 'pan', icon: Hand, label: 'Pan Canvas', shortcut: 'H' },
   { id: 'divider' },
   { id: 'calibrate', icon: Ruler, label: 'Calibrate Scale', shortcut: 'C' },

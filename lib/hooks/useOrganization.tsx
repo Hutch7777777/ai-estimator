@@ -34,9 +34,9 @@ interface OrganizationMembership {
   organization: Organization;
 }
 
-// Mock organization for dev bypass
+// Mock organization for dev bypass - using valid UUID format (8-4-4-4-12)
 const DEV_MOCK_ORGANIZATION: Organization = {
-  id: 'dev-org-00000000-0000-0000-0000-000000000000',
+  id: '00000000-0000-0000-0000-000000000001',
   name: 'Development Organization',
   slug: 'dev-org',
   logo_url: null,
@@ -46,8 +46,8 @@ const DEV_MOCK_ORGANIZATION: Organization = {
 };
 
 const DEV_MOCK_MEMBERSHIP: OrganizationMembership = {
-  id: 'dev-membership-00000000-0000-0000-0000-000000000000',
-  organization_id: 'dev-org-00000000-0000-0000-0000-000000000000',
+  id: '00000000-0000-0000-0000-000000000002',
+  organization_id: '00000000-0000-0000-0000-000000000001',
   role: 'owner',
   joined_at: new Date().toISOString(),
   organization: DEV_MOCK_ORGANIZATION,
@@ -75,32 +75,34 @@ const CURRENT_ORG_KEY = 'estimate_current_org';
 export function OrganizationProvider({ children }: { children: ReactNode }) {
   const { user, isLoading: isUserLoading } = useUser();
 
-  // Check for dev bypass mode on mount
-  const [isDevBypass] = useState(() => isDevBypassEnabled());
+  // IMPORTANT: Always start with consistent initial state for SSR hydration
+  // Dev bypass is checked in useEffect after hydration to avoid mismatch
+  const [isDevBypass, setIsDevBypass] = useState(false);
 
-  // If dev bypass, start with mock data immediately
-  const [organizations, setOrganizations] = useState<OrganizationMembership[]>(
-    () => isDevBypassEnabled() ? [DEV_MOCK_MEMBERSHIP] : []
-  );
-  const [currentOrgId, setCurrentOrgId] = useState<string | null>(
-    () => isDevBypassEnabled() ? DEV_MOCK_ORGANIZATION.id : null
-  );
-  const [isLoading, setIsLoading] = useState(() => !isDevBypassEnabled()); // No loading if dev bypass
+  // Always start with loading state for consistent SSR/client hydration
+  const [organizations, setOrganizations] = useState<OrganizationMembership[]>([]);
+  const [currentOrgId, setCurrentOrgId] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
   const [timedOut, setTimedOut] = useState(false);
 
   // Track if we've already completed loading (via timeout or success)
-  const hasCompletedRef = useRef(isDevBypassEnabled()); // Already completed if dev bypass
+  const hasCompletedRef = useRef(false);
   const mountTimeRef = useRef(Date.now());
 
   // Create client once with useMemo
   const supabase = useMemo(() => createClient(), []);
 
-  // Log dev bypass status on mount
+  // Check for dev bypass after hydration (client-side only)
   useEffect(() => {
-    if (isDevBypass) {
+    if (isDevBypassEnabled()) {
       console.log('🔓 DEV AUTH BYPASS ENABLED - Using mock organization:', DEV_MOCK_ORGANIZATION.name);
+      setIsDevBypass(true);
+      setOrganizations([DEV_MOCK_MEMBERSHIP]);
+      setCurrentOrgId(DEV_MOCK_ORGANIZATION.id);
+      setIsLoading(false);
+      hasCompletedRef.current = true;
     }
-  }, [isDevBypass]);
+  }, []); // Run once on mount
 
   const fetchOrganizations = async (userId: string, retryCount = 0): Promise<OrganizationMembership[]> => {
     try {

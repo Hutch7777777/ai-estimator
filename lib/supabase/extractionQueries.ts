@@ -17,8 +17,8 @@ import type {
 // Direct Fetch API (bypasses Supabase client)
 // =============================================================================
 
-const SUPABASE_URL = 'https://okwtyttfqbfmcqtenize.supabase.co';
-const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9rd3R5dHRmcWJmbWNxdGVuaXplIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjI0NDYwNTEsImV4cCI6MjA3ODAyMjA1MX0.I1HRDRZpj4ExWp9_8tB_k1Bxzuc2SjqQ6DSyAar2AOE';
+const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL!;
+const SUPABASE_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
 
 async function directFetch<T>(endpoint: string): Promise<T | null> {
   const url = `${SUPABASE_URL}/rest/v1/${endpoint}`;

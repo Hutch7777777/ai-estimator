@@ -3,6 +3,7 @@
 import React, { memo, useMemo } from 'react';
 import { Badge } from '@/components/ui/badge';
 import type { ExtractionDetection, DetectionStatus, PolygonPoint } from '@/lib/types/extraction';
+import { calculatePolygonArea, calculatePolygonPerimeter } from '@/lib/utils/polygonUtils';
 
 // =============================================================================
 // Types
@@ -23,48 +24,63 @@ function formatValue(value: number | null | undefined, suffix: string = ''): str
 }
 
 /**
- * Calculate the distance between two points in pixels.
- */
-function calculateLineLength(p1: PolygonPoint, p2: PolygonPoint): number {
-  const dx = p2.x - p1.x;
-  const dy = p2.y - p1.y;
-  return Math.sqrt(dx * dx + dy * dy);
-}
-
-/**
- * Calculate real-world measurements from pixel dimensions using scale ratio.
- * This ensures measurements update dynamically when scale is recalibrated.
+ * Calculate real-world measurements from detection data.
+ * ALWAYS calculates live from polygon_points when available to ensure
+ * measurements match the canvas display exactly.
  */
 function calculateMeasurementsFromPixels(
   detection: ExtractionDetection,
   pixelsPerFoot: number
-): { widthFt: number; heightFt: number; areaSf: number; perimeterLf: number; lengthLf?: number; isLine: boolean } {
-  // Check if this is a line detection
+): { widthFt: number; heightFt: number; areaSf: number; perimeterLf: number; lengthLf?: number; isLine: boolean; isPoint: boolean } {
   const isLine = detection.markup_type === 'line';
+  const isPoint = detection.markup_type === 'point';
 
-  if (isLine && detection.polygon_points && detection.polygon_points.length >= 2) {
-    // For lines, calculate length from the two endpoints
-    const pixelLength = calculateLineLength(
-      detection.polygon_points[0],
-      detection.polygon_points[1]
-    );
-    const lengthLf = pixelLength / pixelsPerFoot;
-    return {
-      widthFt: 0,
-      heightFt: 0,
-      areaSf: 0,
-      perimeterLf: 0,
-      lengthLf,
-      isLine: true,
-    };
+  // For points, return zeroes (count markers only)
+  if (isPoint) {
+    return { widthFt: 0, heightFt: 0, areaSf: 0, perimeterLf: 0, isLine: false, isPoint: true };
   }
 
-  // Standard polygon/rectangle measurements
+  // For lines, calculate length from polygon_points
+  if (isLine && detection.polygon_points && detection.polygon_points.length >= 2) {
+    const p1 = detection.polygon_points[0];
+    const p2 = detection.polygon_points[1];
+    const pixelLength = Math.sqrt(Math.pow(p2.x - p1.x, 2) + Math.pow(p2.y - p1.y, 2));
+    const lengthLf = pixelLength / pixelsPerFoot;
+    return { widthFt: 0, heightFt: 0, areaSf: 0, perimeterLf: 0, lengthLf, isLine: true, isPoint: false };
+  }
+
+  // For polygons - calculate LIVE from polygon_points if available
+  // This ensures measurements always match the canvas display exactly
+  if (detection.polygon_points && detection.polygon_points.length >= 3 && pixelsPerFoot > 0) {
+    // Calculate area using shoelace formula (same as canvas label)
+    const areaPixelsSq = calculatePolygonArea(detection.polygon_points);
+    const areaSf = areaPixelsSq / (pixelsPerFoot * pixelsPerFoot);
+
+    // Calculate perimeter
+    const perimeterPixels = calculatePolygonPerimeter(detection.polygon_points);
+    const perimeterLf = perimeterPixels / pixelsPerFoot;
+
+    // Calculate bounding box for width/height
+    const xs = detection.polygon_points.map(p => p.x);
+    const ys = detection.polygon_points.map(p => p.y);
+    const minX = Math.min(...xs);
+    const maxX = Math.max(...xs);
+    const minY = Math.min(...ys);
+    const maxY = Math.max(...ys);
+    const widthFt = (maxX - minX) / pixelsPerFoot;
+    const heightFt = (maxY - minY) / pixelsPerFoot;
+
+    return { widthFt, heightFt, areaSf, perimeterLf, isLine: false, isPoint: false };
+  }
+
+  // Fallback: calculate from pixel dimensions (bounding box approximation)
+  // This is used when polygon_points aren't available
   const widthFt = (detection.pixel_width || 0) / pixelsPerFoot;
   const heightFt = (detection.pixel_height || 0) / pixelsPerFoot;
   const areaSf = widthFt * heightFt;
   const perimeterLf = 2 * (widthFt + heightFt);
-  return { widthFt, heightFt, areaSf, perimeterLf, isLine: false };
+
+  return { widthFt, heightFt, areaSf, perimeterLf, isLine: false, isPoint: false };
 }
 
 // =============================================================================
@@ -120,7 +136,7 @@ const SelectionProperties = memo(function SelectionProperties({
     if (selectedDetections.length === 1) {
       const detection = selectedDetections[0];
       // Calculate measurements dynamically from pixel dimensions
-      const { widthFt, heightFt, areaSf, perimeterLf, lengthLf, isLine } = calculateMeasurementsFromPixels(
+      const { widthFt, heightFt, areaSf, perimeterLf, lengthLf, isLine, isPoint } = calculateMeasurementsFromPixels(
         detection,
         pixelsPerFoot
       );
@@ -133,7 +149,9 @@ const SelectionProperties = memo(function SelectionProperties({
         heightFt,
         lengthLf,
         isLine,
+        isPoint,
         count: 1,
+        pointCount: isPoint ? 1 : 0,
       };
     }
 
@@ -141,12 +159,17 @@ const SelectionProperties = memo(function SelectionProperties({
     let totalArea = 0;
     let totalPerimeter = 0;
     let totalLength = 0;
+    let pointCount = 0;
     let hasLines = false;
     let hasPolygons = false;
+    let hasPoints = false;
 
     for (const detection of selectedDetections) {
-      const { areaSf, perimeterLf, lengthLf, isLine } = calculateMeasurementsFromPixels(detection, pixelsPerFoot);
-      if (isLine) {
+      const { areaSf, perimeterLf, lengthLf, isLine, isPoint } = calculateMeasurementsFromPixels(detection, pixelsPerFoot);
+      if (isPoint) {
+        hasPoints = true;
+        pointCount += 1;
+      } else if (isLine) {
         hasLines = true;
         totalLength += lengthLf || 0;
       } else {
@@ -164,9 +187,11 @@ const SelectionProperties = memo(function SelectionProperties({
       lengthLf: totalLength > 0 ? totalLength : null,
       widthFt: null,
       heightFt: null,
-      isLine: hasLines && !hasPolygons,
-      hasMixed: hasLines && hasPolygons,
+      isLine: hasLines && !hasPolygons && !hasPoints,
+      isPoint: hasPoints && !hasLines && !hasPolygons,
+      hasMixed: (hasLines && hasPolygons) || (hasPoints && (hasLines || hasPolygons)),
       count: selectedDetections.length,
+      pointCount,
     };
   }, [selectedDetections, pixelsPerFoot]);
 
@@ -194,14 +219,22 @@ const SelectionProperties = memo(function SelectionProperties({
       <div className="space-y-1">
         <span className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">
           {measurements.isSingle
-            ? measurements.isLine
-              ? 'Line Measurement'
-              : 'Measurements'
+            ? measurements.isPoint
+              ? 'Count Marker'
+              : measurements.isLine
+                ? 'Line Measurement'
+                : 'Measurements'
             : `Combined (${measurements.count} items)`}
         </span>
         <div className="space-y-1.5 bg-gray-50 dark:bg-gray-800/50 rounded-md p-2">
-          {/* For lines, show Length instead of Area/Perimeter */}
-          {measurements.isLine ? (
+          {/* For points, show Count instead of dimensions */}
+          {measurements.isPoint ? (
+            <PropertyRow
+              label="Count"
+              value={measurements.isSingle ? '1' : String(measurements.pointCount)}
+            />
+          ) : measurements.isLine ? (
+            /* For lines, show Length instead of Area/Perimeter */
             <PropertyRow
               label="Length"
               value={formatValue(measurements.lengthLf, ' LF')}
@@ -218,14 +251,20 @@ const SelectionProperties = memo(function SelectionProperties({
               />
             </>
           )}
-          {/* For mixed selections, also show total line length */}
+          {/* For mixed selections, show counts and totals */}
+          {measurements.hasMixed && measurements.pointCount > 0 && (
+            <PropertyRow
+              label="Point Count"
+              value={String(measurements.pointCount)}
+            />
+          )}
           {measurements.hasMixed && measurements.lengthLf && (
             <PropertyRow
               label="Total Line Length"
               value={formatValue(measurements.lengthLf, ' LF')}
             />
           )}
-          {measurements.isSingle && !measurements.isLine && (
+          {measurements.isSingle && !measurements.isLine && !measurements.isPoint && (
             <>
               <PropertyRow
                 label="Width"

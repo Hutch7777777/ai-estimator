@@ -1,4 +1,5 @@
-import { createClient } from "./client";
+// Using direct fetch instead of Supabase client due to client issues
+// (Supabase JS client queries build but never execute HTTP requests)
 
 export interface BluebeamProject {
   id: string;
@@ -23,32 +24,32 @@ export async function fetchProjects(organizationId?: string): Promise<{
   data: BluebeamProject[] | null;
   error?: string;
 }> {
-  console.log('fetchProjects: Starting...', { organizationId });
-  const supabase = createClient();
-
   // Don't fetch if no organization is provided
   if (!organizationId) {
-    console.log('fetchProjects: No organization ID provided, returning empty list');
     return { data: [], error: undefined };
   }
 
   try {
-    console.log('fetchProjects: Querying bluebeam_projects table...');
-    // Note: bluebeam_projects table is not in the typed schema, using type assertion
-    const { data, error } = await (supabase as any)
-      .from("bluebeam_projects")
-      .select("*")
-      .eq("organization_id", organizationId)
-      .order("updated_at", { ascending: false });
+    const url = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/rest/v1/bluebeam_projects?select=*&organization_id=eq.${organizationId}&order=updated_at.desc`;
+    console.log('[fetchProjects] Fetching with URL:', url);
 
-    console.log('fetchProjects: Query complete', { hasData: !!data, hasError: !!error, errorMessage: error?.message });
+    const response = await fetch(
+      url,
+      {
+        headers: {
+          'apikey': process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+          'Authorization': `Bearer ${process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY}`
+        }
+      }
+    );
 
-    if (error) {
-      console.error('fetchProjects: Error from Supabase:', error);
-      return { data: null, error: error.message };
+    if (!response.ok) {
+      const errorBody = await response.text();
+      console.error('[fetchProjects] Supabase error:', response.status, errorBody);
+      throw new Error(`HTTP ${response.status}: ${errorBody}`);
     }
 
-    console.log('fetchProjects: Success, returning', data?.length || 0, 'projects');
+    const data = await response.json();
     return { data: data as BluebeamProject[] };
   } catch (error) {
     console.error('fetchProjects: Exception caught:', error);
@@ -66,34 +67,41 @@ export async function createProject(
   pdfPath?: string,
   totalPages?: number
 ): Promise<{ data: BluebeamProject | null; error?: string }> {
-  const supabase = createClient();
-
   if (!organizationId) {
     return { data: null, error: "Organization ID is required" };
   }
 
   try {
-    // Note: bluebeam_projects table is not in the typed schema, using type assertion
-    const { data, error } = await (supabase as any)
-      .from("bluebeam_projects")
-      .insert({
-        organization_id: organizationId,
-        project_name: projectName,
-        client_name: clientName || null,
-        source_pdf_path: pdfPath || null,
-        bax_file_path: pdfPath || "manual-upload", // Required field
-        total_pages: totalPages || null,
-        status: "pending",
-        trade: "siding",
-      })
-      .select()
-      .single();
+    const response = await fetch(
+      `${process.env.NEXT_PUBLIC_SUPABASE_URL}/rest/v1/bluebeam_projects`,
+      {
+        method: 'POST',
+        headers: {
+          'apikey': process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+          'Authorization': `Bearer ${process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY}`,
+          'Content-Type': 'application/json',
+          'Prefer': 'return=representation'
+        },
+        body: JSON.stringify({
+          organization_id: organizationId,
+          project_name: projectName,
+          client_name: clientName || null,
+          source_pdf_path: pdfPath || null,
+          bax_file_path: pdfPath || "manual-upload",
+          total_pages: totalPages || null,
+          status: "pending",
+          trade: "siding",
+        })
+      }
+    );
 
-    if (error) {
-      return { data: null, error: error.message };
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
     }
 
-    return { data: data as BluebeamProject };
+    const data = await response.json();
+    // PostgREST returns an array, get the first item
+    return { data: (Array.isArray(data) ? data[0] : data) as BluebeamProject };
   } catch (error) {
     return { data: null, error: String(error) };
   }
@@ -108,17 +116,22 @@ export async function updateProject(
     Pick<BluebeamProject, "project_name" | "client_name" | "total_pages" | "status" | "notes" | "source_pdf_path" | "pixels_per_foot">
   >
 ): Promise<{ success: boolean; error?: string }> {
-  const supabase = createClient();
-
   try {
-    // Note: bluebeam_projects table is not in the typed schema, using type assertion
-    const { error } = await (supabase as any)
-      .from("bluebeam_projects")
-      .update(updates)
-      .eq("id", projectId);
+    const response = await fetch(
+      `${process.env.NEXT_PUBLIC_SUPABASE_URL}/rest/v1/bluebeam_projects?id=eq.${projectId}`,
+      {
+        method: 'PATCH',
+        headers: {
+          'apikey': process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+          'Authorization': `Bearer ${process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(updates)
+      }
+    );
 
-    if (error) {
-      return { success: false, error: error.message };
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
     }
 
     return { success: true };
@@ -133,20 +146,23 @@ export async function updateProject(
 export async function getProject(
   projectId: string
 ): Promise<{ data: BluebeamProject | null; error?: string }> {
-  const supabase = createClient();
-
   try {
-    // Note: bluebeam_projects table is not in the typed schema, using type assertion
-    const { data, error } = await (supabase as any)
-      .from("bluebeam_projects")
-      .select("*")
-      .eq("id", projectId)
-      .single();
+    const response = await fetch(
+      `${process.env.NEXT_PUBLIC_SUPABASE_URL}/rest/v1/bluebeam_projects?id=eq.${projectId}&select=*`,
+      {
+        headers: {
+          'apikey': process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+          'Authorization': `Bearer ${process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY}`,
+          'Accept': 'application/vnd.pgrst.object+json'
+        }
+      }
+    );
 
-    if (error) {
-      return { data: null, error: error.message };
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
     }
 
+    const data = await response.json();
     return { data: data as BluebeamProject };
   } catch (error) {
     return { data: null, error: String(error) };
@@ -159,17 +175,20 @@ export async function getProject(
 export async function deleteProject(
   projectId: string
 ): Promise<{ success: boolean; error?: string }> {
-  const supabase = createClient();
-
   try {
-    // Note: bluebeam_projects table is not in the typed schema, using type assertion
-    const { error } = await (supabase as any)
-      .from("bluebeam_projects")
-      .delete()
-      .eq("id", projectId);
+    const response = await fetch(
+      `${process.env.NEXT_PUBLIC_SUPABASE_URL}/rest/v1/bluebeam_projects?id=eq.${projectId}`,
+      {
+        method: 'DELETE',
+        headers: {
+          'apikey': process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+          'Authorization': `Bearer ${process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY}`
+        }
+      }
+    );
 
-    if (error) {
-      return { success: false, error: error.message };
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
     }
 
     return { success: true };

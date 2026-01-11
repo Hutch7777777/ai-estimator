@@ -56,26 +56,33 @@ interface UserContextType {
 const UserContext = createContext<UserContextType | undefined>(undefined);
 
 export function UserProvider({ children }: { children: ReactNode }) {
-  // Check for dev bypass mode on mount
-  const [isDevBypass] = useState(() => isDevBypassEnabled());
+  // IMPORTANT: Always start with consistent initial state for SSR hydration
+  // Dev bypass is checked in useEffect after hydration to avoid mismatch
+  const [isDevBypass, setIsDevBypass] = useState(false);
 
-  // If dev bypass is enabled, start with mock user immediately (no loading)
-  const [user, setUser] = useState<User | null>(() => isDevBypassEnabled() ? DEV_MOCK_USER : null);
-  const [profile, setProfile] = useState<UserProfile | null>(() => isDevBypassEnabled() ? DEV_MOCK_PROFILE : null);
-  const [isLoading, setIsLoading] = useState(() => !isDevBypassEnabled()); // No loading if dev bypass
-  const [hasSession, setHasSession] = useState(() => isDevBypassEnabled()); // Has session if dev bypass
+  // Always start with loading state for consistent SSR/client hydration
+  const [user, setUser] = useState<User | null>(null);
+  const [profile, setProfile] = useState<UserProfile | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [hasSession, setHasSession] = useState(false);
 
   // Track if we've completed loading to prevent timeout from firing after success
-  const hasCompletedRef = useRef(isDevBypassEnabled()); // Already completed if dev bypass
+  const hasCompletedRef = useRef(false);
 
   const supabase = useMemo(() => createClient(), []);
 
-  // Log dev bypass status on mount
+  // Check for dev bypass after hydration (client-side only)
   useEffect(() => {
-    if (isDevBypass) {
+    if (isDevBypassEnabled()) {
       console.log('🔓 DEV AUTH BYPASS ENABLED - Using mock user:', DEV_MOCK_USER.email);
+      setIsDevBypass(true);
+      setUser(DEV_MOCK_USER);
+      setProfile(DEV_MOCK_PROFILE);
+      setHasSession(true);
+      setIsLoading(false);
+      hasCompletedRef.current = true;
     }
-  }, [isDevBypass]);
+  }, []); // Run once on mount
 
   const fetchProfile = useCallback(async (userId: string, retryCount = 0): Promise<UserProfile | null> => {
     try {

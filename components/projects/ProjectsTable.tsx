@@ -2,7 +2,6 @@
 
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { createClient } from "@/lib/supabase/client";
 import { useOrganization } from "@/lib/hooks/useOrganization";
 import {
   Table,
@@ -64,11 +63,10 @@ export function ProjectsTable() {
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
 
-  const supabase = createClient();
   const router = useRouter();
   const { organization, isLoading: isOrgLoading } = useOrganization();
 
-  // Fetch projects from database - filtered by organization
+  // Fetch projects from database - filtered by organization using direct fetch
   useEffect(() => {
     async function fetchProjects() {
       // Wait for organization to be loaded
@@ -86,14 +84,22 @@ export function ProjectsTable() {
         setLoading(true);
         setError(null);
 
-        const { data, error: fetchError } = await supabase
-          .from("projects")
-          .select("*")
-          .eq("organization_id", organization.id)
-          .order("created_at", { ascending: false });
+        // Use direct fetch since Supabase JS client has issues
+        const response = await fetch(
+          `${process.env.NEXT_PUBLIC_SUPABASE_URL}/rest/v1/projects?select=*&organization_id=eq.${organization.id}&order=created_at.desc`,
+          {
+            headers: {
+              'apikey': process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+              'Authorization': `Bearer ${process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY}`
+            }
+          }
+        );
 
-        if (fetchError) throw fetchError;
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
 
+        const data = await response.json();
         setProjects(data || []);
         setFilteredProjects(data || []);
       } catch (err) {
@@ -105,44 +111,7 @@ export function ProjectsTable() {
     }
 
     fetchProjects();
-
-    // Subscribe to realtime changes - only for current organization's projects
-    if (!organization?.id) return;
-
-    const channel = supabase
-      .channel("projects-changes")
-      .on(
-        "postgres_changes",
-        {
-          event: "*",
-          schema: "public",
-          table: "projects",
-          filter: `organization_id=eq.${organization.id}`,
-        },
-        (payload) => {
-          console.log("Project change detected:", payload);
-
-          if (payload.eventType === "INSERT") {
-            // Add new project to the list
-            setProjects((prev) => [payload.new as Project, ...prev]);
-          } else if (payload.eventType === "UPDATE") {
-            // Update existing project
-            setProjects((prev) =>
-              prev.map((p) => (p.id === payload.new.id ? (payload.new as Project) : p))
-            );
-          } else if (payload.eventType === "DELETE") {
-            // Remove deleted project
-            setProjects((prev) => prev.filter((p) => p.id !== payload.old.id));
-          }
-        }
-      )
-      .subscribe();
-
-    // Cleanup subscription on unmount
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, [supabase, organization?.id, isOrgLoading]);
+  }, [organization?.id, isOrgLoading]);
 
   // Filter projects based on search query
   useEffect(() => {
@@ -225,12 +194,21 @@ export function ProjectsTable() {
     }
 
     try {
-      const { error: deleteError } = await supabase
-        .from("projects")
-        .delete()
-        .eq("id", projectId);
+      // Use direct fetch for delete
+      const response = await fetch(
+        `${process.env.NEXT_PUBLIC_SUPABASE_URL}/rest/v1/projects?id=eq.${projectId}`,
+        {
+          method: 'DELETE',
+          headers: {
+            'apikey': process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+            'Authorization': `Bearer ${process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY}`
+          }
+        }
+      );
 
-      if (deleteError) throw deleteError;
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
 
       // Remove from local state
       setProjects((prev) => prev.filter((p) => p.id !== projectId));
