@@ -95,6 +95,8 @@ export interface KonvaDetectionCanvasProps {
     updates: PointUpdatePayload
   ) => void;
   onCalibrationComplete?: (data: CalibrationData) => void;
+  /** Called when user right-clicks to exit point/line mode */
+  onExitDrawingMode?: () => void;
   containerWidth: number;
   containerHeight: number;
 }
@@ -131,6 +133,7 @@ export default function KonvaDetectionCanvas({
   onDetectionLineUpdate,
   onDetectionPointUpdate,
   onCalibrationComplete,
+  onExitDrawingMode,
   containerWidth,
   containerHeight,
 }: KonvaDetectionCanvasProps) {
@@ -330,13 +333,29 @@ export default function KonvaDetectionCanvas({
 
   const handleStageMouseDown = useCallback(
     (e: Konva.KonvaEventObject<MouseEvent | TouchEvent>) => {
-      // Only handle clicks on the stage/image itself
-      if (e.target !== stageRef.current && e.target !== imageRef.current) {
+      // Check if we clicked on a detection shape or any child of a detection Group
+      // Walk up the parent chain to find if any parent is a detection
+      let target = e.target;
+      let isDetectionShape = false;
+      while (target && target !== stageRef.current) {
+        const targetName = target.name?.() || '';
+        if (targetName.startsWith('detection-')) {
+          isDetectionShape = true;
+          break;
+        }
+        target = target.parent as typeof target;
+      }
+
+      // If clicking on a detection shape (or child of one), let its own handler deal with it
+      if (isDetectionShape) {
         return;
       }
 
+      // Only handle clicks on the stage/image itself (empty space)
+      const isStageOrImage = e.target === stageRef.current || e.target === imageRef.current;
+
       // Clear selection when clicking on empty space (in select mode)
-      if (toolMode === 'select') {
+      if (toolMode === 'select' && isStageOrImage) {
         onSelectionChange(null, false);
         return;
       }
@@ -561,6 +580,33 @@ export default function KonvaDetectionCanvas({
     [toolMode, isDrawingPolygon, drawingPoints.length, completePolygon]
   );
 
+  // Right-click to exit point/line mode or cancel polygon drawing
+  const handleContextMenu = useCallback(
+    (e: Konva.KonvaEventObject<PointerEvent>) => {
+      e.evt.preventDefault();
+
+      // Cancel polygon drawing
+      if (isDrawingPolygon) {
+        cancelDrawing();
+        return;
+      }
+
+      // Cancel line drawing
+      if (lineStartPoint) {
+        setLineStartPoint(null);
+        setCalibrationMousePos(null);
+        return;
+      }
+
+      // Exit point mode
+      if (toolMode === 'point' || toolMode === 'line') {
+        onExitDrawingMode?.();
+        return;
+      }
+    },
+    [isDrawingPolygon, cancelDrawing, lineStartPoint, toolMode, onExitDrawingMode]
+  );
+
   // Escape key to cancel drawing, calibration, or line drawing
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -692,6 +738,7 @@ export default function KonvaDetectionCanvas({
         onMouseDown={handleStageMouseDown}
         onMouseMove={handleStageMouseMove}
         onDblClick={handleStageDoubleClick}
+        onContextMenu={handleContextMenu}
         onTouchStart={handleStageMouseDown}
         onTouchMove={handleStageMouseMove}
       >

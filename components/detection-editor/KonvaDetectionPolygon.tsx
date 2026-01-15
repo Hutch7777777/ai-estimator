@@ -185,11 +185,11 @@ export default function KonvaDetectionPolygon({
   // Handlers
   // ==========================================================================
 
-  // Handle click to select (with multi-select support via Cmd/Ctrl)
+  // Handle click to select (with multi-select support via Cmd/Ctrl/Shift)
   const handleClick = useCallback((e: Konva.KonvaEventObject<MouseEvent | TouchEvent>) => {
     e.cancelBubble = true;
-    // Check for Cmd (Mac) or Ctrl (Windows) modifier for multi-select
-    const addToSelection = e.evt.metaKey || e.evt.ctrlKey;
+    // Check for Cmd (Mac), Ctrl (Windows), or Shift modifier for multi-select
+    const addToSelection = e.evt.metaKey || e.evt.ctrlKey || e.evt.shiftKey;
     onSelect(detection.id, addToSelection);
   }, [detection.id, onSelect]);
 
@@ -492,8 +492,6 @@ export default function KonvaDetectionPolygon({
       {/* Draggable Edge Lines (only when selected) - for resizing by dragging edges */}
       {isSelected && localPoints.length >= 2 && localPoints.map((point, index) => {
         const nextPoint = localPoints[(index + 1) % localPoints.length];
-        // Determine if edge is more vertical or horizontal for cursor
-        const isVertical = Math.abs(nextPoint.x - point.x) < Math.abs(nextPoint.y - point.y);
 
         return (
           <Line
@@ -506,7 +504,7 @@ export default function KonvaDetectionPolygon({
             onMouseEnter={(e) => {
               const stage = e.target.getStage();
               if (stage && isDraggingEdge === null) {
-                stage.container().style.cursor = isVertical ? 'ew-resize' : 'ns-resize';
+                stage.container().style.cursor = 'pointer';
               }
             }}
             onMouseLeave={(e) => {
@@ -514,6 +512,42 @@ export default function KonvaDetectionPolygon({
               if (stage && isDraggingEdge === null) {
                 stage.container().style.cursor = '';
               }
+            }}
+            onDblClick={(e) => {
+              e.cancelBubble = true;
+
+              // Get click position in stage coordinates
+              const stage = e.target.getStage();
+              if (!stage) return;
+
+              const pointerPos = stage.getPointerPosition();
+              if (!pointerPos) return;
+
+              // Convert to image coordinates
+              const stageScale = stage.scaleX();
+              const stagePos = stage.position();
+              const imageX = (pointerPos.x - stagePos.x) / stageScale;
+              const imageY = (pointerPos.y - stagePos.y) / stageScale;
+
+              // Insert new point between index and index+1
+              const newPoints = [...localPoints];
+              const insertIndex = index + 1;
+              newPoints.splice(insertIndex, 0, { x: imageX, y: imageY });
+
+              // Update local state
+              setLocalPoints(newPoints);
+
+              // Track this edit
+              lastLocalEditRef.current = newPoints;
+
+              // Calculate new measurements and update parent
+              const effectiveScaleRatio = getEffectiveScaleRatio();
+              const measurements = calculatePolygonMeasurements(newPoints, effectiveScaleRatio);
+
+              onPolygonUpdate(detection, {
+                polygon_points: newPoints,
+                ...measurements,
+              });
             }}
             onDragStart={(e) => {
               e.cancelBubble = true;
@@ -532,11 +566,11 @@ export default function KonvaDetectionPolygon({
 
               const line = e.target;
               const stage = line.getStage();
-              const scale = stage?.scaleX() || 1;
+              const stageScale = stage?.scaleX() || 1;
 
               // Calculate delta from start position (not from 0)
-              const dx = (line.x() - edgeDragStartRef.current.startX) / scale;
-              const dy = (line.y() - edgeDragStartRef.current.startY) / scale;
+              const dx = (line.x() - edgeDragStartRef.current.startX) / stageScale;
+              const dy = (line.y() - edgeDragStartRef.current.startY) / stageScale;
 
               // Get the two vertex indices for this edge
               const idx1 = index;

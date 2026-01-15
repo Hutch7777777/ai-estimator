@@ -79,8 +79,8 @@ const ProductItem = memo(function ProductItem({ item, isSelected, onClick }: Pro
         {item.product_name}
       </div>
       <div className="flex items-center justify-between text-[10px] text-gray-500 dark:text-gray-400">
-        <span className="truncate">{item.manufacturer}</span>
-        <span className="flex-shrink-0 ml-2">{formatCost(item.material_cost, item.unit)}</span>
+        <span className="truncate">{item.category || item.sku}</span>
+        <span className="flex-shrink-0 ml-2 font-medium text-green-600 dark:text-green-400">{formatCost(item.material_cost, item.unit)}</span>
       </div>
     </button>
   );

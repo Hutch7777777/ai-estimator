@@ -19,24 +19,16 @@ import {
 import type {
   ExtractionPage,
   ExtractionDetection,
-  ExtractionElevationCalcs,
-  ExtractionJobTotals,
   DetectionClass,
   AllDetectionClasses,
   DetectionStatus,
+  LiveDerivedTotals,
 } from '@/lib/types/extraction';
 import { DETECTION_CLASS_COLORS, CONFIDENCE_THRESHOLDS } from '@/lib/types/extraction';
 import ClassSelector from './PropertiesPanel/ClassSelector';
 import SelectionProperties from './PropertiesPanel/SelectionProperties';
 import MaterialAssignment from './PropertiesPanel/MaterialAssignment';
 import NotesField from './PropertiesPanel/NotesField';
-import {
-  getClassDerivedMeasurements,
-  rectToPolygonPoints,
-  calculateBuildingMeasurements,
-  calculateLineMeasurements,
-  calculateAreaMeasurements,
-} from '@/lib/utils/polygonUtils';
 
 // =============================================================================
 // Types
@@ -50,8 +42,6 @@ export interface DetectionSidebarProps {
   selectedIds: Set<string>;
   onDetectionSelect: (id: string, addToSelection: boolean) => void;
   onDetectionHover: (id: string | null) => void;
-  elevationCalcs: ExtractionElevationCalcs | null;
-  jobTotals: ExtractionJobTotals | null;
   showDeleted: boolean;
   onShowDeletedChange: (show: boolean) => void;
   jobId: string; // For Phase 4 data fetching
@@ -63,6 +53,8 @@ export interface DetectionSidebarProps {
   onNotesChange: (detectionIds: string[], notes: string) => void;
   // Scale for dynamic measurement calculation
   pixelsPerFoot: number;
+  // Live derived totals (calculated in parent, passed down for display)
+  liveDerivedTotals: LiveDerivedTotals | null;
 }
 
 type TabType = 'pages' | 'detections' | 'properties' | 'totals';
@@ -118,11 +110,6 @@ function formatDimension(feet: number | null): string {
 function formatArea(sf: number | null): string {
   if (sf === null) return '-';
   return `${sf.toFixed(1)} SF`;
-}
-
-function formatLinearFeet(lf: number | null): string {
-  if (lf === null || lf === 0) return '-';
-  return `${lf.toFixed(1)} LF`;
 }
 
 /**
@@ -353,38 +340,6 @@ const DetectionGroup = memo(function DetectionGroup({
   );
 });
 
-interface TotalsRowProps {
-  label: string;
-  value: string | number;
-  unit?: string;
-  indent?: boolean;
-  highlight?: boolean;
-}
-
-const TotalsRow = memo(function TotalsRow({
-  label,
-  value,
-  unit,
-  indent = false,
-  highlight = false,
-}: TotalsRowProps) {
-  return (
-    <div
-      className={`
-        flex items-center justify-between py-1.5
-        ${indent ? 'pl-4' : ''}
-        ${highlight ? 'font-medium text-gray-900 dark:text-gray-100' : 'text-gray-600 dark:text-gray-400'}
-      `}
-    >
-      <span className="text-sm">{label}</span>
-      <span className="text-sm font-mono">
-        {typeof value === 'number' ? value.toFixed(1) : value}
-        {unit && <span className="text-gray-400 ml-1">{unit}</span>}
-      </span>
-    </div>
-  );
-});
-
 // =============================================================================
 // Main Component
 // =============================================================================
@@ -397,8 +352,6 @@ const DetectionSidebar = memo(function DetectionSidebar({
   selectedIds,
   onDetectionSelect,
   onDetectionHover,
-  elevationCalcs,
-  jobTotals,
   showDeleted,
   onShowDeletedChange,
   jobId,
@@ -408,6 +361,7 @@ const DetectionSidebar = memo(function DetectionSidebar({
   onMaterialAssign,
   onNotesChange,
   pixelsPerFoot,
+  liveDerivedTotals,
 }: DetectionSidebarProps) {
   const [activeTab, setActiveTab] = useState<TabType>('detections');
   const [expandedClasses, setExpandedClasses] = useState<Set<AllDetectionClasses>>(
@@ -496,188 +450,6 @@ const DetectionSidebar = memo(function DetectionSidebar({
   const totalDetections = detections.filter(
     (d) => d.page_id === currentPageId && d.status !== 'deleted'
   ).length;
-
-  // Get current page for scale ratio
-  const currentPage = useMemo(() => {
-    return pages.find((p) => p.id === currentPageId) || null;
-  }, [pages, currentPageId]);
-
-  // Calculate live derived measurements from current page detections (HOVER-style)
-  const liveDerivedTotals = useMemo(() => {
-    if (!currentPage?.scale_ratio || currentPage.scale_ratio <= 0) {
-      return null;
-    }
-
-    const scaleRatio = currentPage.scale_ratio;
-    // Filter out roof detections - they belong on roof plans, not elevations
-    const pageDetections = detections.filter(
-      (d) => d.page_id === currentPage.id && d.status !== 'deleted' && d.class !== 'roof'
-    );
-
-    const totals = {
-      // FACADE (building/exterior wall)
-      buildingCount: 0,
-      buildingAreaSf: 0,
-      buildingPerimeterLf: 0,
-      buildingLevelStarterLf: 0,
-      // WINDOWS
-      windowCount: 0,
-      windowAreaSf: 0,
-      windowPerimeterLf: 0,
-      windowHeadLf: 0,
-      windowJambLf: 0,
-      windowSillLf: 0,
-      // DOORS
-      doorCount: 0,
-      doorAreaSf: 0,
-      doorPerimeterLf: 0,
-      doorHeadLf: 0,
-      doorJambLf: 0,
-      // GARAGES
-      garageCount: 0,
-      garageAreaSf: 0,
-      garagePerimeterLf: 0,
-      garageHeadLf: 0,
-      garageJambLf: 0,
-      // GABLES
-      gableCount: 0,
-      gableAreaSf: 0,
-      gableRakeLf: 0,
-      // CORNERS
-      insideCornerCount: 0,
-      insideCornerLf: 0,
-      outsideCornerCount: 0,
-      outsideCornerLf: 0,
-      // ROOFLINE (line-type measurements)
-      eavesCount: 0,
-      eavesLf: 0,
-      rakesCount: 0,
-      rakesLf: 0,
-      ridgeCount: 0,
-      ridgeLf: 0,
-      valleyCount: 0,
-      valleyLf: 0,
-      // SOFFIT (area)
-      soffitCount: 0,
-      soffitAreaSf: 0,
-      // FASCIA (line)
-      fasciaCount: 0,
-      fasciaLf: 0,
-      // GUTTERS
-      gutterCount: 0,
-      gutterLf: 0,
-      downspoutCount: 0,
-      // SIDING (net area = building - openings)
-      sidingNetSf: 0,
-    };
-
-    // Track total openings for net siding calculation
-    let totalOpeningsSf = 0;
-
-    for (const detection of pageDetections) {
-      // Cast to string for comparison with classes that may not be in DetectionClass type
-      const cls = detection.class as string;
-
-      // Get polygon points (use existing or convert from bounding box)
-      const points = detection.polygon_points && detection.polygon_points.length > 0
-        ? detection.polygon_points
-        : rectToPolygonPoints({
-            pixel_x: detection.pixel_x,
-            pixel_y: detection.pixel_y,
-            pixel_width: detection.pixel_width,
-            pixel_height: detection.pixel_height,
-          });
-
-      // Building/Facade class (handle both underscore and space versions)
-      if (cls === 'building' || cls === 'exterior_wall' || cls === 'exterior wall') {
-        const buildingMeasurements = calculateBuildingMeasurements(points, scaleRatio);
-        totals.buildingCount++;
-        totals.buildingAreaSf += buildingMeasurements.area_sf;
-        totals.buildingPerimeterLf += buildingMeasurements.perimeter_lf;
-        totals.buildingLevelStarterLf += buildingMeasurements.level_starter_lf;
-        continue;
-      }
-
-      // Window/Door/Garage/Gable derived measurements
-      const derived = getClassDerivedMeasurements(cls, points, scaleRatio);
-      const areaMeasurement = calculateAreaMeasurements(points, scaleRatio);
-
-      if (cls === 'window' && derived && 'head_lf' in derived) {
-        totals.windowCount++;
-        totals.windowAreaSf += areaMeasurement.area_sf;
-        totals.windowPerimeterLf += areaMeasurement.perimeter_lf;
-        totals.windowHeadLf += derived.head_lf;
-        totals.windowJambLf += derived.jamb_lf;
-        totals.windowSillLf += (derived as { sill_lf?: number }).sill_lf || 0;
-        totalOpeningsSf += areaMeasurement.area_sf;
-      } else if (cls === 'door' && derived && 'head_lf' in derived) {
-        totals.doorCount++;
-        totals.doorAreaSf += areaMeasurement.area_sf;
-        totals.doorPerimeterLf += areaMeasurement.perimeter_lf;
-        totals.doorHeadLf += derived.head_lf;
-        totals.doorJambLf += derived.jamb_lf;
-        totalOpeningsSf += areaMeasurement.area_sf;
-      } else if (cls === 'garage' && derived && 'head_lf' in derived) {
-        totals.garageCount++;
-        totals.garageAreaSf += areaMeasurement.area_sf;
-        totals.garagePerimeterLf += areaMeasurement.perimeter_lf;
-        totals.garageHeadLf += derived.head_lf;
-        totals.garageJambLf += derived.jamb_lf;
-        totalOpeningsSf += areaMeasurement.area_sf;
-      } else if (cls === 'gable' && derived && 'rake_lf' in derived) {
-        totals.gableCount++;
-        totals.gableAreaSf += areaMeasurement.area_sf;
-        totals.gableRakeLf += derived.rake_lf;
-      } else if (cls === 'siding') {
-        // Siding zones are handled by the overlay, not individual totals
-      } else if (cls === 'soffit') {
-        totals.soffitCount++;
-        totals.soffitAreaSf += areaMeasurement.area_sf;
-      } else if (cls === 'inside_corner' || cls === 'inside corner') {
-        const lineMeasurement = calculateLineMeasurements(points, scaleRatio);
-        totals.insideCornerCount++;
-        totals.insideCornerLf += lineMeasurement.length_lf;
-      } else if (cls === 'outside_corner' || cls === 'outside corner') {
-        const lineMeasurement = calculateLineMeasurements(points, scaleRatio);
-        totals.outsideCornerCount++;
-        totals.outsideCornerLf += lineMeasurement.length_lf;
-      } else if (cls === 'fascia') {
-        const lineMeasurement = calculateLineMeasurements(points, scaleRatio);
-        totals.fasciaCount++;
-        totals.fasciaLf += lineMeasurement.length_lf;
-      } else if (cls === 'gutter') {
-        const lineMeasurement = calculateLineMeasurements(points, scaleRatio);
-        totals.gutterCount++;
-        totals.gutterLf += lineMeasurement.length_lf;
-      } else if (cls === 'downspout') {
-        totals.downspoutCount++;
-      }
-
-      // Line-type detections (roof elements)
-      if (cls === 'eave' || cls === 'roof_eave') {
-        const lineMeasurement = calculateLineMeasurements(points, scaleRatio);
-        totals.eavesCount++;
-        totals.eavesLf += lineMeasurement.length_lf;
-      } else if (cls === 'rake' || cls === 'roof_rake') {
-        const lineMeasurement = calculateLineMeasurements(points, scaleRatio);
-        totals.rakesCount++;
-        totals.rakesLf += lineMeasurement.length_lf;
-      } else if (cls === 'ridge' || cls === 'roof_ridge') {
-        const lineMeasurement = calculateLineMeasurements(points, scaleRatio);
-        totals.ridgeCount++;
-        totals.ridgeLf += lineMeasurement.length_lf;
-      } else if (cls === 'valley' || cls === 'roof_valley') {
-        const lineMeasurement = calculateLineMeasurements(points, scaleRatio);
-        totals.valleyCount++;
-        totals.valleyLf += lineMeasurement.length_lf;
-      }
-    }
-
-    // Calculate net siding (building area minus openings)
-    totals.sidingNetSf = Math.max(0, totals.buildingAreaSf - totalOpeningsSf);
-
-    return totals;
-  }, [detections, currentPage]);
 
   return (
     <div className="w-72 h-full bg-white dark:bg-gray-900 border-l border-gray-200 dark:border-gray-700 flex flex-col">
@@ -1174,80 +946,17 @@ const DetectionSidebar = memo(function DetectionSidebar({
             )}
 
             {/* Show message if no scale is set */}
-            {!liveDerivedTotals && currentPage && (
+            {!liveDerivedTotals && currentPageId && (
               <div className="text-xs text-yellow-600 dark:text-yellow-500 bg-yellow-50 dark:bg-yellow-900/20 rounded-lg p-3">
                 ⚠️ Calibrate scale to see live measurements
               </div>
             )}
 
-            {/* Elevation Totals */}
-            {elevationCalcs && (
-              <div className="space-y-1">
-                <h3 className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-2">
-                  Current Elevation
-                </h3>
-                <div className="bg-gray-50 dark:bg-gray-800/50 rounded-lg p-3 space-y-1">
-                  <TotalsRow label="Gross Facade" value={elevationCalcs.gross_facade_sf} unit="SF" highlight />
-                  <TotalsRow label="Total Openings" value={elevationCalcs.total_openings_sf} unit="SF" indent />
-                  <TotalsRow label="Net Siding" value={elevationCalcs.net_siding_sf} unit="SF" highlight />
-
-                  <div className="border-t border-gray-200 dark:border-gray-700 my-2" />
-
-                  <TotalsRow label="Windows" value={elevationCalcs.window_count} />
-                  <TotalsRow label="Window Area" value={elevationCalcs.window_area_sf} unit="SF" indent />
-                  <TotalsRow label="Window Perimeter" value={formatLinearFeet(elevationCalcs.window_perimeter_lf)} indent />
-
-                  <TotalsRow label="Doors" value={elevationCalcs.door_count} />
-                  <TotalsRow label="Door Area" value={elevationCalcs.door_area_sf} unit="SF" indent />
-
-                  <TotalsRow label="Garages" value={elevationCalcs.garage_count} />
-                  <TotalsRow label="Garage Area" value={elevationCalcs.garage_area_sf} unit="SF" indent />
-
-                  <TotalsRow label="Gables" value={elevationCalcs.gable_count} />
-                  <TotalsRow label="Gable Rake" value={formatLinearFeet(elevationCalcs.gable_rake_lf)} indent />
-                </div>
-              </div>
-            )}
-
-            {/* Job Totals */}
-            {jobTotals && (
-              <div className="space-y-1">
-                <h3 className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-2">
-                  All Elevations
-                </h3>
-                <div className="bg-blue-50 dark:bg-blue-900/20 rounded-lg p-3 space-y-1">
-                  <TotalsRow label="Total Gross Facade" value={jobTotals.total_gross_facade_sf} unit="SF" highlight />
-                  <TotalsRow label="Total Openings" value={jobTotals.total_openings_sf} unit="SF" indent />
-                  <TotalsRow label="Total Net Siding" value={jobTotals.total_net_siding_sf} unit="SF" highlight />
-                  <TotalsRow label="Siding Squares" value={jobTotals.siding_squares} unit="SQ" highlight />
-
-                  <div className="border-t border-gray-200 dark:border-gray-700 my-2" />
-
-                  <TotalsRow label="Total Windows" value={jobTotals.total_windows} />
-                  <TotalsRow label="Window Head" value={formatLinearFeet(jobTotals.total_window_head_lf)} indent />
-                  <TotalsRow label="Window Jamb" value={formatLinearFeet(jobTotals.total_window_jamb_lf)} indent />
-                  <TotalsRow label="Window Sill" value={formatLinearFeet(jobTotals.total_window_sill_lf)} indent />
-
-                  <TotalsRow label="Total Doors" value={jobTotals.total_doors} />
-                  <TotalsRow label="Door Head" value={formatLinearFeet(jobTotals.total_door_head_lf)} indent />
-                  <TotalsRow label="Door Jamb" value={formatLinearFeet(jobTotals.total_door_jamb_lf)} indent />
-
-                  <TotalsRow label="Total Garages" value={jobTotals.total_garages} />
-                  <TotalsRow label="Garage Head" value={formatLinearFeet(jobTotals.total_garage_head_lf)} indent />
-
-                  <TotalsRow label="Total Gables" value={jobTotals.total_gables} />
-                  <TotalsRow label="Gable Rake" value={formatLinearFeet(jobTotals.total_gable_rake_lf)} indent />
-
-                  <TotalsRow label="Roof Eave" value={formatLinearFeet(jobTotals.total_roof_eave_lf)} />
-                </div>
-              </div>
-            )}
-
-            {!elevationCalcs && !jobTotals && (
+            {!liveDerivedTotals && !currentPageId && (
               <div className="p-8 text-center text-gray-500 dark:text-gray-400">
                 <Calculator className="w-8 h-8 mx-auto mb-2 opacity-50" />
                 <p className="text-sm">No calculations available</p>
-                <p className="text-xs mt-1">Verify detections to generate totals</p>
+                <p className="text-xs mt-1">Select a page to see measurements</p>
               </div>
             )}
           </div>

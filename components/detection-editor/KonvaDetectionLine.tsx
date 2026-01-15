@@ -188,10 +188,10 @@ export default function KonvaDetectionLine({
   // Handlers
   // ==========================================================================
 
-  // Handle click to select
+  // Handle click to select (with multi-select support via Cmd/Ctrl/Shift)
   const handleClick = useCallback((e: Konva.KonvaEventObject<MouseEvent | TouchEvent>) => {
     e.cancelBubble = true;
-    const addToSelection = e.evt.metaKey || e.evt.ctrlKey;
+    const addToSelection = e.evt.metaKey || e.evt.ctrlKey || e.evt.shiftKey;
     onSelect(detection.id, addToSelection);
   }, [detection.id, onSelect]);
 

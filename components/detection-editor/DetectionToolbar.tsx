@@ -46,6 +46,8 @@ export interface DetectionToolbarProps {
   };
   onApprove?: () => void;
   isApproving?: boolean;
+  canApprove?: boolean; // False when liveDerivedTotals is null (no scale calibrated)
+  isApproved?: boolean; // True after successful approval
   onGenerateMarkup?: () => void;
   isGeneratingMarkup?: boolean;
   // Local-first editing props
@@ -137,6 +139,8 @@ const DetectionToolbar = memo(function DetectionToolbar({
   reviewProgress,
   onApprove,
   isApproving = false,
+  canApprove = true,
+  isApproved = false,
   onGenerateMarkup,
   isGeneratingMarkup = false,
   // Local-first editing props
@@ -372,19 +376,32 @@ const DetectionToolbar = memo(function DetectionToolbar({
         <button
           type="button"
           onClick={onApprove}
-          // TODO: Restore review requirement for production: disabled={reviewProgress.pending > 0 || isApproving}
-          disabled={isApproving}
+          // TODO: Restore review requirement for production: disabled={reviewProgress.pending > 0 || isApproving || !canApprove || isApproved}
+          disabled={isApproving || !canApprove || isApproved}
           className={`
             flex items-center gap-2 px-4 py-2 rounded-md font-medium transition-colors
             ${
-              isApproving
-                ? 'bg-gray-200 dark:bg-gray-700 text-gray-400 dark:text-gray-500 cursor-not-allowed'
-                : 'bg-blue-600 hover:bg-blue-700 text-white'
+              isApproved
+                ? 'bg-green-600 text-white cursor-default'
+                : isApproving || !canApprove
+                  ? 'bg-gray-200 dark:bg-gray-700 text-gray-400 dark:text-gray-500 cursor-not-allowed'
+                  : 'bg-blue-600 hover:bg-blue-700 text-white'
             }
           `}
-          title="Approve all detections and calculate totals"
+          title={
+            isApproved
+              ? 'Takeoff has been created'
+              : !canApprove
+                ? 'Calibrate scale first to enable calculations'
+                : 'Approve all detections and calculate totals'
+          }
         >
-          {isApproving ? (
+          {isApproved ? (
+            <>
+              <Check className="w-4 h-4" />
+              <span>Approved</span>
+            </>
+          ) : isApproving ? (
             <>
               <Loader2 className="w-4 h-4 animate-spin" />
               <span>Approving...</span>

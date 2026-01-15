@@ -115,8 +115,8 @@ export default function KonvaDetectionRect({
   // Handle click to select (works for both mouse and touch, with multi-select support)
   const handleClick = (e: Konva.KonvaEventObject<MouseEvent | TouchEvent>) => {
     e.cancelBubble = true;
-    // Check for Cmd (Mac) or Ctrl (Windows) modifier for multi-select
-    const addToSelection = e.evt.metaKey || e.evt.ctrlKey;
+    // Check for Cmd (Mac), Ctrl (Windows), or Shift modifier for multi-select
+    const addToSelection = e.evt.metaKey || e.evt.ctrlKey || e.evt.shiftKey;
     onSelect(detection.id, addToSelection);
   };
 

@@ -31,10 +31,10 @@ export interface KonvaDetectionPointProps {
 // Constants
 // =============================================================================
 
-// Marker styling
-const MARKER_RADIUS = 10; // Base radius in pixels
-const MARKER_STROKE_WIDTH = 2;
-const MARKER_INNER_RADIUS = 4; // Inner dot radius
+// Marker styling - small solid dots
+const MARKER_RADIUS = 5; // Small solid dot radius
+const SELECTION_RING_RADIUS = 9; // Ring shown when selected
+const SELECTION_RING_WIDTH = 1.5;
 
 // =============================================================================
 // Helper Functions
@@ -112,10 +112,10 @@ export default function KonvaDetectionPoint({
 
   // Scale-adjusted sizes for consistent visual appearance
   const markerRadius = MARKER_RADIUS / scale;
-  const markerStrokeWidth = MARKER_STROKE_WIDTH / scale;
-  const innerRadius = MARKER_INNER_RADIUS / scale;
-  const fontSize = 12 / scale;
-  const labelPadding = 4 / scale;
+  const selectionRingRadius = SELECTION_RING_RADIUS / scale;
+  const selectionRingWidth = SELECTION_RING_WIDTH / scale;
+  const fontSize = 11 / scale;
+  const labelPadding = 3 / scale;
 
   // ==========================================================================
   // Handlers
@@ -124,7 +124,7 @@ export default function KonvaDetectionPoint({
   // Handle click to select
   const handleClick = useCallback((e: Konva.KonvaEventObject<MouseEvent | TouchEvent>) => {
     e.cancelBubble = true;
-    const addToSelection = e.evt.metaKey || e.evt.ctrlKey;
+    const addToSelection = e.evt.metaKey || e.evt.ctrlKey || e.evt.shiftKey;
     onSelect(detection.id, addToSelection);
   }, [detection.id, onSelect]);
 
@@ -167,7 +167,7 @@ export default function KonvaDetectionPoint({
         y={localPosition.y}
         radius={markerRadius}
         fill={color}
-        opacity={0.2}
+        opacity={0.15}
         listening={false}
       />
     );
@@ -188,19 +188,29 @@ export default function KonvaDetectionPoint({
       onDragMove={handleDragMove}
       onDragEnd={handleDragEnd}
     >
-      {/* Outer ring (shows selection state) */}
+      {/* Selection ring (only visible when selected or hovered) */}
+      {(isSelected || isHovered) && (
+        <Circle
+          x={0}
+          y={0}
+          radius={selectionRingRadius}
+          fill="transparent"
+          stroke={isSelected ? color : 'rgba(255,255,255,0.6)'}
+          strokeWidth={selectionRingWidth}
+          dash={lowConfidence ? [3 / scale, 1.5 / scale] : undefined}
+          listening={false}
+        />
+      )}
+
+      {/* Main solid dot - small filled circle */}
       <Circle
         x={0}
         y={0}
         radius={markerRadius}
-        fill={isSelected ? color : 'transparent'}
-        stroke={color}
-        strokeWidth={markerStrokeWidth}
-        opacity={isSelected ? 1 : isHovered ? 0.9 : 0.8}
-        dash={lowConfidence ? [4 / scale, 2 / scale] : undefined}
-        shadowColor={isSelected ? color : undefined}
-        shadowBlur={isSelected ? 8 : 0}
-        shadowOpacity={isSelected ? 0.5 : 0}
+        fill={color}
+        opacity={isSelected ? 1 : isHovered ? 0.95 : 0.85}
+        stroke={isSelected ? 'white' : undefined}
+        strokeWidth={isSelected ? 1 / scale : 0}
         onClick={handleClick}
         onTap={handleClick}
         onMouseEnter={() => {
@@ -215,25 +225,16 @@ export default function KonvaDetectionPoint({
         }}
       />
 
-      {/* Inner dot (always visible) */}
-      <Circle
-        x={0}
-        y={0}
-        radius={innerRadius}
-        fill={isSelected ? 'white' : color}
-        listening={false}
-      />
-
       {/* Class Label (shown on hover or when selected) */}
       {(isHovered || isSelected) && (
         <Label
           x={0}
-          y={-markerRadius - fontSize - labelPadding * 2}
+          y={-selectionRingRadius - fontSize - labelPadding}
           listening={false}
         >
           <Tag
             fill={color}
-            cornerRadius={4 / scale}
+            cornerRadius={3 / scale}
           />
           <Text
             text={formatClassName(detection.class)}

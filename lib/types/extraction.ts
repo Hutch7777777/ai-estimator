@@ -38,6 +38,15 @@ export type DetectionClass =
   | 'outlet'
   | 'hose_bib'
   | 'light_fixture'
+  | 'corbel'
+  | 'gable_vent'
+  | 'belly_band'
+  | 'corner_inside'
+  | 'corner_outside'
+  | 'shutter'
+  | 'post'
+  | 'column'
+  | 'bracket'
   | '';
 
 // Internal classes - used for calculations but not user-selectable
@@ -64,6 +73,7 @@ export type JobStatus =
   | 'classified'  // Pages classified, ready for user review
   | 'processing'
   | 'complete'
+  | 'approved'    // Detections approved, takeoff generated
   | 'failed';
 
 export type EditType =
@@ -344,6 +354,15 @@ export const DETECTION_CLASS_COLORS: Record<DetectionClass | InternalDetectionCl
   outlet: '#FACC15',         // Yellow
   hose_bib: '#22C55E',       // Green
   light_fixture: '#FBBF24',  // Amber
+  corbel: '#D97706',         // Amber-600
+  gable_vent: '#7C3AED',     // Violet-600
+  belly_band: '#DC2626',     // Red-600
+  corner_inside: '#059669',  // Emerald-600
+  corner_outside: '#0D9488', // Teal-600
+  shutter: '#4F46E5',        // Indigo-600
+  post: '#9333EA',           // Purple-600
+  column: '#2563EB',         // Blue-600
+  bracket: '#CA8A04',        // Yellow-600
   // Internal classes
   building: '#8B5CF6',       // Purple (internal)
   exterior_wall: '#10B981',  // Same as siding (legacy compatibility)
@@ -375,7 +394,58 @@ export const USER_SELECTABLE_CLASSES: DetectionClass[] = [
   'outlet',
   'hose_bib',
   'light_fixture',
+  'corbel',
+  'gable_vent',
+  'belly_band',
+  'corner_inside',
+  'corner_outside',
+  'shutter',
+  'post',
+  'column',
+  'bracket',
 ];
+
+/** Measurement type for each detection class - used to filter classes by tool type */
+export const CLASS_MEASUREMENT_TYPES: Record<DetectionClass, 'area' | 'linear' | 'count'> = {
+  // Area classes (SF) - measured in square feet
+  siding: 'area',
+  window: 'area',
+  door: 'area',
+  garage: 'area',
+  roof: 'area',
+  gable: 'area',
+  // Linear classes (LF) - measured in linear feet
+  trim: 'linear',
+  fascia: 'linear',
+  gutter: 'linear',
+  eave: 'linear',
+  rake: 'linear',
+  ridge: 'linear',
+  soffit: 'linear',
+  valley: 'linear',
+  // Point/Count classes (EA) - measured by count
+  vent: 'count',
+  flashing: 'count',
+  downspout: 'count',
+  outlet: 'count',
+  hose_bib: 'count',
+  light_fixture: 'count',
+  corbel: 'count',
+  gable_vent: 'count',
+  belly_band: 'count',
+  corner_inside: 'count',
+  corner_outside: 'count',
+  shutter: 'count',
+  post: 'count',
+  column: 'count',
+  bracket: 'count',
+  '': 'area', // Default for unclassified
+};
+
+/** Get classes filtered by measurement type */
+export function getClassesByMeasurementType(type: 'area' | 'linear' | 'count'): DetectionClass[] {
+  return USER_SELECTABLE_CLASSES.filter(cls => CLASS_MEASUREMENT_TYPES[cls] === type);
+}
 
 export const CONFIDENCE_THRESHOLDS = {
   high: 0.85,
@@ -452,4 +522,158 @@ export function getConfidenceLevel(confidence: number): ConfidenceLevel {
 
 export function getDetectionColor(detectionClass: DetectionClass | InternalDetectionClass): string {
   return DETECTION_CLASS_COLORS[detectionClass] ?? DETECTION_CLASS_COLORS[''];
+}
+
+// =============================================================================
+// Live Derived Totals (calculated from current page detections)
+// =============================================================================
+
+export interface LiveDerivedTotals {
+  // FACADE (building/exterior wall)
+  buildingCount: number;
+  buildingAreaSf: number;
+  buildingPerimeterLf: number;
+  buildingLevelStarterLf: number;
+  // WINDOWS
+  windowCount: number;
+  windowAreaSf: number;
+  windowPerimeterLf: number;
+  windowHeadLf: number;
+  windowJambLf: number;
+  windowSillLf: number;
+  // DOORS
+  doorCount: number;
+  doorAreaSf: number;
+  doorPerimeterLf: number;
+  doorHeadLf: number;
+  doorJambLf: number;
+  // GARAGES
+  garageCount: number;
+  garageAreaSf: number;
+  garagePerimeterLf: number;
+  garageHeadLf: number;
+  garageJambLf: number;
+  // GABLES
+  gableCount: number;
+  gableAreaSf: number;
+  gableRakeLf: number;
+  // CORNERS
+  insideCornerCount: number;
+  insideCornerLf: number;
+  outsideCornerCount: number;
+  outsideCornerLf: number;
+  // ROOFLINE (line-type measurements)
+  eavesCount: number;
+  eavesLf: number;
+  rakesCount: number;
+  rakesLf: number;
+  ridgeCount: number;
+  ridgeLf: number;
+  valleyCount: number;
+  valleyLf: number;
+  // SOFFIT (area)
+  soffitCount: number;
+  soffitAreaSf: number;
+  // FASCIA (line)
+  fasciaCount: number;
+  fasciaLf: number;
+  // GUTTERS
+  gutterCount: number;
+  gutterLf: number;
+  downspoutCount: number;
+  // SIDING (net area = building - openings)
+  sidingNetSf: number;
+}
+
+// =============================================================================
+// Approve & Calculate Webhook Payload
+// =============================================================================
+
+export interface ApprovePayload {
+  job_id: string;
+  project_id?: string;
+  project_name?: string;
+  client_name?: string;
+  address?: string;
+
+  // Which trades to calculate (default: ['siding'])
+  selected_trades: string[];
+
+  facade: {
+    gross_area_sf: number;
+    net_siding_sf: number;
+    perimeter_lf: number;
+    level_starter_lf: number;
+  };
+
+  windows: {
+    count: number;
+    area_sf: number;
+    perimeter_lf: number;
+    head_lf: number;
+    jamb_lf: number;
+    sill_lf: number;
+  };
+
+  doors: {
+    count: number;
+    area_sf: number;
+    perimeter_lf: number;
+    head_lf: number;
+    jamb_lf: number;
+  };
+
+  garages: {
+    count: number;
+    area_sf: number;
+    perimeter_lf: number;
+    head_lf: number;
+    jamb_lf: number;
+  };
+
+  trim: {
+    total_head_lf: number;
+    total_jamb_lf: number;
+    total_sill_lf: number;
+    total_trim_lf: number;
+  };
+
+  corners: {
+    outside_count: number;
+    outside_lf: number;
+    inside_count: number;
+    inside_lf: number;
+  };
+
+  gables: {
+    count: number;
+    area_sf: number;
+    rake_lf: number;
+  };
+
+  // Minimal product config - n8n uses auto-scope rules and DB defaults
+  products: {
+    color: string | null;
+    profile: string;
+  };
+}
+
+// =============================================================================
+// Approval Result (response from n8n webhook)
+// =============================================================================
+
+export interface ApprovalResult {
+  success: boolean;
+  takeoff_id: string;
+  sections_created: number;
+  line_items_created: number;
+  line_items_failed: number;
+  trades_processed: string[];
+  totals: {
+    material_cost: number;
+    labor_cost: number;
+    overhead_cost: number;
+    subtotal: number;
+    markup_percent: number;
+  };
 }

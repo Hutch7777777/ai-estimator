@@ -189,6 +189,7 @@ export function ExtractionsTable() {
   const getStatusVariant = (status: JobStatus): "default" | "secondary" | "destructive" | "outline" => {
     switch (status) {
       case "complete":
+      case "approved":
         return "default"; // green-ish
       case "failed":
         return "destructive";
@@ -214,6 +215,8 @@ export function ExtractionsTable() {
         return "Detecting Objects";
       case "complete":
         return "Complete";
+      case "approved":
+        return "Approved";
       case "failed":
         return "Failed";
       default:
@@ -226,6 +229,8 @@ export function ExtractionsTable() {
     switch (status) {
       case "complete":
         return "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200";
+      case "approved":
+        return "bg-emerald-100 text-emerald-800 dark:bg-emerald-900 dark:text-emerald-200";
       case "failed":
         return "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200";
       case "converting":
@@ -336,7 +341,7 @@ export function ExtractionsTable() {
                         Review
                       </Link>
                     </Button>
-                  ) : job.status === "complete" && job.project_id ? (
+                  ) : (job.status === "complete" || job.status === "approved") && job.project_id ? (
                     <Button variant="outline" size="sm" asChild>
                       <Link href={`/projects/${job.project_id}/extraction/${job.id}`}>
                         <Eye className="mr-2 h-4 w-4" />

@@ -7,16 +7,15 @@ interface CategoryRow {
   category: string;
 }
 
-// Type for the product query result
-interface ProductRow {
+// Type for the pricing_items query result
+interface PricingRow {
   id: string;
+  sku: string;
   product_name: string;
   material_cost: number | null;
-  labor_cost: number | null;
   unit: string;
+  is_colorplus: boolean;
   category: string;
-  manufacturer: string;
-  sku: string;
 }
 
 // =============================================================================
@@ -32,6 +31,7 @@ export interface MaterialItem {
   category: string;
   manufacturer: string;
   sku: string;
+  is_colorplus?: boolean;
 }
 
 export interface UseMaterialSearchOptions {
@@ -95,6 +95,16 @@ const CLASS_TO_CATEGORIES: Record<string, string[]> = {
   rake: ['trim', 'accessories', 'Trim', 'Accessories'],
   ridge: ['trim', 'ridge_cap', 'accessories', 'Trim'],
   soffit: ['soffit', 'trim', 'Soffit', 'Trim'],
+  // Point classes - count-based (EA)
+  corbel: ['trim_decorative', 'corbel', 'decorative'],
+  gable_vent: ['vents', 'gable_vent', 'louver'],
+  belly_band: ['trim_belly_band', 'belly_band', 'band_board'],
+  corner_inside: ['trim_corners', 'inside_corner', 'corner'],
+  corner_outside: ['trim_corners', 'outside_corner', 'corner'],
+  shutter: ['shutter', 'shutters', 'decorative'],
+  post: ['post', 'posts', 'trim_posts'],
+  column: ['column', 'columns', 'trim_columns'],
+  bracket: ['bracket', 'brackets', 'trim_decorative'],
 };
 
 // =============================================================================
@@ -113,7 +123,7 @@ export function useMaterialSearch(options: UseMaterialSearchOptions = {}): UseMa
   const debounceRef = useRef<NodeJS.Timeout | null>(null);
   const isMountedRef = useRef(true);
 
-  // Fetch categories on mount
+  // Fetch categories on mount - from pricing_items table
   useEffect(() => {
     if (!enabled) {
       console.log('[useMaterialSearch] Categories fetch skipped - not enabled');
@@ -121,7 +131,7 @@ export function useMaterialSearch(options: UseMaterialSearchOptions = {}): UseMa
     }
 
     const fetchCategories = async () => {
-      console.log('[useMaterialSearch] Fetching categories...');
+      console.log('[useMaterialSearch] Fetching categories from pricing_items...');
       try {
         // Use direct fetch instead of Supabase JS client
         const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -134,7 +144,7 @@ export function useMaterialSearch(options: UseMaterialSearchOptions = {}): UseMa
 
         const params = new URLSearchParams();
         params.set('select', 'category');
-        params.set('active', 'eq.true');
+        params.set('material_cost', 'not.is.null');
         params.set('order', 'category.asc');
 
         // Filter by trade if specified
@@ -142,14 +152,8 @@ export function useMaterialSearch(options: UseMaterialSearchOptions = {}): UseMa
           params.set('trade', `eq.${trade}`);
         }
 
-        // Filter to main product categories only (exclude accessories, trim, etc.)
-        const mainCategories = trade ? MAIN_PRODUCT_CATEGORIES[trade] : null;
-        if (mainCategories && mainCategories.length > 0) {
-          params.set('category', `in.(${mainCategories.join(',')})`);
-        }
-
-        const fetchUrl = `${url}/rest/v1/product_catalog?${params.toString()}`;
-        console.log('[useMaterialSearch] Fetching categories:', fetchUrl, 'trade:', trade, 'mainCategories:', mainCategories);
+        const fetchUrl = `${url}/rest/v1/pricing_items?${params.toString()}`;
+        console.log('[useMaterialSearch] Fetching categories:', fetchUrl, 'trade:', trade);
 
         const response = await fetch(fetchUrl, {
           headers: {
@@ -186,7 +190,7 @@ export function useMaterialSearch(options: UseMaterialSearchOptions = {}): UseMa
     fetchCategories();
   }, [enabled, trade]);
 
-  // Fetch products with debounced search
+  // Fetch products with debounced search - from pricing_items table
   useEffect(() => {
     console.log('[useMaterialSearch] Products effect triggered:', { enabled, trade, category, search, limit });
 
@@ -206,7 +210,7 @@ export function useMaterialSearch(options: UseMaterialSearchOptions = {}): UseMa
     console.log('[useMaterialSearch] Setting up debounced fetch with delay:', debounceMs);
 
     debounceRef.current = setTimeout(async () => {
-      console.log('[useMaterialSearch] Starting products fetch...');
+      console.log('[useMaterialSearch] Starting products fetch from pricing_items...');
 
       if (!isMountedRef.current) {
         console.log('[useMaterialSearch] Component unmounted, skipping fetch');
@@ -231,11 +235,11 @@ export function useMaterialSearch(options: UseMaterialSearchOptions = {}): UseMa
           throw new Error('Missing Supabase environment variables');
         }
 
-        // Build query params for PostgREST
+        // Build query params for PostgREST - querying pricing_items table
         const params = new URLSearchParams();
-        params.set('select', 'id,product_name,material_cost,labor_cost,unit,category,manufacturer,sku');
-        params.set('active', 'eq.true');
-        params.set('order', 'sort_order.asc');
+        params.set('select', 'id,sku,product_name,material_cost,unit,is_colorplus,category');
+        params.set('material_cost', 'not.is.null'); // Only items with prices
+        params.set('order', 'product_name.asc');
         params.set('limit', String(limit));
 
         // Apply trade filter
@@ -270,7 +274,7 @@ export function useMaterialSearch(options: UseMaterialSearchOptions = {}): UseMa
           params.set('product_name', `ilike.*${search.trim()}*`);
         }
 
-        const fetchUrl = `${url}/rest/v1/product_catalog?${params.toString()}`;
+        const fetchUrl = `${url}/rest/v1/pricing_items?${params.toString()}`;
         console.log('[useMaterialSearch] Fetching:', fetchUrl);
 
         const response = await fetch(fetchUrl, {
@@ -289,22 +293,24 @@ export function useMaterialSearch(options: UseMaterialSearchOptions = {}): UseMa
           throw new Error(`HTTP error! status: ${response.status} - ${errorText}`);
         }
 
-        const data: ProductRow[] = await response.json();
+        const data: PricingRow[] = await response.json();
         console.log('[useMaterialSearch] Products fetched:', {
           count: data.length,
           firstItem: data[0]?.product_name,
         });
 
         if (isMountedRef.current) {
-          const mappedItems = data.map((item) => ({
+          // Map pricing_items to MaterialItem interface
+          const mappedItems: MaterialItem[] = data.map((item) => ({
             id: item.id,
             product_name: item.product_name,
             material_cost: item.material_cost,
-            labor_cost: item.labor_cost,
-            unit: item.unit,
-            category: item.category,
-            manufacturer: item.manufacturer,
-            sku: item.sku,
+            labor_cost: null, // pricing_items doesn't have labor_cost per item
+            unit: item.unit || 'ea',
+            category: item.category || '',
+            manufacturer: '', // pricing_items doesn't have manufacturer
+            sku: item.sku || '',
+            is_colorplus: item.is_colorplus,
           }));
           console.log('[useMaterialSearch] Setting items:', mappedItems.length);
           setItems(mappedItems);
@@ -342,7 +348,7 @@ export function useMaterialSearch(options: UseMaterialSearchOptions = {}): UseMa
 }
 
 // =============================================================================
-// Helper: Fetch single product by ID
+// Helper: Fetch single product by ID from pricing_items
 // =============================================================================
 
 export async function getMaterialById(materialId: string): Promise<MaterialItem | null> {
@@ -356,10 +362,10 @@ export async function getMaterialById(materialId: string): Promise<MaterialItem 
     }
 
     const params = new URLSearchParams();
-    params.set('select', 'id,product_name,material_cost,labor_cost,unit,category,manufacturer,sku');
+    params.set('select', 'id,sku,product_name,material_cost,unit,is_colorplus,category');
     params.set('id', `eq.${materialId}`);
 
-    const fetchUrl = `${url}/rest/v1/product_catalog?${params.toString()}`;
+    const fetchUrl = `${url}/rest/v1/pricing_items?${params.toString()}`;
 
     const response = await fetch(fetchUrl, {
       headers: {
@@ -376,7 +382,7 @@ export async function getMaterialById(materialId: string): Promise<MaterialItem 
       return null;
     }
 
-    const row: ProductRow = await response.json();
+    const row: PricingRow = await response.json();
 
     if (!row || !row.id) {
       console.error('[getMaterialById] No data found');
@@ -387,11 +393,12 @@ export async function getMaterialById(materialId: string): Promise<MaterialItem 
       id: row.id,
       product_name: row.product_name,
       material_cost: row.material_cost,
-      labor_cost: row.labor_cost,
-      unit: row.unit,
-      category: row.category,
-      manufacturer: row.manufacturer,
-      sku: row.sku,
+      labor_cost: null,
+      unit: row.unit || 'ea',
+      category: row.category || '',
+      manufacturer: '',
+      sku: row.sku || '',
+      is_colorplus: row.is_colorplus,
     };
   } catch (err) {
     console.error('[getMaterialById] Unexpected error:', err);
