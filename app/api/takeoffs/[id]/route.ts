@@ -7,6 +7,7 @@ import { NextResponse } from 'next/server';
 
 interface TakeoffRecord {
   id: string;
+  project_id?: string;
   takeoff_name?: string;
   project_name?: string;
   client_name?: string;
@@ -202,6 +203,7 @@ export async function GET(
       success: true,
       takeoff: {
         id: takeoff.id,
+        project_id: takeoff.project_id || null,
         takeoff_name: takeoff.takeoff_name,
         project_name: takeoff.project_name,
         client_name: takeoff.client_name,

@@ -520,3 +520,174 @@ export async function exportTakeoffToExcel(data: TakeoffData, filename?: string)
   const defaultFilename = `takeoff_${takeoff.client_name?.replace(/[^a-z0-9]/gi, '_') || 'estimate'}_${new Date().toISOString().split('T')[0]}.xlsx`;
   saveAs(blob, filename || defaultFilename);
 }
+
+// =============================================================================
+// Vendor Takeoff Export - Materials only, NO pricing
+// =============================================================================
+
+export async function exportVendorTakeoff(data: TakeoffData, filename?: string): Promise<void> {
+  const workbook = new ExcelJS.Workbook();
+  workbook.creator = 'Exterior Finishes AI Estimator';
+  workbook.created = new Date();
+
+  const takeoff = data.takeoff;
+  const lineItems = data.line_items || [];
+
+  const materialItems = lineItems.filter(item => !item.item_type || item.item_type === 'material');
+
+  const sheet = workbook.addWorksheet('Material Request', { views: [{ state: 'frozen', xSplit: 0, ySplit: 5 }] });
+  sheet.getColumn('A').width = 8;
+  sheet.getColumn('B').width = 50;
+  sheet.getColumn('C').width = 12;
+  sheet.getColumn('D').width = 10;
+  sheet.getColumn('E').width = 14;
+  sheet.getColumn('F').width = 14;
+  sheet.getColumn('G').width = 30;
+
+  let row = 1;
+
+  // Header
+  const titleCell = sheet.getCell(`A${row}`);
+  titleCell.value = 'MATERIAL REQUEST';
+  titleCell.font = { bold: true, size: 18 };
+  sheet.mergeCells(`A${row}:G${row}`);
+  row++;
+
+  sheet.getCell(`A${row}`).value = takeoff.client_name || takeoff.project_name || 'Project';
+  sheet.getCell(`A${row}`).font = { bold: true, size: 14 };
+  sheet.mergeCells(`A${row}:G${row}`);
+  row++;
+
+  sheet.getCell(`A${row}`).value = takeoff.address || '';
+  sheet.getCell(`A${row}`).font = { size: 11 };
+  sheet.mergeCells(`A${row}:G${row}`);
+  row++;
+
+  sheet.getCell(`A${row}`).value = `Date: ${new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })}`;
+  sheet.getCell(`A${row}`).font = { size: 10, italic: true };
+  sheet.mergeCells(`A${row}:G${row}`);
+  row += 2;
+
+  // Column headers
+  const headers = ['Item #', 'Description', 'Qty', 'Unit', 'Vendor Price', 'Extended', 'Notes'];
+  headers.forEach((label, idx) => {
+    const cell = sheet.getCell(row, idx + 1);
+    cell.value = label;
+    styleHeader(cell);
+  });
+  row++;
+
+  // Group materials
+  const groupedMaterials: Record<string, TakeoffLineItem[]> = {};
+  materialItems.forEach(item => {
+    const group = item.presentation_group || item.category || 'other';
+    if (!groupedMaterials[group]) groupedMaterials[group] = [];
+    groupedMaterials[group].push(item);
+  });
+
+  const sortedGroups = Object.keys(groupedMaterials).sort((a, b) => getGroupConfig(a).order - getGroupConfig(b).order);
+  let itemNumber = 1;
+
+  sortedGroups.forEach(groupKey => {
+    const groupConfig = getGroupConfig(groupKey);
+    const items = groupedMaterials[groupKey];
+    items.sort((a, b) => (a.item_number || 999) - (b.item_number || 999));
+
+    // Group header
+    const groupHeaderCell = sheet.getCell(`A${row}`);
+    groupHeaderCell.value = groupConfig.title;
+    styleGroupHeader(groupHeaderCell, groupConfig.color);
+    sheet.mergeCells(`A${row}:G${row}`);
+    row++;
+
+    items.forEach((item, idx) => {
+      const isAltRow = idx % 2 === 1;
+
+      // Item #
+      const itemNumCell = sheet.getCell(`A${row}`);
+      itemNumCell.value = itemNumber++;
+      styleDataCell(itemNumCell, isAltRow);
+      itemNumCell.alignment = { horizontal: 'center' };
+
+      // Description
+      const descCell = sheet.getCell(`B${row}`);
+      descCell.value = item.description;
+      styleDataCell(descCell, isAltRow);
+
+      // Qty
+      const qtyCell = sheet.getCell(`C${row}`);
+      qtyCell.value = safeNum(item.quantity);
+      qtyCell.numFmt = Number.isInteger(safeNum(item.quantity)) ? '#,##0' : '#,##0.00';
+      styleDataCell(qtyCell, isAltRow);
+      qtyCell.alignment = { horizontal: 'right' };
+
+      // Unit
+      const unitCell = sheet.getCell(`D${row}`);
+      unitCell.value = item.unit || 'EA';
+      styleDataCell(unitCell, isAltRow);
+      unitCell.alignment = { horizontal: 'center' };
+
+      // Vendor Price (blank - for vendor to fill in)
+      const priceCell = sheet.getCell(`E${row}`);
+      priceCell.value = null;
+      priceCell.numFmt = '"$"#,##0.00';
+      styleDataCell(priceCell, isAltRow);
+      priceCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFFFCC' } };
+
+      // Extended (formula: Qty * Vendor Price)
+      const extCell = sheet.getCell(`F${row}`);
+      extCell.value = { formula: `C${row}*E${row}` };
+      extCell.numFmt = '"$"#,##0.00';
+      styleDataCell(extCell, isAltRow);
+
+      // Notes
+      const notesCell = sheet.getCell(`G${row}`);
+      notesCell.value = item.notes || '';
+      styleDataCell(notesCell, isAltRow);
+      notesCell.alignment = { wrapText: true };
+      notesCell.font = { size: 9 };
+
+      row++;
+    });
+
+    row++; // Space between groups
+  });
+
+  // Total row
+  row++;
+  sheet.getCell(`A${row}`).value = 'TOTAL';
+  sheet.getCell(`A${row}`).font = { bold: true, size: 12 };
+  sheet.mergeCells(`A${row}:E${row}`);
+  styleSubtotalRow(sheet.getCell(`A${row}`));
+  sheet.getCell(`A${row}`).alignment = { horizontal: 'right' };
+
+  const totalCell = sheet.getCell(`F${row}`);
+  totalCell.value = { formula: `SUMPRODUCT(C6:C${row-1},E6:E${row-1})` };
+  totalCell.numFmt = '"$"#,##0.00';
+  styleSubtotalRow(totalCell);
+  row += 2;
+
+  // Instructions
+  sheet.getCell(`A${row}`).value = 'Instructions:';
+  sheet.getCell(`A${row}`).font = { bold: true };
+  row++;
+
+  const instructions = [
+    '1. Fill in the yellow "Vendor Price" column with your unit prices',
+    '2. Extended totals will calculate automatically',
+    '3. Please return this quote within 5 business days',
+    '4. Questions? Contact us at the number above',
+  ];
+  instructions.forEach(instruction => {
+    sheet.getCell(`A${row}`).value = instruction;
+    sheet.getCell(`A${row}`).font = { size: 10 };
+    sheet.mergeCells(`A${row}:G${row}`);
+    row++;
+  });
+
+  // Generate and Download
+  const buffer = await workbook.xlsx.writeBuffer();
+  const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+  const defaultFilename = `${takeoff.client_name?.replace(/[^a-z0-9]/gi, '_') || 'project'}_material_request_${new Date().toISOString().split('T')[0]}.xlsx`;
+  saveAs(blob, filename || defaultFilename);
+}

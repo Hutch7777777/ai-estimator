@@ -34,6 +34,7 @@ import type {
   LiveDerivedTotals,
   ApprovePayload,
   ApprovalResult,
+  CountClass,
 } from '@/lib/types/extraction';
 import DetectionToolbar from './DetectionToolbar';
 import MarkupToolbar from './MarkupToolbar';
@@ -202,6 +203,7 @@ export default function DetectionEditor({
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [selectedDetectionId, setSelectedDetectionId] = useState<string | null>(null);
   const [hoveredId, setHoveredId] = useState<string | null>(null);
+  const [multiSelectMode, setMultiSelectMode] = useState(false);
   const [toolMode, setToolMode] = useState<ToolMode>('select');
   const [createClass, setCreateClass] = useState<DetectionClass>('siding');
   const [lineClass, setLineClass] = useState<DetectionClass>('eave');
@@ -211,7 +213,6 @@ export default function DetectionEditor({
   const [showDimensions, setShowDimensions] = useState(true);
   const [showArea, setShowArea] = useState(true);
   const [isApproving, setIsApproving] = useState(false);
-  const [isGeneratingMarkup, setIsGeneratingMarkup] = useState(false);
   const [approvalResult, setApprovalResult] = useState<ApprovalResult | null>(null);
   const [showApprovalResults, setShowApprovalResults] = useState(false);
   const [takeoffDetails, setTakeoffDetails] = useState<TakeoffData | null>(null);
@@ -492,6 +493,11 @@ export default function DetectionEditor({
 
   const handleHover = useCallback((id: string | null) => {
     setHoveredId(id);
+  }, []);
+
+  // Handler for selecting all detections in a class (bulk selection via Cmd/Ctrl+click)
+  const handleSelectAllInClass = useCallback((detectionIds: string[]) => {
+    setSelectedIds(new Set(detectionIds));
   }, []);
 
   // ============================================================================
@@ -1155,65 +1161,6 @@ export default function DetectionEditor({
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [selectedIds, canUndo, canRedo, undo, redo, hasUnsavedChanges, isValidating, handleValidate, handleVerifySelected, handleDeleteSelected, handleZoomIn, handleZoomOut, handleZoomReset, toolMode]);
 
-  // ============================================================================
-  // Generate Facade Markup Handler
-  // ============================================================================
-
-  const handleGenerateMarkup = useCallback(async () => {
-    if (!jobId || !currentPageId) {
-      console.error('Missing jobId or currentPageId', { jobId, currentPageId });
-      return;
-    }
-
-    setIsGeneratingMarkup(true);
-
-    try {
-      const payload = { job_id: jobId, page_id: currentPageId };
-      console.log('Sending markup request:', payload);
-
-      const response = await fetch(
-        'https://extraction-api-production.up.railway.app/generate-facade-markup',
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload),
-        }
-      );
-
-      console.log('Response status:', response.status, response.statusText);
-      console.log('Response ok:', response.ok);
-
-      // Parse JSON first, then check for success
-      // Don't check response.ok first - API might return 200 with success:true
-      const data = await response.json();
-      console.log('Response data:', data);
-
-      let url: string | null = null;
-      if (data.success && data.pages?.[0]?.markup_url) {
-        url = data.pages[0].markup_url;
-      } else if (data.markup_url) {
-        url = data.markup_url;
-      } else {
-        throw new Error(data.error || 'No markup URL in response');
-      }
-
-      // Add cache buster to prevent stale images
-      if (url) {
-        url = url + '?t=' + Date.now();
-        setMarkupUrl(url);
-        setShowMarkup(true);
-      }
-    } catch (err) {
-      console.error('Markup generation error:', err);
-      const error = err instanceof Error ? err : new Error('Markup generation failed');
-      onError?.(error);
-    } finally {
-      if (isMountedRef.current) {
-        setIsGeneratingMarkup(false);
-      }
-    }
-  }, [jobId, currentPageId, onError]);
-
   // Toggle between markup view and editor view
   const handleToggleMarkup = useCallback(() => {
     setShowMarkup((prev) => !prev);
@@ -1327,6 +1274,9 @@ export default function DetectionEditor({
       downspoutCount: 0,
       // SIDING (net area = building - openings)
       sidingNetSf: 0,
+      // COUNTS (point markers)
+      countsByClass: {},
+      totalPointCount: 0,
     };
 
     // Track total openings for net siding calculation
@@ -1337,6 +1287,15 @@ export default function DetectionEditor({
 
     for (const detection of pageDetections) {
       const cls = detection.class as string;
+
+      // Handle point markers (count markers) - these have markup_type === 'point'
+      if (detection.markup_type === 'point') {
+        // Group by class name (or use 'Count' as default label)
+        const countLabel = cls || 'Count';
+        totals.countsByClass[countLabel] = (totals.countsByClass[countLabel] || 0) + 1;
+        totals.totalPointCount++;
+        continue; // Points don't have area/perimeter measurements
+      }
 
       // Get polygon points (use existing or convert from bounding box)
       const points = detection.polygon_points && detection.polygon_points.length > 0
@@ -1549,6 +1508,190 @@ export default function DetectionEditor({
 
     return totals;
   }, [currentPage, currentPageDetections]);
+
+  // Calculate all pages totals (aggregate across all elevation pages)
+  const allPagesTotals = useMemo((): LiveDerivedTotals | null => {
+    // Only include elevation pages that have a valid scale
+    const elevationPages = pages.filter(
+      (p) => p.page_type === 'elevation' && p.scale_ratio && p.scale_ratio > 0
+    );
+
+    if (elevationPages.length === 0) {
+      return null;
+    }
+
+    // Get all detections
+    const allDetections = getAllDetections();
+
+    // Initialize aggregate totals
+    const aggregateTotals: LiveDerivedTotals = {
+      buildingCount: 0,
+      buildingAreaSf: 0,
+      buildingPerimeterLf: 0,
+      buildingLevelStarterLf: 0,
+      windowCount: 0,
+      windowAreaSf: 0,
+      windowPerimeterLf: 0,
+      windowHeadLf: 0,
+      windowJambLf: 0,
+      windowSillLf: 0,
+      doorCount: 0,
+      doorAreaSf: 0,
+      doorPerimeterLf: 0,
+      doorHeadLf: 0,
+      doorJambLf: 0,
+      garageCount: 0,
+      garageAreaSf: 0,
+      garagePerimeterLf: 0,
+      garageHeadLf: 0,
+      garageJambLf: 0,
+      gableCount: 0,
+      gableAreaSf: 0,
+      gableRakeLf: 0,
+      insideCornerCount: 0,
+      insideCornerLf: 0,
+      outsideCornerCount: 0,
+      outsideCornerLf: 0,
+      eavesCount: 0,
+      eavesLf: 0,
+      rakesCount: 0,
+      rakesLf: 0,
+      ridgeCount: 0,
+      ridgeLf: 0,
+      valleyCount: 0,
+      valleyLf: 0,
+      soffitCount: 0,
+      soffitAreaSf: 0,
+      fasciaCount: 0,
+      fasciaLf: 0,
+      gutterCount: 0,
+      gutterLf: 0,
+      downspoutCount: 0,
+      sidingNetSf: 0,
+      countsByClass: {},
+      totalPointCount: 0,
+    };
+
+    // Process each elevation page
+    for (const page of elevationPages) {
+      const scaleRatio = page.scale_ratio!;
+      const pageDetections = allDetections.filter(
+        (d) => d.page_id === page.id && d.status !== 'deleted' && d.class !== 'roof'
+      );
+
+      let pageOpeningsSf = 0;
+      let pageBuildingAreaSf = 0;
+
+      for (const detection of pageDetections) {
+        const cls = detection.class as string;
+
+        // Handle point markers
+        if (detection.markup_type === 'point') {
+          const countLabel = cls || 'Count';
+          aggregateTotals.countsByClass[countLabel] = (aggregateTotals.countsByClass[countLabel] || 0) + 1;
+          aggregateTotals.totalPointCount++;
+          continue;
+        }
+
+        // Get polygon points
+        const points = detection.polygon_points && detection.polygon_points.length > 0
+          ? detection.polygon_points
+          : rectToPolygonPoints({
+              pixel_x: detection.pixel_x,
+              pixel_y: detection.pixel_y,
+              pixel_width: detection.pixel_width,
+              pixel_height: detection.pixel_height,
+            });
+
+        // Building/Facade
+        if (cls === 'building' || cls === 'exterior_wall' || cls === 'exterior wall') {
+          const measurements = calculateBuildingMeasurements(points, scaleRatio);
+          aggregateTotals.buildingCount++;
+          aggregateTotals.buildingAreaSf += measurements.area_sf;
+          aggregateTotals.buildingPerimeterLf += measurements.perimeter_lf;
+          aggregateTotals.buildingLevelStarterLf += measurements.level_starter_lf;
+          pageBuildingAreaSf += measurements.area_sf;
+          continue;
+        }
+
+        const derived = getClassDerivedMeasurements(cls, points, scaleRatio);
+        const areaMeasurement = calculateAreaMeasurements(points, scaleRatio);
+
+        if (cls === 'window' && derived && 'head_lf' in derived) {
+          aggregateTotals.windowCount++;
+          aggregateTotals.windowAreaSf += areaMeasurement.area_sf;
+          aggregateTotals.windowPerimeterLf += areaMeasurement.perimeter_lf;
+          aggregateTotals.windowHeadLf += derived.head_lf;
+          aggregateTotals.windowJambLf += derived.jamb_lf;
+          aggregateTotals.windowSillLf += (derived as { sill_lf?: number }).sill_lf || 0;
+          pageOpeningsSf += areaMeasurement.area_sf;
+        } else if (cls === 'door' && derived && 'head_lf' in derived) {
+          aggregateTotals.doorCount++;
+          aggregateTotals.doorAreaSf += areaMeasurement.area_sf;
+          aggregateTotals.doorPerimeterLf += areaMeasurement.perimeter_lf;
+          aggregateTotals.doorHeadLf += derived.head_lf;
+          aggregateTotals.doorJambLf += derived.jamb_lf;
+          pageOpeningsSf += areaMeasurement.area_sf;
+        } else if (cls === 'garage' && derived && 'head_lf' in derived) {
+          aggregateTotals.garageCount++;
+          aggregateTotals.garageAreaSf += areaMeasurement.area_sf;
+          aggregateTotals.garagePerimeterLf += areaMeasurement.perimeter_lf;
+          aggregateTotals.garageHeadLf += derived.head_lf;
+          aggregateTotals.garageJambLf += derived.jamb_lf;
+          pageOpeningsSf += areaMeasurement.area_sf;
+        } else if (cls === 'gable' && derived && 'rake_lf' in derived) {
+          aggregateTotals.gableCount++;
+          aggregateTotals.gableAreaSf += areaMeasurement.area_sf;
+          aggregateTotals.gableRakeLf += derived.rake_lf;
+        } else if (cls === 'soffit') {
+          aggregateTotals.soffitCount++;
+          aggregateTotals.soffitAreaSf += areaMeasurement.area_sf;
+        } else if (cls === 'inside_corner' || cls === 'inside corner') {
+          const lineMeasurement = calculateLineMeasurements(points, scaleRatio);
+          aggregateTotals.insideCornerCount++;
+          aggregateTotals.insideCornerLf += lineMeasurement.length_lf;
+        } else if (cls === 'outside_corner' || cls === 'outside corner') {
+          const lineMeasurement = calculateLineMeasurements(points, scaleRatio);
+          aggregateTotals.outsideCornerCount++;
+          aggregateTotals.outsideCornerLf += lineMeasurement.length_lf;
+        } else if (cls === 'fascia') {
+          const lineMeasurement = calculateLineMeasurements(points, scaleRatio);
+          aggregateTotals.fasciaCount++;
+          aggregateTotals.fasciaLf += lineMeasurement.length_lf;
+        } else if (cls === 'gutter') {
+          const lineMeasurement = calculateLineMeasurements(points, scaleRatio);
+          aggregateTotals.gutterCount++;
+          aggregateTotals.gutterLf += lineMeasurement.length_lf;
+        } else if (cls === 'downspout') {
+          aggregateTotals.downspoutCount++;
+        }
+
+        // Line-type detections (roof elements)
+        if (cls === 'eave' || cls === 'roof_eave') {
+          const lineMeasurement = calculateLineMeasurements(points, scaleRatio);
+          aggregateTotals.eavesCount++;
+          aggregateTotals.eavesLf += lineMeasurement.length_lf;
+        } else if (cls === 'rake' || cls === 'roof_rake') {
+          const lineMeasurement = calculateLineMeasurements(points, scaleRatio);
+          aggregateTotals.rakesCount++;
+          aggregateTotals.rakesLf += lineMeasurement.length_lf;
+        } else if (cls === 'ridge' || cls === 'roof_ridge') {
+          const lineMeasurement = calculateLineMeasurements(points, scaleRatio);
+          aggregateTotals.ridgeCount++;
+          aggregateTotals.ridgeLf += lineMeasurement.length_lf;
+        } else if (cls === 'valley' || cls === 'roof_valley') {
+          const lineMeasurement = calculateLineMeasurements(points, scaleRatio);
+          aggregateTotals.valleyCount++;
+          aggregateTotals.valleyLf += lineMeasurement.length_lf;
+        }
+      }
+
+      // Add page's net siding to aggregate
+      aggregateTotals.sidingNetSf += Math.max(0, pageBuildingAreaSf - pageOpeningsSf);
+    }
+
+    return aggregateTotals;
+  }, [pages, getAllDetections]);
 
   // ============================================================================
   // Approval Handler - Build Payload & Call Webhook
@@ -1906,8 +2049,6 @@ export default function DetectionEditor({
             isApproving={isApproving}
             canApprove={!!liveDerivedTotals}
             isApproved={!!approvalResult}
-            onGenerateMarkup={handleGenerateMarkup}
-            isGeneratingMarkup={isGeneratingMarkup}
             // Local-first editing props
             hasUnsavedChanges={hasUnsavedChanges}
             canUndo={canUndo}
@@ -2024,6 +2165,7 @@ export default function DetectionEditor({
                     onDetectionPolygonUpdate={handleDetectionPolygonUpdate}
                     onCalibrationComplete={handleCalibrationComplete}
                     onExitDrawingMode={() => setToolMode('select')}
+                    multiSelectMode={multiSelectMode}
                     containerWidth={canvasContainerSize.width}
                     containerHeight={canvasContainerSize.height}
                   />
@@ -2075,25 +2217,22 @@ export default function DetectionEditor({
               )}
             </div>
 
-            {/* Sidebar - pages, detection list, and selection properties */}
+            {/* Sidebar - pages, properties, and totals */}
             <DetectionSidebar
               pages={pages}
               currentPageId={currentPageId}
               onPageSelect={setCurrentPageId}
               detections={currentPageDetections}
-              selectedIds={selectedIds}
-              onDetectionSelect={handleSelect}
-              onDetectionHover={handleHover}
-              showDeleted={showDeleted}
-              onShowDeletedChange={setShowDeleted}
-              jobId={jobId}
               selectedDetections={selectedDetections}
               onClassChange={handleClassChange}
               onStatusChange={handleStatusChange}
               onMaterialAssign={handleMaterialAssign}
               onNotesChange={handleNotesChange}
               pixelsPerFoot={currentPage?.scale_ratio || 64}
+              multiSelectMode={multiSelectMode}
+              onMultiSelectModeChange={setMultiSelectMode}
               liveDerivedTotals={liveDerivedTotals}
+              allPagesTotals={allPagesTotals}
             />
           </div>
         </>

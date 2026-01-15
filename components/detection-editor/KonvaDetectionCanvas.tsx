@@ -97,6 +97,8 @@ export interface KonvaDetectionCanvasProps {
   onCalibrationComplete?: (data: CalibrationData) => void;
   /** Called when user right-clicks to exit point/line mode */
   onExitDrawingMode?: () => void;
+  /** Multi-select mode - clicks add to selection instead of replacing */
+  multiSelectMode?: boolean;
   containerWidth: number;
   containerHeight: number;
 }
@@ -134,6 +136,7 @@ export default function KonvaDetectionCanvas({
   onDetectionPointUpdate,
   onCalibrationComplete,
   onExitDrawingMode,
+  multiSelectMode = false,
   containerWidth,
   containerHeight,
 }: KonvaDetectionCanvasProps) {
@@ -174,6 +177,9 @@ export default function KonvaDetectionCanvas({
   const imageHeight = page.original_height || 1080;
   const imageUrl = page.original_image_url || page.image_url;
 
+  // Track which image we've positioned for to avoid resetting on container resize
+  const positionedForImageRef = useRef<string | null>(null);
+
   // ==========================================================================
   // Load Image
   // ==========================================================================
@@ -181,29 +187,37 @@ export default function KonvaDetectionCanvas({
   useEffect(() => {
     if (!imageUrl) return;
 
+    // Check if we're loading a NEW image (page change) vs same image
+    const isNewImage = positionedForImageRef.current !== imageUrl;
+
     const img = new window.Image();
     img.crossOrigin = 'anonymous';
     img.onload = () => {
       setImage(img);
       setImageLoaded(true);
 
-      // Calculate initial fit scale and position
-      const fitScale = calculateFitScale(
-        img.naturalWidth || imageWidth,
-        img.naturalHeight || imageHeight,
-        containerWidth,
-        containerHeight
-      );
-      const centerOffset = calculateCenterOffset(
-        img.naturalWidth || imageWidth,
-        img.naturalHeight || imageHeight,
-        containerWidth,
-        containerHeight,
-        fitScale
-      );
+      // Only reset viewport position when loading a different image (page change)
+      // This preserves zoom/pan when tool or selection changes
+      if (isNewImage) {
+        // Calculate initial fit scale and position
+        const fitScale = calculateFitScale(
+          img.naturalWidth || imageWidth,
+          img.naturalHeight || imageHeight,
+          containerWidth,
+          containerHeight
+        );
+        const centerOffset = calculateCenterOffset(
+          img.naturalWidth || imageWidth,
+          img.naturalHeight || imageHeight,
+          containerWidth,
+          containerHeight,
+          fitScale
+        );
 
-      setScale(fitScale);
-      setPosition(centerOffset);
+        setScale(fitScale);
+        setPosition(centerOffset);
+        positionedForImageRef.current = imageUrl;
+      }
     };
     img.onerror = () => {
       console.error('Failed to load image:', imageUrl);
@@ -333,35 +347,108 @@ export default function KonvaDetectionCanvas({
 
   const handleStageMouseDown = useCallback(
     (e: Konva.KonvaEventObject<MouseEvent | TouchEvent>) => {
-      // Check if we clicked on a detection shape or any child of a detection Group
-      // Walk up the parent chain to find if any parent is a detection
-      let target = e.target;
-      let isDetectionShape = false;
-      while (target && target !== stageRef.current) {
-        const targetName = target.name?.() || '';
-        if (targetName.startsWith('detection-')) {
-          isDetectionShape = true;
-          break;
+      // IMPORTANT: Check drawing tool modes FIRST before checking if we clicked on a detection
+      // This allows placing points, lines, and polygons ON TOP of existing markups
+
+      // Point mode - single click to place a marker (works over existing detections)
+      if (toolMode === 'point') {
+        const stage = stageRef.current;
+        if (!stage) return;
+
+        const pointer = stage.getPointerPosition();
+        if (!pointer) return;
+
+        // Transform to image coordinates
+        const imageX = (pointer.x - position.x) / scale;
+        const imageY = (pointer.y - position.y) / scale;
+
+        // Create point detection
+        onDetectionCreate({
+          pixel_x: imageX,
+          pixel_y: imageY,
+          pixel_width: 0,
+          pixel_height: 0,
+          class: activeClass,
+          markup_type: 'point',
+        });
+        return;
+      }
+
+      // Line mode - two clicks to draw a line (works over existing detections)
+      if (toolMode === 'line') {
+        const stage = stageRef.current;
+        if (!stage) return;
+
+        const pointer = stage.getPointerPosition();
+        if (!pointer) return;
+
+        // Transform to image coordinates
+        const imageX = (pointer.x - position.x) / scale;
+        const imageY = (pointer.y - position.y) / scale;
+        const imagePoint = { x: imageX, y: imageY };
+
+        if (!lineStartPoint) {
+          // First click - set start point
+          setLineStartPoint(imagePoint);
+        } else {
+          // Second click - create line detection
+          const dx = imagePoint.x - lineStartPoint.x;
+          const dy = imagePoint.y - lineStartPoint.y;
+          const pixelLength = Math.sqrt(dx * dx + dy * dy);
+          const lengthLf = pixelLength / scaleRatio;
+
+          // For lines, use activeClass if it's a linear class, otherwise default to 'trim'
+          const lineClass = LINEAR_CLASSES.includes(activeClass) ? activeClass : 'trim';
+
+          onDetectionCreate({
+            pixel_x: (lineStartPoint.x + imagePoint.x) / 2,
+            pixel_y: (lineStartPoint.y + imagePoint.y) / 2,
+            pixel_width: Math.abs(dx),
+            pixel_height: Math.abs(dy),
+            class: lineClass,
+            polygon_points: [lineStartPoint, imagePoint],
+            markup_type: 'line',
+            perimeter_lf: lengthLf,
+            area_sf: 0,
+            real_width_ft: Math.abs(dx) / scaleRatio,
+            real_height_ft: Math.abs(dy) / scaleRatio,
+          });
+
+          setLineStartPoint(null);
         }
-        target = target.parent as typeof target;
-      }
-
-      // If clicking on a detection shape (or child of one), let its own handler deal with it
-      if (isDetectionShape) {
         return;
       }
 
-      // Only handle clicks on the stage/image itself (empty space)
-      const isStageOrImage = e.target === stageRef.current || e.target === imageRef.current;
+      // Create (polygon) mode - works over existing detections
+      if (toolMode === 'create') {
+        const stage = stageRef.current;
+        if (!stage) return;
 
-      // Clear selection when clicking on empty space (in select mode)
-      if (toolMode === 'select' && isStageOrImage) {
-        onSelectionChange(null, false);
+        // Use getRelativePointerPosition() which returns coordinates in the Stage's
+        // local coordinate system (accounts for scale and position transforms)
+        const pointer = stage.getRelativePointerPosition();
+        if (!pointer) return;
+
+        // Pointer is now directly in image-pixel coordinates
+        const clickPoint = { x: pointer.x, y: pointer.y };
+
+        if (!isDrawingPolygon) {
+          // Start new polygon
+          setIsDrawingPolygon(true);
+          setDrawingPoints([clickPoint]);
+        } else {
+          // Check if clicking near start point to close
+          if (drawingPoints.length >= MIN_POLYGON_POINTS && isNearStart) {
+            completePolygon();
+          } else {
+            // Add point to polygon
+            setDrawingPoints((prev) => [...prev, clickPoint]);
+          }
+        }
         return;
       }
 
-      // Calibration mode - click two points to measure pixel distance
-      // IMPORTANT: We need distance in IMAGE coordinates, not canvas coordinates
+      // Calibration mode - click two points to measure pixel distance (works over existing detections)
       if (toolMode === 'calibrate') {
         const stage = stageRef.current;
         if (!stage) return;
@@ -417,102 +504,35 @@ export default function KonvaDetectionCanvas({
         return;
       }
 
-      // Point-by-point polygon drawing in create mode
-      if (toolMode === 'create') {
-        const stage = stageRef.current;
-        if (!stage) return;
-
-        // Use getRelativePointerPosition() which returns coordinates in the Stage's
-        // local coordinate system (accounts for scale and position transforms)
-        const pointer = stage.getRelativePointerPosition();
-        if (!pointer) return;
-
-        // Pointer is now directly in image-pixel coordinates
-        const clickPoint = { x: pointer.x, y: pointer.y };
-
-        if (!isDrawingPolygon) {
-          // Start new polygon
-          setIsDrawingPolygon(true);
-          setDrawingPoints([clickPoint]);
-        } else {
-          // Check if clicking near start point to close
-          if (drawingPoints.length >= MIN_POLYGON_POINTS && isNearStart) {
-            completePolygon();
-          } else {
-            // Add point to polygon
-            setDrawingPoints((prev) => [...prev, clickPoint]);
-          }
+      // For select/pan/verify modes, check if we clicked on a detection
+      // Walk up the parent chain to find if any parent is a detection
+      let target = e.target;
+      let isDetectionShape = false;
+      while (target && target !== stageRef.current) {
+        const targetName = target.name?.() || '';
+        if (targetName.startsWith('detection-')) {
+          isDetectionShape = true;
+          break;
         }
+        target = target.parent as typeof target;
       }
 
-      // Line mode - two clicks to draw a line measurement
-      if (toolMode === 'line') {
-        const stage = stageRef.current;
-        if (!stage) return;
-
-        const pointer = stage.getPointerPosition();
-        if (!pointer) return;
-
-        // Transform to image coordinates
-        const imageX = (pointer.x - position.x) / scale;
-        const imageY = (pointer.y - position.y) / scale;
-        const imagePoint = { x: imageX, y: imageY };
-
-        if (!lineStartPoint) {
-          // First click - set start point
-          setLineStartPoint(imagePoint);
-        } else {
-          // Second click - create line detection
-          const dx = imagePoint.x - lineStartPoint.x;
-          const dy = imagePoint.y - lineStartPoint.y;
-          const pixelLength = Math.sqrt(dx * dx + dy * dy);
-          const lengthLf = pixelLength / scaleRatio;
-
-          // For lines, use activeClass if it's a linear class, otherwise default to 'siding'
-          const lineClass = LINEAR_CLASSES.includes(activeClass) ? activeClass : 'trim';
-
-          onDetectionCreate({
-            pixel_x: (lineStartPoint.x + imagePoint.x) / 2,
-            pixel_y: (lineStartPoint.y + imagePoint.y) / 2,
-            pixel_width: Math.abs(dx),
-            pixel_height: Math.abs(dy),
-            class: lineClass,
-            polygon_points: [lineStartPoint, imagePoint],
-            markup_type: 'line',
-            perimeter_lf: lengthLf,
-            area_sf: 0,
-            real_width_ft: Math.abs(dx) / scaleRatio,
-            real_height_ft: Math.abs(dy) / scaleRatio,
-          });
-
-          setLineStartPoint(null);
-        }
+      // If clicking on a detection shape (or child of one), let its own handler deal with it
+      if (isDetectionShape) {
         return;
       }
 
-      // Point mode - single click to place a marker
-      if (toolMode === 'point') {
-        const stage = stageRef.current;
-        if (!stage) return;
+      // Only handle clicks on the stage/image itself (empty space)
+      const isStageOrImage = e.target === stageRef.current || e.target === imageRef.current;
 
-        const pointer = stage.getPointerPosition();
-        if (!pointer) return;
-
-        // Transform to image coordinates
-        const imageX = (pointer.x - position.x) / scale;
-        const imageY = (pointer.y - position.y) / scale;
-
-        // Create point detection
-        onDetectionCreate({
-          pixel_x: imageX,
-          pixel_y: imageY,
-          pixel_width: 0,
-          pixel_height: 0,
-          class: activeClass,
-          markup_type: 'point',
-        });
+      // Clear selection when clicking on empty space (in select mode)
+      if (toolMode === 'select' && isStageOrImage) {
+        onSelectionChange(null, false);
         return;
       }
+
+      // Pan mode handled by Konva's draggable property
+      // Verify mode handled by detection click handlers
     },
     [toolMode, onSelectionChange, isDrawingPolygon, drawingPoints.length, isNearStart, completePolygon, calibrationState.pointA, onCalibrationComplete, resetCalibration, position, scale, lineStartPoint, scaleRatio, activeClass, onDetectionCreate]
   );
@@ -638,10 +658,12 @@ export default function KonvaDetectionCanvas({
   const handleDetectionSelect = useCallback(
     (id: string, addToSelection: boolean) => {
       if (toolMode === 'select' || toolMode === 'verify') {
-        onSelectionChange(id, addToSelection);
+        // If multiSelectMode is enabled, always add to selection
+        // (OR with modifier key check from child components)
+        onSelectionChange(id, addToSelection || multiSelectMode);
       }
     },
-    [toolMode, onSelectionChange]
+    [toolMode, onSelectionChange, multiSelectMode]
   );
 
   const handlePolygonUpdate = useCallback(
@@ -721,8 +743,16 @@ export default function KonvaDetectionCanvas({
 
   return (
     <div
-      className="w-full h-full overflow-hidden bg-neutral-900"
-      style={{ cursor: getCursor() }}
+      className="w-full h-full overflow-hidden"
+      style={{
+        cursor: getCursor(),
+        backgroundColor: '#1a1a2e',
+        backgroundImage: `
+          linear-gradient(rgba(255,255,255,0.03) 1px, transparent 1px),
+          linear-gradient(90deg, rgba(255,255,255,0.03) 1px, transparent 1px)
+        `,
+        backgroundSize: '20px 20px',
+      }}
     >
       <Stage
         ref={stageRef}

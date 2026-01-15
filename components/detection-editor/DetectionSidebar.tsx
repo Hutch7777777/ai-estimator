@@ -3,28 +3,19 @@
 import React, { memo, useState, useMemo, useEffect, useRef } from 'react';
 import {
   FileImage,
-  Layers,
   Calculator,
-  ChevronDown,
-  ChevronRight,
-  Eye,
-  EyeOff,
-  Check,
-  AlertTriangle,
-  Trash2,
-  Pencil,
   SlidersHorizontal,
+  Check,
   RotateCcw,
+  Trash2,
 } from 'lucide-react';
 import type {
   ExtractionPage,
   ExtractionDetection,
   DetectionClass,
-  AllDetectionClasses,
   DetectionStatus,
   LiveDerivedTotals,
 } from '@/lib/types/extraction';
-import { DETECTION_CLASS_COLORS, CONFIDENCE_THRESHOLDS } from '@/lib/types/extraction';
 import ClassSelector from './PropertiesPanel/ClassSelector';
 import SelectionProperties from './PropertiesPanel/SelectionProperties';
 import MaterialAssignment from './PropertiesPanel/MaterialAssignment';
@@ -39,25 +30,23 @@ export interface DetectionSidebarProps {
   currentPageId: string | null;
   onPageSelect: (pageId: string) => void;
   detections: ExtractionDetection[];
-  selectedIds: Set<string>;
-  onDetectionSelect: (id: string, addToSelection: boolean) => void;
-  onDetectionHover: (id: string | null) => void;
-  showDeleted: boolean;
-  onShowDeletedChange: (show: boolean) => void;
-  jobId: string; // For Phase 4 data fetching
-  // Selection properties section
+  // Selection properties (for Properties tab)
   selectedDetections: ExtractionDetection[];
   onClassChange: (detectionIds: string[], newClass: DetectionClass) => void;
   onStatusChange: (detectionIds: string[], newStatus: DetectionStatus) => void;
   onMaterialAssign: (detectionIds: string[], materialId: string | null) => void;
   onNotesChange: (detectionIds: string[], notes: string) => void;
-  // Scale for dynamic measurement calculation
   pixelsPerFoot: number;
+  // Multi-select mode toggle
+  multiSelectMode: boolean;
+  onMultiSelectModeChange: (enabled: boolean) => void;
   // Live derived totals (calculated in parent, passed down for display)
   liveDerivedTotals: LiveDerivedTotals | null;
+  // All pages totals (aggregated across all elevation pages)
+  allPagesTotals?: LiveDerivedTotals | null;
 }
 
-type TabType = 'pages' | 'detections' | 'properties' | 'totals';
+type TabType = 'pages' | 'properties' | 'totals';
 
 // =============================================================================
 // Constants
@@ -65,66 +54,65 @@ type TabType = 'pages' | 'detections' | 'properties' | 'totals';
 
 const TABS: { id: TabType; icon: typeof FileImage; label: string }[] = [
   { id: 'pages', icon: FileImage, label: 'Pages' },
-  { id: 'detections', icon: Layers, label: 'Detections' },
   { id: 'properties', icon: SlidersHorizontal, label: 'Properties' },
   { id: 'totals', icon: Calculator, label: 'Totals' },
 ];
 
-const STATUS_OPTIONS: { value: DetectionStatus | 'all'; label: string }[] = [
-  { value: 'all', label: 'All' },
-  { value: 'auto', label: 'Auto' },
-  { value: 'verified', label: 'Verified' },
-  { value: 'edited', label: 'Edited' },
-  { value: 'deleted', label: 'Deleted' },
-];
 
-// Note: Uses AllDetectionClasses to support legacy 'exterior_wall'/'building' from DB
-const CLASS_ORDER: AllDetectionClasses[] = [
-  'siding',
-  'window',
-  'door',
-  'garage',
-  'exterior_wall', // Legacy - kept for backward compatibility
-  'building',      // Internal class for gross facade
-  'roof',
-  'gable',
-];
 
 // =============================================================================
 // Helper Functions
 // =============================================================================
 
-function formatClassName(cls: AllDetectionClasses | ''): string {
-  if (!cls) return 'Unknown';
-  return cls
-    .split('_')
-    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
-    .join(' ');
-}
+/**
+ * Get display label for page type
+ */
+function getPageTypeLabel(page: ExtractionPage): string {
+  // If it's an elevation with a name, use that
+  if (page.page_type === 'elevation' && page.elevation_name) {
+    return page.elevation_name; // "front", "rear", etc.
+  }
 
-function formatDimension(feet: number | null): string {
-  if (feet === null) return '-';
-  return `${feet.toFixed(1)}'`;
-}
+  // Otherwise show the page type
+  const typeLabels: Record<string, string> = {
+    elevation: 'elevation',
+    floor_plan: 'floor plan',
+    framing: 'framing',
+    site_plan: 'site',
+    roof_plan: 'roof',
+    details: 'details',
+    schedule: 'schedule',
+    section: 'section',
+    cover: 'cover',
+    electrical: 'electrical',
+    plumbing: 'plumbing',
+    foundation: 'foundation',
+    other: 'other',
+  };
 
-function formatArea(sf: number | null): string {
-  if (sf === null) return '-';
-  return `${sf.toFixed(1)} SF`;
+  return typeLabels[page.page_type || ''] || page.page_type || 'unclassified';
 }
 
 /**
- * Calculate real-world measurements from pixel dimensions using scale ratio.
- * This ensures measurements update dynamically when scale is recalibrated.
+ * Get background color for page type badge
  */
-function calculateMeasurementsFromPixels(
-  detection: ExtractionDetection,
-  pixelsPerFoot: number
-): { widthFt: number; heightFt: number; areaSf: number; perimeterLf: number } {
-  const widthFt = (detection.pixel_width || 0) / pixelsPerFoot;
-  const heightFt = (detection.pixel_height || 0) / pixelsPerFoot;
-  const areaSf = widthFt * heightFt;
-  const perimeterLf = 2 * (widthFt + heightFt);
-  return { widthFt, heightFt, areaSf, perimeterLf };
+function getPageTypeColor(pageType: string | null): string {
+  const colors: Record<string, string> = {
+    elevation: 'bg-green-600',
+    floor_plan: 'bg-blue-600',
+    framing: 'bg-purple-600',
+    site_plan: 'bg-amber-600',
+    roof_plan: 'bg-cyan-600',
+    details: 'bg-gray-600',
+    schedule: 'bg-orange-600',
+    section: 'bg-pink-600',
+    cover: 'bg-slate-600',
+    electrical: 'bg-yellow-600',
+    plumbing: 'bg-indigo-600',
+    foundation: 'bg-stone-600',
+    other: 'bg-gray-500',
+  };
+  return colors[pageType || ''] || 'bg-gray-500';
 }
 
 // =============================================================================
@@ -144,8 +132,6 @@ const PageThumbnail = memo(function PageThumbnail({
   detectionCount,
   onClick,
 }: PageThumbnailProps) {
-  const isElevation = page.page_type === 'elevation';
-
   return (
     <button
       type="button"
@@ -153,7 +139,6 @@ const PageThumbnail = memo(function PageThumbnail({
       className={`
         relative w-full aspect-[4/3] rounded-lg overflow-hidden border-2 transition-all
         ${isSelected ? 'border-blue-500 ring-2 ring-blue-200' : 'border-gray-200 dark:border-gray-700'}
-        ${isElevation ? 'opacity-100' : 'opacity-60'}
         hover:border-blue-400
       `}
     >
@@ -175,12 +160,12 @@ const PageThumbnail = memo(function PageThumbnail({
         {page.page_number}
       </div>
 
-      {/* Elevation name badge */}
-      {page.elevation_name && (
-        <div className="absolute top-1 right-1 bg-blue-600 text-white text-xs px-1.5 py-0.5 rounded capitalize">
-          {page.elevation_name}
-        </div>
-      )}
+      {/* Page type/classification badge - shown for ALL pages */}
+      <div
+        className={`absolute top-1 right-1 ${getPageTypeColor(page.page_type)} text-white text-xs px-1.5 py-0.5 rounded capitalize`}
+      >
+        {getPageTypeLabel(page)}
+      </div>
 
       {/* Detection count */}
       {detectionCount > 0 && (
@@ -192,153 +177,6 @@ const PageThumbnail = memo(function PageThumbnail({
   );
 });
 
-interface DetectionItemProps {
-  detection: ExtractionDetection;
-  index: number;
-  isSelected: boolean;
-  onSelect: (addToSelection: boolean) => void;
-  onHoverStart: () => void;
-  onHoverEnd: () => void;
-  pixelsPerFoot: number;
-}
-
-const DetectionItem = memo(function DetectionItem({
-  detection,
-  index,
-  isSelected,
-  onSelect,
-  onHoverStart,
-  onHoverEnd,
-  pixelsPerFoot,
-}: DetectionItemProps) {
-  const color = DETECTION_CLASS_COLORS[detection.class] || DETECTION_CLASS_COLORS[''];
-  const isLowConfidence = detection.confidence < CONFIDENCE_THRESHOLDS.medium;
-  const isDeleted = detection.status === 'deleted';
-
-  // Calculate measurements dynamically from pixel dimensions
-  const { widthFt, heightFt, areaSf } = calculateMeasurementsFromPixels(detection, pixelsPerFoot);
-
-  return (
-    <button
-      type="button"
-      onClick={(e) => onSelect(e.shiftKey)}
-      onMouseEnter={onHoverStart}
-      onMouseLeave={onHoverEnd}
-      className={`
-        w-full flex items-center gap-2 px-2 py-1.5 text-left transition-colors
-        ${isSelected ? 'bg-blue-100 dark:bg-blue-900/50' : 'hover:bg-gray-100 dark:hover:bg-gray-800'}
-        ${isDeleted ? 'opacity-50' : ''}
-      `}
-    >
-      {/* Color bar */}
-      <div
-        className="w-1 h-8 rounded-full flex-shrink-0"
-        style={{ backgroundColor: color }}
-      />
-
-      {/* Index */}
-      <span className="text-xs text-gray-500 dark:text-gray-400 w-6">
-        #{index + 1}
-      </span>
-
-      {/* Dimensions - calculated from pixel dimensions and current scale */}
-      <div className="flex-1 min-w-0">
-        <div className="text-sm text-gray-900 dark:text-gray-100 truncate">
-          {formatDimension(widthFt)} × {formatDimension(heightFt)}
-        </div>
-        <div className="text-xs text-gray-500 dark:text-gray-400">
-          {formatArea(areaSf)}
-        </div>
-      </div>
-
-      {/* Status icon */}
-      <div className="flex-shrink-0">
-        {detection.status === 'verified' && (
-          <Check className="w-4 h-4 text-green-500" />
-        )}
-        {detection.status === 'auto' && isLowConfidence && (
-          <AlertTriangle className="w-4 h-4 text-yellow-500" />
-        )}
-        {detection.status === 'edited' && (
-          <Pencil className="w-4 h-4 text-blue-500" />
-        )}
-        {detection.status === 'deleted' && (
-          <Trash2 className="w-4 h-4 text-red-500" />
-        )}
-      </div>
-    </button>
-  );
-});
-
-interface DetectionGroupProps {
-  detectionClass: AllDetectionClasses;
-  detections: ExtractionDetection[];
-  isExpanded: boolean;
-  onToggle: () => void;
-  selectedIds: Set<string>;
-  onDetectionSelect: (id: string, addToSelection: boolean) => void;
-  onDetectionHover: (id: string | null) => void;
-  pixelsPerFoot: number;
-}
-
-const DetectionGroup = memo(function DetectionGroup({
-  detectionClass,
-  detections,
-  isExpanded,
-  onToggle,
-  selectedIds,
-  onDetectionSelect,
-  onDetectionHover,
-  pixelsPerFoot,
-}: DetectionGroupProps) {
-  const color = DETECTION_CLASS_COLORS[detectionClass] || DETECTION_CLASS_COLORS[''];
-  const verifiedCount = detections.filter((d) => d.status === 'verified').length;
-
-  return (
-    <div className="border-b border-gray-200 dark:border-gray-700 last:border-b-0">
-      {/* Group header */}
-      <button
-        type="button"
-        onClick={onToggle}
-        className="w-full flex items-center gap-2 px-3 py-2 hover:bg-gray-50 dark:hover:bg-gray-800/50"
-      >
-        {isExpanded ? (
-          <ChevronDown className="w-4 h-4 text-gray-400" />
-        ) : (
-          <ChevronRight className="w-4 h-4 text-gray-400" />
-        )}
-        <span
-          className="w-3 h-3 rounded-sm flex-shrink-0"
-          style={{ backgroundColor: color }}
-        />
-        <span className="flex-1 text-sm font-medium text-gray-900 dark:text-gray-100 text-left">
-          {formatClassName(detectionClass)}
-        </span>
-        <span className="text-xs text-gray-500 dark:text-gray-400">
-          {verifiedCount}/{detections.length}
-        </span>
-      </button>
-
-      {/* Detection items */}
-      {isExpanded && (
-        <div className="pl-6">
-          {detections.map((detection, index) => (
-            <DetectionItem
-              key={detection.id}
-              detection={detection}
-              index={index}
-              isSelected={selectedIds.has(detection.id)}
-              onSelect={(add) => onDetectionSelect(detection.id, add)}
-              onHoverStart={() => onDetectionHover(detection.id)}
-              onHoverEnd={() => onDetectionHover(null)}
-              pixelsPerFoot={pixelsPerFoot}
-            />
-          ))}
-        </div>
-      )}
-    </div>
-  );
-});
 
 // =============================================================================
 // Main Component
@@ -349,25 +187,21 @@ const DetectionSidebar = memo(function DetectionSidebar({
   currentPageId,
   onPageSelect,
   detections,
-  selectedIds,
-  onDetectionSelect,
-  onDetectionHover,
-  showDeleted,
-  onShowDeletedChange,
-  jobId,
   selectedDetections,
   onClassChange,
   onStatusChange,
   onMaterialAssign,
   onNotesChange,
   pixelsPerFoot,
+  multiSelectMode,
+  onMultiSelectModeChange,
   liveDerivedTotals,
+  allPagesTotals,
 }: DetectionSidebarProps) {
-  const [activeTab, setActiveTab] = useState<TabType>('detections');
-  const [expandedClasses, setExpandedClasses] = useState<Set<AllDetectionClasses>>(
-    new Set(CLASS_ORDER)
-  );
-  const [filterStatus, setFilterStatus] = useState<DetectionStatus | 'all'>('all');
+  // Default to 'pages' tab for quick page navigation
+  const [activeTab, setActiveTab] = useState<TabType>('pages');
+  // Toggle between current page and all pages totals
+  const [totalsScope, setTotalsScope] = useState<'current' | 'all'>('current');
 
   // Auto-switch to Properties tab when selection changes from empty to non-empty
   const prevSelectedCountRef = useRef(0);
@@ -378,7 +212,7 @@ const DetectionSidebar = memo(function DetectionSidebar({
     prevSelectedCountRef.current = selectedDetections.length;
   }, [selectedDetections.length]);
 
-  // Group detections by page for counts
+  // Group detections by page for counts (shown on page thumbnails)
   const detectionCountsByPage = useMemo(() => {
     const counts = new Map<string, number>();
     for (const detection of detections) {
@@ -389,68 +223,6 @@ const DetectionSidebar = memo(function DetectionSidebar({
     return counts;
   }, [detections]);
 
-  // Filter and group detections for current page
-  const filteredDetections = useMemo(() => {
-    let filtered = detections.filter((d) => d.page_id === currentPageId);
-
-    // Apply status filter
-    if (filterStatus !== 'all') {
-      filtered = filtered.filter((d) => d.status === filterStatus);
-    } else if (!showDeleted) {
-      filtered = filtered.filter((d) => d.status !== 'deleted');
-    }
-
-    return filtered;
-  }, [detections, currentPageId, filterStatus, showDeleted]);
-
-  // Group by class
-  const groupedDetections = useMemo(() => {
-    const groups = new Map<AllDetectionClasses, ExtractionDetection[]>();
-
-    for (const cls of CLASS_ORDER) {
-      groups.set(cls, []);
-    }
-
-    for (const detection of filteredDetections) {
-      // Cast to handle legacy 'exterior_wall'/'building' values from DB
-      const cls = (detection.class || '') as AllDetectionClasses;
-      if (!groups.has(cls)) {
-        groups.set(cls, []);
-      }
-      groups.get(cls)!.push(detection);
-    }
-
-    // Sort by detection_index within each group
-    for (const [, dets] of groups) {
-      dets.sort((a, b) => a.detection_index - b.detection_index);
-    }
-
-    // Remove empty groups
-    for (const [cls, dets] of groups) {
-      if (dets.length === 0) {
-        groups.delete(cls);
-      }
-    }
-
-    return groups;
-  }, [filteredDetections]);
-
-  const toggleClassExpanded = (cls: AllDetectionClasses) => {
-    setExpandedClasses((prev) => {
-      const next = new Set(prev);
-      if (next.has(cls)) {
-        next.delete(cls);
-      } else {
-        next.add(cls);
-      }
-      return next;
-    });
-  };
-
-  const totalDetections = detections.filter(
-    (d) => d.page_id === currentPageId && d.status !== 'deleted'
-  ).length;
-
   return (
     <div className="w-72 h-full bg-white dark:bg-gray-900 border-l border-gray-200 dark:border-gray-700 flex flex-col">
       {/* Tab Bar */}
@@ -458,7 +230,6 @@ const DetectionSidebar = memo(function DetectionSidebar({
         {TABS.map((tab) => {
           const Icon = tab.icon;
           const isActive = activeTab === tab.id;
-          const isPropertiesDisabled = tab.id === 'properties' && selectedDetections.length === 0;
           return (
             <button
               key={tab.id}
@@ -467,7 +238,6 @@ const DetectionSidebar = memo(function DetectionSidebar({
               title={tab.label}
               className={`
                 flex-1 flex items-center justify-center py-3 transition-colors relative
-                ${isPropertiesDisabled ? 'opacity-50' : ''}
                 ${
                   isActive
                     ? 'text-blue-600 dark:text-blue-400 border-b-2 border-blue-600 dark:border-blue-400'
@@ -476,13 +246,7 @@ const DetectionSidebar = memo(function DetectionSidebar({
               `}
             >
               <Icon className="w-5 h-5" />
-              {/* Badge for detection count */}
-              {tab.id === 'detections' && totalDetections > 0 && (
-                <span className="absolute top-1 right-1 min-w-[18px] h-[18px] bg-gray-500 text-white text-[10px] font-medium rounded-full flex items-center justify-center px-1">
-                  {totalDetections > 99 ? '99+' : totalDetections}
-                </span>
-              )}
-              {/* Badge for selection count */}
+              {/* Badge for selection count on Properties tab */}
               {tab.id === 'properties' && selectedDetections.length > 0 && (
                 <span className="absolute top-1 right-1 min-w-[18px] h-[18px] bg-blue-500 text-white text-[10px] font-medium rounded-full flex items-center justify-center px-1">
                   {selectedDetections.length > 99 ? '99+' : selectedDetections.length}
@@ -512,84 +276,40 @@ const DetectionSidebar = memo(function DetectionSidebar({
           </div>
         )}
 
-        {/* Detections Tab */}
-        {activeTab === 'detections' && (
-          <div className="flex flex-col h-full">
-            {/* Filter Bar */}
-            <div className="p-3 border-b border-gray-200 dark:border-gray-700 space-y-2">
-              <div className="flex items-center gap-2">
-                <select
-                  value={filterStatus}
-                  onChange={(e) => setFilterStatus(e.target.value as DetectionStatus | 'all')}
-                  className="flex-1 text-sm border border-gray-300 dark:border-gray-600 rounded px-2 py-1 bg-white dark:bg-gray-800"
-                >
-                  {STATUS_OPTIONS.map((opt) => (
-                    <option key={opt.value} value={opt.value}>
-                      {opt.label}
-                    </option>
-                  ))}
-                </select>
-                <button
-                  type="button"
-                  onClick={() => onShowDeletedChange(!showDeleted)}
-                  className={`
-                    p-1.5 rounded transition-colors
-                    ${showDeleted ? 'bg-gray-200 dark:bg-gray-700' : 'hover:bg-gray-100 dark:hover:bg-gray-800'}
-                  `}
-                  title={showDeleted ? 'Hide deleted' : 'Show deleted'}
-                >
-                  {showDeleted ? (
-                    <Eye className="w-4 h-4" />
-                  ) : (
-                    <EyeOff className="w-4 h-4" />
-                  )}
-                </button>
-              </div>
-            </div>
-
-            {/* Detection Groups */}
-            <div className="flex-1 overflow-y-auto">
-              {Array.from(groupedDetections.entries()).map(([cls, dets]) => (
-                <DetectionGroup
-                  key={cls}
-                  detectionClass={cls}
-                  detections={dets}
-                  isExpanded={expandedClasses.has(cls)}
-                  onToggle={() => toggleClassExpanded(cls)}
-                  selectedIds={selectedIds}
-                  onDetectionSelect={onDetectionSelect}
-                  onDetectionHover={onDetectionHover}
-                  pixelsPerFoot={pixelsPerFoot}
-                />
-              ))}
-              {groupedDetections.size === 0 && (
-                <div className="p-8 text-center text-gray-500 dark:text-gray-400">
-                  <Layers className="w-8 h-8 mx-auto mb-2 opacity-50" />
-                  <p className="text-sm">No detections</p>
-                </div>
-              )}
-            </div>
-          </div>
-        )}
-
-        {/* Properties Tab */}
+        {/* Properties Tab - Selection-based editing */}
         {activeTab === 'properties' && (
           <div className="p-3 space-y-4">
+            {/* Multi-Select Toggle - Always visible */}
+            <div className="flex items-center justify-between">
+              <span className="text-sm font-medium text-gray-900 dark:text-gray-100">
+                {selectedDetections.length === 0
+                  ? 'No Selection'
+                  : selectedDetections.length === 1
+                    ? '1 Detection Selected'
+                    : `${selectedDetections.length} Detections Selected`}
+              </span>
+              <label className="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={multiSelectMode}
+                  onChange={(e) => onMultiSelectModeChange(e.target.checked)}
+                  className="w-3.5 h-3.5 rounded border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-blue-500 focus:ring-blue-500 focus:ring-offset-0"
+                />
+                Multi-Select
+              </label>
+            </div>
+
             {selectedDetections.length === 0 ? (
-              <div className="flex flex-col items-center justify-center py-8 text-center">
+              <div className="flex flex-col items-center justify-center py-6 text-center">
                 <SlidersHorizontal className="w-8 h-8 text-gray-400 mb-2" />
                 <p className="text-sm text-gray-500 dark:text-gray-400">
-                  Select a detection to view properties
+                  {multiSelectMode
+                    ? 'Click detections to add to selection'
+                    : 'Select a detection to view properties'}
                 </p>
               </div>
             ) : (
               <>
-                {/* Selection Header */}
-                <div className="text-sm font-medium text-gray-900 dark:text-gray-100">
-                  {selectedDetections.length === 1
-                    ? '1 Detection Selected'
-                    : `${selectedDetections.length} Detections Selected`}
-                </div>
 
                 {/* Class Selector */}
                 <div className="space-y-1">
@@ -696,155 +416,191 @@ const DetectionSidebar = memo(function DetectionSidebar({
         {/* Totals Tab */}
         {activeTab === 'totals' && (
           <div className="p-3 space-y-4">
-            {/* Live Derived Measurements (calculated from current detections - HOVER style) */}
-            {liveDerivedTotals && (
+            {/* Scope Toggle */}
+            <div className="flex items-center justify-between">
+              <h3 className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                Live Calculations
+              </h3>
+              <div className="flex bg-gray-200 dark:bg-gray-700 rounded text-xs">
+                <button
+                  type="button"
+                  onClick={() => setTotalsScope('current')}
+                  className={`px-2 py-1 rounded-l transition-colors ${
+                    totalsScope === 'current'
+                      ? 'bg-blue-600 text-white'
+                      : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white'
+                  }`}
+                >
+                  Page
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setTotalsScope('all')}
+                  disabled={!allPagesTotals}
+                  className={`px-2 py-1 rounded-r transition-colors ${
+                    totalsScope === 'all'
+                      ? 'bg-blue-600 text-white'
+                      : !allPagesTotals
+                        ? 'text-gray-400 dark:text-gray-600 cursor-not-allowed'
+                        : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white'
+                  }`}
+                >
+                  All
+                </button>
+              </div>
+            </div>
+
+            {/* Live Derived Measurements */}
+            {(() => {
+              const displayTotals = totalsScope === 'all' && allPagesTotals ? allPagesTotals : liveDerivedTotals;
+              if (!displayTotals) return null;
+
+              return (
               <div className="space-y-3">
-                <div className="flex items-center gap-2">
-                  <h3 className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                    Live Calculations
-                  </h3>
-                  <span className="text-xs text-gray-400 dark:text-gray-500">(Current Page)</span>
+                {/* Scope indicator */}
+                <div className="text-xs text-gray-400 dark:text-gray-500">
+                  {totalsScope === 'current' ? 'Current Page' : 'All Elevation Pages'}
                 </div>
 
                 {/* Facade Summary (HOVER-style) */}
-                {liveDerivedTotals.buildingAreaSf > 0 && (
+                {displayTotals.buildingAreaSf > 0 && (
                   <div className="bg-blue-50 dark:bg-blue-900/20 rounded-lg p-3 space-y-2">
                     <div className="text-xs font-semibold text-blue-700 dark:text-blue-300 uppercase">
                       Facade Summary
                     </div>
                     <div className="grid grid-cols-2 gap-x-4 text-xs text-gray-600 dark:text-gray-400">
                       <span>Gross Area:</span>
-                      <span className="text-right font-mono font-medium">{liveDerivedTotals.buildingAreaSf.toFixed(1)} SF</span>
+                      <span className="text-right font-mono font-medium">{displayTotals.buildingAreaSf.toFixed(1)} SF</span>
                       <span>Net Siding:</span>
-                      <span className="text-right font-mono font-medium text-green-600 dark:text-green-400">{liveDerivedTotals.sidingNetSf.toFixed(1)} SF</span>
+                      <span className="text-right font-mono font-medium text-green-600 dark:text-green-400">{displayTotals.sidingNetSf.toFixed(1)} SF</span>
                       <span>Perimeter:</span>
-                      <span className="text-right font-mono">{liveDerivedTotals.buildingPerimeterLf.toFixed(1)} LF</span>
+                      <span className="text-right font-mono">{displayTotals.buildingPerimeterLf.toFixed(1)} LF</span>
                       <span>Level Starter:</span>
-                      <span className="text-right font-mono">{liveDerivedTotals.buildingLevelStarterLf.toFixed(1)} LF</span>
+                      <span className="text-right font-mono">{displayTotals.buildingLevelStarterLf.toFixed(1)} LF</span>
                     </div>
                   </div>
                 )}
 
                 <div className="bg-green-50 dark:bg-green-900/20 rounded-lg p-3 space-y-3">
                   {/* Windows */}
-                  {liveDerivedTotals.windowCount > 0 && (
+                  {displayTotals.windowCount > 0 && (
                     <div className="space-y-1">
                       <div className="text-xs font-medium text-blue-600 dark:text-blue-400">
-                        Windows ({liveDerivedTotals.windowCount}) — {liveDerivedTotals.windowAreaSf.toFixed(1)} SF
+                        Windows ({displayTotals.windowCount}) — {displayTotals.windowAreaSf.toFixed(1)} SF
                       </div>
                       <div className="grid grid-cols-2 gap-x-4 text-xs text-gray-600 dark:text-gray-400 pl-2">
                         <span>Perimeter:</span>
-                        <span className="text-right font-mono">{liveDerivedTotals.windowPerimeterLf.toFixed(1)} LF</span>
+                        <span className="text-right font-mono">{displayTotals.windowPerimeterLf.toFixed(1)} LF</span>
                         <span>Head:</span>
-                        <span className="text-right font-mono">{liveDerivedTotals.windowHeadLf.toFixed(1)} LF</span>
+                        <span className="text-right font-mono">{displayTotals.windowHeadLf.toFixed(1)} LF</span>
                         <span>Jamb:</span>
-                        <span className="text-right font-mono">{liveDerivedTotals.windowJambLf.toFixed(1)} LF</span>
+                        <span className="text-right font-mono">{displayTotals.windowJambLf.toFixed(1)} LF</span>
                         <span>Sill:</span>
-                        <span className="text-right font-mono">{liveDerivedTotals.windowSillLf.toFixed(1)} LF</span>
+                        <span className="text-right font-mono">{displayTotals.windowSillLf.toFixed(1)} LF</span>
                       </div>
                     </div>
                   )}
 
                   {/* Doors */}
-                  {liveDerivedTotals.doorCount > 0 && (
+                  {displayTotals.doorCount > 0 && (
                     <div className="space-y-1">
                       <div className="text-xs font-medium text-green-600 dark:text-green-400">
-                        Doors ({liveDerivedTotals.doorCount}) — {liveDerivedTotals.doorAreaSf.toFixed(1)} SF
+                        Doors ({displayTotals.doorCount}) — {displayTotals.doorAreaSf.toFixed(1)} SF
                       </div>
                       <div className="grid grid-cols-2 gap-x-4 text-xs text-gray-600 dark:text-gray-400 pl-2">
                         <span>Perimeter:</span>
-                        <span className="text-right font-mono">{liveDerivedTotals.doorPerimeterLf.toFixed(1)} LF</span>
+                        <span className="text-right font-mono">{displayTotals.doorPerimeterLf.toFixed(1)} LF</span>
                         <span>Head:</span>
-                        <span className="text-right font-mono">{liveDerivedTotals.doorHeadLf.toFixed(1)} LF</span>
+                        <span className="text-right font-mono">{displayTotals.doorHeadLf.toFixed(1)} LF</span>
                         <span>Jamb:</span>
-                        <span className="text-right font-mono">{liveDerivedTotals.doorJambLf.toFixed(1)} LF</span>
+                        <span className="text-right font-mono">{displayTotals.doorJambLf.toFixed(1)} LF</span>
                       </div>
                     </div>
                   )}
 
                   {/* Garages */}
-                  {liveDerivedTotals.garageCount > 0 && (
+                  {displayTotals.garageCount > 0 && (
                     <div className="space-y-1">
                       <div className="text-xs font-medium text-orange-600 dark:text-orange-400">
-                        Garages ({liveDerivedTotals.garageCount}) — {liveDerivedTotals.garageAreaSf.toFixed(1)} SF
+                        Garages ({displayTotals.garageCount}) — {displayTotals.garageAreaSf.toFixed(1)} SF
                       </div>
                       <div className="grid grid-cols-2 gap-x-4 text-xs text-gray-600 dark:text-gray-400 pl-2">
                         <span>Perimeter:</span>
-                        <span className="text-right font-mono">{liveDerivedTotals.garagePerimeterLf.toFixed(1)} LF</span>
+                        <span className="text-right font-mono">{displayTotals.garagePerimeterLf.toFixed(1)} LF</span>
                         <span>Head:</span>
-                        <span className="text-right font-mono">{liveDerivedTotals.garageHeadLf.toFixed(1)} LF</span>
+                        <span className="text-right font-mono">{displayTotals.garageHeadLf.toFixed(1)} LF</span>
                         <span>Jamb:</span>
-                        <span className="text-right font-mono">{liveDerivedTotals.garageJambLf.toFixed(1)} LF</span>
+                        <span className="text-right font-mono">{displayTotals.garageJambLf.toFixed(1)} LF</span>
                       </div>
                     </div>
                   )}
 
                   {/* Opening Totals */}
-                  {(liveDerivedTotals.windowCount > 0 || liveDerivedTotals.doorCount > 0 || liveDerivedTotals.garageCount > 0) && (
+                  {(displayTotals.windowCount > 0 || displayTotals.doorCount > 0 || displayTotals.garageCount > 0) && (
                     <div className="border-t border-green-200 dark:border-green-800 pt-2 mt-2">
                       <div className="grid grid-cols-2 gap-x-4 text-xs">
                         <span className="text-gray-500 dark:text-gray-400">Total Opening Area:</span>
-                        <span className="text-right font-mono font-medium text-gray-700 dark:text-gray-300">{(liveDerivedTotals.windowAreaSf + liveDerivedTotals.doorAreaSf + liveDerivedTotals.garageAreaSf).toFixed(1)} SF</span>
+                        <span className="text-right font-mono font-medium text-gray-700 dark:text-gray-300">{(displayTotals.windowAreaSf + displayTotals.doorAreaSf + displayTotals.garageAreaSf).toFixed(1)} SF</span>
                         <span className="text-gray-500 dark:text-gray-400">Total Opening Perim:</span>
-                        <span className="text-right font-mono font-medium text-gray-700 dark:text-gray-300">{(liveDerivedTotals.windowPerimeterLf + liveDerivedTotals.doorPerimeterLf + liveDerivedTotals.garagePerimeterLf).toFixed(1)} LF</span>
+                        <span className="text-right font-mono font-medium text-gray-700 dark:text-gray-300">{(displayTotals.windowPerimeterLf + displayTotals.doorPerimeterLf + displayTotals.garagePerimeterLf).toFixed(1)} LF</span>
                       </div>
                     </div>
                   )}
                 </div>
 
                 {/* TRIM SUMMARY */}
-                {(liveDerivedTotals.windowHeadLf > 0 || liveDerivedTotals.doorHeadLf > 0 || liveDerivedTotals.garageHeadLf > 0) && (
+                {(displayTotals.windowHeadLf > 0 || displayTotals.doorHeadLf > 0 || displayTotals.garageHeadLf > 0) && (
                   <div className="bg-amber-50 dark:bg-amber-900/20 rounded-lg p-3 space-y-2">
                     <div className="text-xs font-semibold text-amber-700 dark:text-amber-300 uppercase">
                       Trim Summary
                     </div>
                     <div className="grid grid-cols-2 gap-x-4 text-xs text-gray-600 dark:text-gray-400">
                       <span>Total Head:</span>
-                      <span className="text-right font-mono">{(liveDerivedTotals.windowHeadLf + liveDerivedTotals.doorHeadLf + liveDerivedTotals.garageHeadLf).toFixed(1)} LF</span>
+                      <span className="text-right font-mono">{(displayTotals.windowHeadLf + displayTotals.doorHeadLf + displayTotals.garageHeadLf).toFixed(1)} LF</span>
                       <span>Total Jamb:</span>
-                      <span className="text-right font-mono">{(liveDerivedTotals.windowJambLf + liveDerivedTotals.doorJambLf + liveDerivedTotals.garageJambLf).toFixed(1)} LF</span>
+                      <span className="text-right font-mono">{(displayTotals.windowJambLf + displayTotals.doorJambLf + displayTotals.garageJambLf).toFixed(1)} LF</span>
                       <span>Total Sill:</span>
-                      <span className="text-right font-mono">{liveDerivedTotals.windowSillLf.toFixed(1)} LF</span>
+                      <span className="text-right font-mono">{displayTotals.windowSillLf.toFixed(1)} LF</span>
                     </div>
                     <div className="border-t border-amber-200 dark:border-amber-800 pt-2 mt-1">
                       <div className="grid grid-cols-2 gap-x-4 text-xs">
                         <span className="font-medium text-amber-700 dark:text-amber-300">Total Trim:</span>
-                        <span className="text-right font-mono font-medium text-amber-700 dark:text-amber-300">{(liveDerivedTotals.windowHeadLf + liveDerivedTotals.doorHeadLf + liveDerivedTotals.garageHeadLf + liveDerivedTotals.windowJambLf + liveDerivedTotals.doorJambLf + liveDerivedTotals.garageJambLf + liveDerivedTotals.windowSillLf).toFixed(1)} LF</span>
+                        <span className="text-right font-mono font-medium text-amber-700 dark:text-amber-300">{(displayTotals.windowHeadLf + displayTotals.doorHeadLf + displayTotals.garageHeadLf + displayTotals.windowJambLf + displayTotals.doorJambLf + displayTotals.garageJambLf + displayTotals.windowSillLf).toFixed(1)} LF</span>
                       </div>
                     </div>
                   </div>
                 )}
 
                 {/* Gables */}
-                {liveDerivedTotals.gableCount > 0 && (
+                {displayTotals.gableCount > 0 && (
                   <div className="bg-purple-50 dark:bg-purple-900/20 rounded-lg p-3 space-y-2">
                     <div className="text-xs font-medium text-purple-600 dark:text-purple-400">
-                      Gables ({liveDerivedTotals.gableCount}) — {liveDerivedTotals.gableAreaSf.toFixed(1)} SF
+                      Gables ({displayTotals.gableCount}) — {displayTotals.gableAreaSf.toFixed(1)} SF
                     </div>
                     <div className="grid grid-cols-2 gap-x-4 text-xs text-gray-600 dark:text-gray-400 pl-2">
                       <span>Rake:</span>
-                      <span className="text-right font-mono">{liveDerivedTotals.gableRakeLf.toFixed(1)} LF</span>
+                      <span className="text-right font-mono">{displayTotals.gableRakeLf.toFixed(1)} LF</span>
                     </div>
                   </div>
                 )}
 
                 {/* Corners */}
-                {(liveDerivedTotals.insideCornerCount > 0 || liveDerivedTotals.outsideCornerCount > 0) && (
+                {(displayTotals.insideCornerCount > 0 || displayTotals.outsideCornerCount > 0) && (
                   <div className="bg-gray-50 dark:bg-gray-800/50 rounded-lg p-3 space-y-2">
                     <div className="text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase">
                       Corners
                     </div>
                     <div className="grid grid-cols-2 gap-x-4 text-xs text-gray-600 dark:text-gray-400">
-                      {liveDerivedTotals.insideCornerCount > 0 && (
+                      {displayTotals.insideCornerCount > 0 && (
                         <>
-                          <span>Inside ({liveDerivedTotals.insideCornerCount}):</span>
-                          <span className="text-right font-mono">{liveDerivedTotals.insideCornerLf.toFixed(1)} LF</span>
+                          <span>Inside ({displayTotals.insideCornerCount}):</span>
+                          <span className="text-right font-mono">{displayTotals.insideCornerLf.toFixed(1)} LF</span>
                         </>
                       )}
-                      {liveDerivedTotals.outsideCornerCount > 0 && (
+                      {displayTotals.outsideCornerCount > 0 && (
                         <>
-                          <span>Outside ({liveDerivedTotals.outsideCornerCount}):</span>
-                          <span className="text-right font-mono">{liveDerivedTotals.outsideCornerLf.toFixed(1)} LF</span>
+                          <span>Outside ({displayTotals.outsideCornerCount}):</span>
+                          <span className="text-right font-mono">{displayTotals.outsideCornerLf.toFixed(1)} LF</span>
                         </>
                       )}
                     </div>
@@ -852,22 +608,22 @@ const DetectionSidebar = memo(function DetectionSidebar({
                 )}
 
                 {/* Soffit & Fascia */}
-                {(liveDerivedTotals.soffitAreaSf > 0 || liveDerivedTotals.fasciaLf > 0) && (
+                {(displayTotals.soffitAreaSf > 0 || displayTotals.fasciaLf > 0) && (
                   <div className="bg-teal-50 dark:bg-teal-900/20 rounded-lg p-3 space-y-2">
                     <div className="text-xs font-semibold text-teal-700 dark:text-teal-300 uppercase">
                       Soffit & Fascia
                     </div>
                     <div className="grid grid-cols-2 gap-x-4 text-xs text-gray-600 dark:text-gray-400">
-                      {liveDerivedTotals.soffitAreaSf > 0 && (
+                      {displayTotals.soffitAreaSf > 0 && (
                         <>
-                          <span>Soffit ({liveDerivedTotals.soffitCount}):</span>
-                          <span className="text-right font-mono">{liveDerivedTotals.soffitAreaSf.toFixed(1)} SF</span>
+                          <span>Soffit ({displayTotals.soffitCount}):</span>
+                          <span className="text-right font-mono">{displayTotals.soffitAreaSf.toFixed(1)} SF</span>
                         </>
                       )}
-                      {liveDerivedTotals.fasciaLf > 0 && (
+                      {displayTotals.fasciaLf > 0 && (
                         <>
-                          <span>Fascia ({liveDerivedTotals.fasciaCount}):</span>
-                          <span className="text-right font-mono">{liveDerivedTotals.fasciaLf.toFixed(1)} LF</span>
+                          <span>Fascia ({displayTotals.fasciaCount}):</span>
+                          <span className="text-right font-mono">{displayTotals.fasciaLf.toFixed(1)} LF</span>
                         </>
                       )}
                     </div>
@@ -875,34 +631,34 @@ const DetectionSidebar = memo(function DetectionSidebar({
                 )}
 
                 {/* Roofline */}
-                {(liveDerivedTotals.eavesLf > 0 || liveDerivedTotals.rakesLf > 0 || liveDerivedTotals.ridgeLf > 0 || liveDerivedTotals.valleyLf > 0) && (
+                {(displayTotals.eavesLf > 0 || displayTotals.rakesLf > 0 || displayTotals.ridgeLf > 0 || displayTotals.valleyLf > 0) && (
                   <div className="bg-slate-50 dark:bg-slate-800/50 rounded-lg p-3 space-y-2">
                     <div className="text-xs font-semibold text-slate-700 dark:text-slate-300 uppercase">
                       Roofline
                     </div>
                     <div className="grid grid-cols-2 gap-x-4 text-xs text-gray-600 dark:text-gray-400">
-                      {liveDerivedTotals.eavesLf > 0 && (
+                      {displayTotals.eavesLf > 0 && (
                         <>
-                          <span>Eaves ({liveDerivedTotals.eavesCount}):</span>
-                          <span className="text-right font-mono">{liveDerivedTotals.eavesLf.toFixed(1)} LF</span>
+                          <span>Eaves ({displayTotals.eavesCount}):</span>
+                          <span className="text-right font-mono">{displayTotals.eavesLf.toFixed(1)} LF</span>
                         </>
                       )}
-                      {liveDerivedTotals.rakesLf > 0 && (
+                      {displayTotals.rakesLf > 0 && (
                         <>
-                          <span>Rakes ({liveDerivedTotals.rakesCount}):</span>
-                          <span className="text-right font-mono">{liveDerivedTotals.rakesLf.toFixed(1)} LF</span>
+                          <span>Rakes ({displayTotals.rakesCount}):</span>
+                          <span className="text-right font-mono">{displayTotals.rakesLf.toFixed(1)} LF</span>
                         </>
                       )}
-                      {liveDerivedTotals.ridgeLf > 0 && (
+                      {displayTotals.ridgeLf > 0 && (
                         <>
-                          <span>Ridge ({liveDerivedTotals.ridgeCount}):</span>
-                          <span className="text-right font-mono">{liveDerivedTotals.ridgeLf.toFixed(1)} LF</span>
+                          <span>Ridge ({displayTotals.ridgeCount}):</span>
+                          <span className="text-right font-mono">{displayTotals.ridgeLf.toFixed(1)} LF</span>
                         </>
                       )}
-                      {liveDerivedTotals.valleyLf > 0 && (
+                      {displayTotals.valleyLf > 0 && (
                         <>
-                          <span>Valley ({liveDerivedTotals.valleyCount}):</span>
-                          <span className="text-right font-mono">{liveDerivedTotals.valleyLf.toFixed(1)} LF</span>
+                          <span>Valley ({displayTotals.valleyCount}):</span>
+                          <span className="text-right font-mono">{displayTotals.valleyLf.toFixed(1)} LF</span>
                         </>
                       )}
                     </div>
@@ -910,40 +666,61 @@ const DetectionSidebar = memo(function DetectionSidebar({
                 )}
 
                 {/* Gutters */}
-                {(liveDerivedTotals.gutterLf > 0 || liveDerivedTotals.downspoutCount > 0) && (
+                {(displayTotals.gutterLf > 0 || displayTotals.downspoutCount > 0) && (
                   <div className="bg-cyan-50 dark:bg-cyan-900/20 rounded-lg p-3 space-y-2">
                     <div className="text-xs font-semibold text-cyan-700 dark:text-cyan-300 uppercase">
                       Gutters
                     </div>
                     <div className="grid grid-cols-2 gap-x-4 text-xs text-gray-600 dark:text-gray-400">
-                      {liveDerivedTotals.gutterLf > 0 && (
+                      {displayTotals.gutterLf > 0 && (
                         <>
-                          <span>Gutters ({liveDerivedTotals.gutterCount}):</span>
-                          <span className="text-right font-mono">{liveDerivedTotals.gutterLf.toFixed(1)} LF</span>
+                          <span>Gutters ({displayTotals.gutterCount}):</span>
+                          <span className="text-right font-mono">{displayTotals.gutterLf.toFixed(1)} LF</span>
                         </>
                       )}
-                      {liveDerivedTotals.downspoutCount > 0 && (
+                      {displayTotals.downspoutCount > 0 && (
                         <>
                           <span>Downspouts:</span>
-                          <span className="text-right font-mono">{liveDerivedTotals.downspoutCount}</span>
+                          <span className="text-right font-mono">{displayTotals.downspoutCount}</span>
                         </>
                       )}
                     </div>
                   </div>
                 )}
 
+                {/* Counts (Point Markers) */}
+                {displayTotals.totalPointCount > 0 && (
+                  <div className="bg-pink-50 dark:bg-pink-900/20 rounded-lg p-3 space-y-2">
+                    <div className="text-xs font-semibold text-pink-700 dark:text-pink-300 uppercase">
+                      Counts ({displayTotals.totalPointCount})
+                    </div>
+                    <div className="grid grid-cols-2 gap-x-4 text-xs text-gray-600 dark:text-gray-400">
+                      {Object.entries(displayTotals.countsByClass)
+                        .sort(([, a], [, b]) => b - a) // Sort by count descending
+                        .map(([label, count]) => (
+                          <React.Fragment key={label}>
+                            <span className="capitalize">{label.replace(/_/g, ' ')}:</span>
+                            <span className="text-right font-mono font-medium">{count} EA</span>
+                          </React.Fragment>
+                        ))}
+                    </div>
+                  </div>
+                )}
+
                 {/* Show if no applicable detections */}
-                {liveDerivedTotals.buildingAreaSf === 0 &&
-                  liveDerivedTotals.windowCount === 0 &&
-                  liveDerivedTotals.doorCount === 0 &&
-                  liveDerivedTotals.garageCount === 0 &&
-                  liveDerivedTotals.gableCount === 0 && (
+                {displayTotals.buildingAreaSf === 0 &&
+                  displayTotals.windowCount === 0 &&
+                  displayTotals.doorCount === 0 &&
+                  displayTotals.garageCount === 0 &&
+                  displayTotals.gableCount === 0 &&
+                  displayTotals.totalPointCount === 0 && (
                     <div className="text-xs text-gray-500 dark:text-gray-400 text-center py-2">
-                      No detections on this page
+                      {totalsScope === 'current' ? 'No detections on this page' : 'No detections across all pages'}
                     </div>
                   )}
               </div>
-            )}
+              );
+            })()}
 
             {/* Show message if no scale is set */}
             {!liveDerivedTotals && currentPageId && (

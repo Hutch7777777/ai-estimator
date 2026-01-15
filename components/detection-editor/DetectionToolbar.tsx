@@ -11,7 +11,6 @@ import {
   Check,
   CheckCircle,
   X,
-  Camera,
   Undo2,
   Redo2,
   Save,
@@ -48,8 +47,6 @@ export interface DetectionToolbarProps {
   isApproving?: boolean;
   canApprove?: boolean; // False when liveDerivedTotals is null (no scale calibrated)
   isApproved?: boolean; // True after successful approval
-  onGenerateMarkup?: () => void;
-  isGeneratingMarkup?: boolean;
   // Local-first editing props
   hasUnsavedChanges?: boolean;
   canUndo?: boolean;
@@ -141,8 +138,6 @@ const DetectionToolbar = memo(function DetectionToolbar({
   isApproving = false,
   canApprove = true,
   isApproved = false,
-  onGenerateMarkup,
-  isGeneratingMarkup = false,
   // Local-first editing props
   hasUnsavedChanges = false,
   canUndo = false,
@@ -340,36 +335,6 @@ const DetectionToolbar = memo(function DetectionToolbar({
           </div>
         </div>
       </div>
-
-      {/* Generate Markup Button */}
-      {onGenerateMarkup && (
-        <button
-          type="button"
-          onClick={onGenerateMarkup}
-          disabled={isGeneratingMarkup}
-          className={`
-            flex items-center gap-2 px-4 py-2 rounded-md font-medium transition-colors
-            ${
-              isGeneratingMarkup
-                ? 'bg-gray-200 dark:bg-gray-700 text-gray-400 dark:text-gray-500 cursor-not-allowed'
-                : 'bg-purple-600 hover:bg-purple-700 text-white'
-            }
-          `}
-          title="Generate facade markup image with measurements"
-        >
-          {isGeneratingMarkup ? (
-            <>
-              <Loader2 className="w-4 h-4 animate-spin" />
-              <span>Generating...</span>
-            </>
-          ) : (
-            <>
-              <Camera className="w-4 h-4" />
-              <span>Generate Markup</span>
-            </>
-          )}
-        </button>
-      )}
 
       {/* Approve Button */}
       {onApprove && (

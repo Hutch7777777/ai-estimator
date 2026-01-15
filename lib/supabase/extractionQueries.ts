@@ -14,6 +14,25 @@ import type {
 } from '@/lib/types/extraction';
 
 // =============================================================================
+// Draft Detection Type (for extraction_detections_draft table)
+// =============================================================================
+
+interface DraftDetection extends Omit<ExtractionDetection, 'status'> {
+  is_deleted: boolean;
+  status?: DetectionStatus;
+}
+
+/**
+ * Maps a draft detection record to the standard ExtractionDetection format
+ */
+function mapDraftToDetection(draft: DraftDetection): ExtractionDetection {
+  return {
+    ...draft,
+    status: draft.is_deleted ? 'deleted' : (draft.status || 'auto'),
+  } as ExtractionDetection;
+}
+
+// =============================================================================
 // Direct Fetch API (bypasses Supabase client)
 // =============================================================================
 
@@ -144,6 +163,31 @@ export async function getPageDetections(
 ): Promise<ExtractionDetection[]> {
   const supabase = getClient();
 
+  // First, check if drafts exist for this page in extraction_detections_draft
+  let draftQuery = supabase
+    .from('extraction_detections_draft')
+    .select('*')
+    .eq('page_id', pageId)
+    .order('detection_index', { ascending: true });
+
+  if (!includeDeleted) {
+    draftQuery = draftQuery.eq('is_deleted', false);
+  }
+
+  const { data: drafts, error: draftError } = await draftQuery;
+
+  if (draftError) {
+    console.error('Error fetching draft detections:', draftError);
+  }
+
+  // If drafts exist, use them
+  if (drafts && drafts.length > 0) {
+    console.log(`[getPageDetections] Found ${drafts.length} drafts for page ${pageId}`);
+    return (drafts as unknown as DraftDetection[]).map(mapDraftToDetection);
+  }
+
+  // No drafts - fall back to original detections
+  console.log(`[getPageDetections] No drafts found for page ${pageId}, loading originals`);
   let query = supabase
     .from('extraction_detection_details')
     .select('*')
@@ -168,7 +212,23 @@ export async function getJobDetections(
   jobId: string,
   includeDeleted = false
 ): Promise<ExtractionDetection[]> {
-  console.log('[getJobDetections] Using direct fetch for job:', jobId);
+  console.log('[getJobDetections] Checking for drafts first for job:', jobId);
+
+  // First, check if drafts exist in extraction_detections_draft
+  const deletedFilter = includeDeleted ? '' : '&is_deleted=eq.false';
+  const drafts = await directFetch<DraftDetection[]>(
+    `extraction_detections_draft?job_id=eq.${jobId}&select=*${deletedFilter}`
+  );
+
+  // If drafts exist, use them (user has made edits)
+  if (drafts && drafts.length > 0) {
+    console.log(`[getJobDetections] Found ${drafts.length} drafts, using draft data`);
+    // Map draft fields to detection format (is_deleted -> status='deleted')
+    return drafts.map(mapDraftToDetection);
+  }
+
+  // No drafts found - fall back to original AI detections
+  console.log('[getJobDetections] No drafts found, loading original detections');
   const statusFilter = includeDeleted ? '' : '&status=neq.deleted';
   const data = await directFetch<ExtractionDetection[]>(
     `extraction_detection_details?job_id=eq.${jobId}&select=*${statusFilter}`
@@ -501,14 +561,15 @@ export function subscribeToPageDetections(
   const supabase = getClient();
   const { editingModeRef } = options || {};
 
+  // Subscribe to extraction_detections_draft table (where edits are saved)
   const channel = supabase
-    .channel(`page-detections-${pageId}`)
+    .channel(`page-detections-draft-${pageId}`)
     .on(
       'postgres_changes',
       {
         event: 'INSERT',
         schema: 'public',
-        table: 'extraction_detection_details',
+        table: 'extraction_detections_draft',
         filter: `page_id=eq.${pageId}`,
       },
       (payload) => {
@@ -518,7 +579,7 @@ export function subscribeToPageDetections(
           return;
         }
         if (callbacks.onInsert) {
-          callbacks.onInsert(payload.new as ExtractionDetection);
+          callbacks.onInsert(mapDraftToDetection(payload.new as DraftDetection));
         }
       }
     )
@@ -527,7 +588,7 @@ export function subscribeToPageDetections(
       {
         event: 'UPDATE',
         schema: 'public',
-        table: 'extraction_detection_details',
+        table: 'extraction_detections_draft',
         filter: `page_id=eq.${pageId}`,
       },
       (payload) => {
@@ -537,7 +598,7 @@ export function subscribeToPageDetections(
           return;
         }
         if (callbacks.onUpdate) {
-          callbacks.onUpdate(payload.new as ExtractionDetection);
+          callbacks.onUpdate(mapDraftToDetection(payload.new as DraftDetection));
         }
       }
     )
@@ -546,7 +607,7 @@ export function subscribeToPageDetections(
       {
         event: 'DELETE',
         schema: 'public',
-        table: 'extraction_detection_details',
+        table: 'extraction_detections_draft',
         filter: `page_id=eq.${pageId}`,
       },
       (payload) => {
@@ -556,13 +617,13 @@ export function subscribeToPageDetections(
           return;
         }
         if (callbacks.onDelete) {
-          callbacks.onDelete(payload.old as ExtractionDetection);
+          callbacks.onDelete(mapDraftToDetection(payload.old as DraftDetection));
         }
       }
     )
     .subscribe((status) => {
       if (status === 'SUBSCRIBED') {
-        console.log(`Subscribed to page detections: ${pageId}`);
+        console.log(`Subscribed to page detections (draft): ${pageId}`);
       }
     });
 

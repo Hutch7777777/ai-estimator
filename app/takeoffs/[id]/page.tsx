@@ -3,9 +3,11 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { ArrowLeft, Download, Loader2, AlertCircle, Home, FolderOpen, Wrench, Receipt } from 'lucide-react';
+import { ArrowLeft, Download, Loader2, AlertCircle, Home, FolderOpen, Wrench, Receipt, FileSpreadsheet, FileImage } from 'lucide-react';
+import JSZip from 'jszip';
+import { saveAs } from 'file-saver';
 import { Badge } from '@/components/ui/badge';
-import { exportTakeoffToExcel, TakeoffLineItem, TakeoffHeader, LaborItem, OverheadItem } from '@/lib/utils/exportTakeoffExcel';
+import { exportTakeoffToExcel, exportVendorTakeoff, TakeoffLineItem, TakeoffHeader, LaborItem, OverheadItem } from '@/lib/utils/exportTakeoffExcel';
 import { toast } from 'sonner';
 
 // =============================================================================
@@ -185,6 +187,8 @@ export default function TakeoffDetailsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [isDownloading, setIsDownloading] = useState(false);
+  const [isDownloadingVendor, setIsDownloadingVendor] = useState(false);
+  const [isDownloadingMarkup, setIsDownloadingMarkup] = useState(false);
 
   // Fetch takeoff data
   const fetchTakeoff = async () => {
@@ -250,6 +254,100 @@ export default function TakeoffDetailsPage() {
       toast.error('Failed to download Excel');
     } finally {
       setIsDownloading(false);
+    }
+  };
+
+  // Handle Vendor Takeoff download (materials only, no pricing)
+  const handleDownloadVendorTakeoff = async () => {
+    if (!data?.takeoff || !data?.line_items) return;
+
+    setIsDownloadingVendor(true);
+    try {
+      const filename = `${data.takeoff.client_name?.replace(/[^a-z0-9]/gi, '_') || data.takeoff.takeoff_name?.replace(/\s+/g, '_') || takeoffId.slice(0, 8)}_material_request_${new Date().toISOString().split('T')[0]}.xlsx`;
+      await exportVendorTakeoff(
+        {
+          takeoff: data.takeoff,
+          line_items: data.line_items,
+          labor_items: [],
+          overhead_items: [],
+        },
+        filename
+      );
+      toast.success('Vendor takeoff downloaded successfully');
+    } catch (err) {
+      console.error('Vendor takeoff export error:', err);
+      toast.error('Failed to download vendor takeoff');
+    } finally {
+      setIsDownloadingVendor(false);
+    }
+  };
+
+  // Handle Markup Plans download (elevation images with detection overlays)
+  const handleDownloadMarkupPlans = async () => {
+    if (!data?.takeoff?.project_id) {
+      toast.error('No project linked to this takeoff');
+      return;
+    }
+
+    setIsDownloadingMarkup(true);
+    try {
+      // Fetch extraction pages for this project
+      const response = await fetch(`/api/extraction-pages?project_id=${data.takeoff.project_id}`);
+      const result = await response.json();
+
+      if (!result.success || !result.pages?.length) {
+        toast.error('No markup images found for this project');
+        setIsDownloadingMarkup(false);
+        return;
+      }
+
+      const pages = result.pages as Array<{
+        id: string;
+        page_number: number;
+        elevation_name: string | null;
+        image_url: string;
+      }>;
+
+      // Create zip file with all elevation images
+      const zip = new JSZip();
+      const folder = zip.folder('markup_plans');
+
+      toast.info(`Downloading ${pages.length} elevation images...`);
+
+      // Download each image and add to zip
+      for (let i = 0; i < pages.length; i++) {
+        const page = pages[i];
+        try {
+          const imageResponse = await fetch(page.image_url);
+          if (!imageResponse.ok) {
+            console.error(`Failed to fetch image for page ${page.page_number}`);
+            continue;
+          }
+          const blob = await imageResponse.blob();
+
+          // Create filename from elevation name or page number
+          const elevationLabel = page.elevation_name
+            ? page.elevation_name.replace(/[^a-z0-9]/gi, '_')
+            : `page_${page.page_number}`;
+          const filename = `elevation_${String(i + 1).padStart(2, '0')}_${elevationLabel}.png`;
+
+          folder?.file(filename, blob);
+        } catch (imgErr) {
+          console.error(`Error downloading image for page ${page.page_number}:`, imgErr);
+        }
+      }
+
+      // Generate and download the zip
+      const zipBlob = await zip.generateAsync({ type: 'blob' });
+      const zipFilename = `${data.takeoff.client_name?.replace(/[^a-z0-9]/gi, '_') || data.takeoff.takeoff_name?.replace(/\s+/g, '_') || 'project'}_markup_plans_${new Date().toISOString().split('T')[0]}.zip`;
+
+      saveAs(zipBlob, zipFilename);
+      toast.success('Markup plans downloaded successfully');
+    } catch (err) {
+      console.error('Markup plans download error:', err);
+      toast.error('Failed to download markup plans');
+    } finally {
+      setIsDownloadingMarkup(false);
     }
   };
 
@@ -323,6 +421,34 @@ export default function TakeoffDetailsPage() {
 
           {/* Actions */}
           <div className="flex items-center gap-3">
+            {takeoff.project_id && (
+              <button
+                onClick={handleDownloadMarkupPlans}
+                disabled={isDownloadingMarkup}
+                title="Download elevation drawings with detection overlays (ZIP)"
+                className="flex items-center gap-2 px-4 py-2 bg-cyan-600 hover:bg-cyan-700 disabled:bg-gray-400 text-white rounded-md text-sm font-medium transition-colors"
+              >
+                {isDownloadingMarkup ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : (
+                  <FileImage className="w-4 h-4" />
+                )}
+                Markup Plans
+              </button>
+            )}
+            <button
+              onClick={handleDownloadVendorTakeoff}
+              disabled={isDownloadingVendor}
+              title="Export materials list for vendor quotes (no pricing)"
+              className="flex items-center gap-2 px-4 py-2 bg-amber-600 hover:bg-amber-700 disabled:bg-gray-400 text-white rounded-md text-sm font-medium transition-colors"
+            >
+              {isDownloadingVendor ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : (
+                <FileSpreadsheet className="w-4 h-4" />
+              )}
+              Vendor Takeoff
+            </button>
             <button
               onClick={handleDownloadExcel}
               disabled={isDownloading}
@@ -680,18 +806,48 @@ export default function TakeoffDetailsPage() {
               Back to Dashboard
             </Link>
           </div>
-          <button
-            onClick={handleDownloadExcel}
-            disabled={isDownloading}
-            className="flex items-center gap-2 px-4 py-2 bg-green-600 hover:bg-green-700 disabled:bg-gray-400 text-white rounded-md text-sm font-medium transition-colors"
-          >
-            {isDownloading ? (
-              <Loader2 className="w-4 h-4 animate-spin" />
-            ) : (
-              <Download className="w-4 h-4" />
+          <div className="flex items-center gap-3">
+            {takeoff.project_id && (
+              <button
+                onClick={handleDownloadMarkupPlans}
+                disabled={isDownloadingMarkup}
+                title="Download elevation drawings with detection overlays (ZIP)"
+                className="flex items-center gap-2 px-4 py-2 bg-cyan-600 hover:bg-cyan-700 disabled:bg-gray-400 text-white rounded-md text-sm font-medium transition-colors"
+              >
+                {isDownloadingMarkup ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : (
+                  <FileImage className="w-4 h-4" />
+                )}
+                Markup Plans
+              </button>
             )}
-            Download Excel
-          </button>
+            <button
+              onClick={handleDownloadVendorTakeoff}
+              disabled={isDownloadingVendor}
+              title="Export materials list for vendor quotes (no pricing)"
+              className="flex items-center gap-2 px-4 py-2 bg-amber-600 hover:bg-amber-700 disabled:bg-gray-400 text-white rounded-md text-sm font-medium transition-colors"
+            >
+              {isDownloadingVendor ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : (
+                <FileSpreadsheet className="w-4 h-4" />
+              )}
+              Vendor Takeoff
+            </button>
+            <button
+              onClick={handleDownloadExcel}
+              disabled={isDownloading}
+              className="flex items-center gap-2 px-4 py-2 bg-green-600 hover:bg-green-700 disabled:bg-gray-400 text-white rounded-md text-sm font-medium transition-colors"
+            >
+              {isDownloading ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : (
+                <Download className="w-4 h-4" />
+              )}
+              Download Excel
+            </button>
+          </div>
         </div>
       </div>
     </div>

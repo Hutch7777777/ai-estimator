@@ -93,6 +93,49 @@ export type ResizeHandle = 'nw' | 'n' | 'ne' | 'w' | 'e' | 'sw' | 's' | 'se';
 export type MarkupType = 'polygon' | 'line' | 'point';
 
 // =============================================================================
+// Count Classes (for Point Tool dropdown)
+// =============================================================================
+
+export type CountClass =
+  | 'corbel'
+  | 'gable_vent'
+  | 'roof_vent'
+  | 'outlet'
+  | 'hose_bib'
+  | 'downspout'
+  | 'light_fixture'
+  | 'louver'
+  | 'address_block'
+  | 'decorative_bracket'
+  | 'vent'
+  | 'flashing'
+  | 'shutter'
+  | 'post'
+  | 'column'
+  | 'bracket'
+  | 'other';
+
+export const COUNT_CLASSES: { value: CountClass; label: string }[] = [
+  { value: 'corbel', label: 'Corbel' },
+  { value: 'gable_vent', label: 'Gable Vent' },
+  { value: 'roof_vent', label: 'Roof Vent' },
+  { value: 'outlet', label: 'Outlet' },
+  { value: 'hose_bib', label: 'Hose Bib' },
+  { value: 'downspout', label: 'Downspout' },
+  { value: 'light_fixture', label: 'Light Fixture' },
+  { value: 'louver', label: 'Louver' },
+  { value: 'address_block', label: 'Address Block' },
+  { value: 'decorative_bracket', label: 'Decorative Bracket' },
+  { value: 'vent', label: 'Vent' },
+  { value: 'flashing', label: 'Flashing' },
+  { value: 'shutter', label: 'Shutter' },
+  { value: 'post', label: 'Post' },
+  { value: 'column', label: 'Column' },
+  { value: 'bracket', label: 'Bracket' },
+  { value: 'other', label: 'Other' },
+];
+
+// =============================================================================
 // Database Entity Interfaces
 // =============================================================================
 
@@ -583,6 +626,9 @@ export interface LiveDerivedTotals {
   downspoutCount: number;
   // SIDING (net area = building - openings)
   sidingNetSf: number;
+  // COUNTS (point markers grouped by class)
+  countsByClass: Record<string, number>;
+  totalPointCount: number;
 }
 
 // =============================================================================
