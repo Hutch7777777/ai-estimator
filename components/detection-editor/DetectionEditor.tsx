@@ -1,7 +1,8 @@
 'use client';
 
 import React, { useState, useCallback, useEffect, useMemo, useRef } from 'react';
-import { Loader2, AlertCircle, RefreshCw, Eye, EyeOff, X, Layers } from 'lucide-react';
+import { useRouter } from 'next/navigation';
+import { Loader2, AlertCircle, RefreshCw, Eye, EyeOff, X, Layers, CheckCircle, DollarSign, FileText, Download, ExternalLink } from 'lucide-react';
 import { toast } from 'sonner';
 import {
   useExtractionData,
@@ -14,6 +15,13 @@ import {
   createOptimisticReclassify,
 } from '@/lib/hooks';
 import { calculateRealWorldMeasurements } from '@/lib/utils/coordinates';
+import {
+  getClassDerivedMeasurements,
+  rectToPolygonPoints,
+  calculateBuildingMeasurements,
+  calculateLineMeasurements,
+  calculateAreaMeasurements,
+} from '@/lib/utils/polygonUtils';
 import type {
   ViewTransform,
   ToolMode,
@@ -23,6 +31,9 @@ import type {
   ExtractionDetection,
   PolygonPoint,
   MarkupType,
+  LiveDerivedTotals,
+  ApprovePayload,
+  ApprovalResult,
 } from '@/lib/types/extraction';
 import DetectionToolbar from './DetectionToolbar';
 import MarkupToolbar from './MarkupToolbar';
@@ -30,6 +41,7 @@ import KonvaDetectionCanvas, { type CalibrationData } from './KonvaDetectionCanv
 import type { PolygonUpdatePayload } from './KonvaDetectionPolygon';
 import DetectionSidebar from './DetectionSidebar';
 import CalibrationModal from './CalibrationModal';
+import { exportTakeoffToExcel, type TakeoffData } from '@/lib/utils/exportTakeoffExcel';
 
 // =============================================================================
 // Types
@@ -124,6 +136,8 @@ export default function DetectionEditor({
   onComplete,
   onError,
 }: DetectionEditorProps) {
+  const router = useRouter();
+
   // ============================================================================
   // Data Hooks
   // ============================================================================
@@ -136,8 +150,6 @@ export default function DetectionEditor({
     setCurrentPageId,
     currentPageDetections,
     elevationCalcs,
-    currentElevationCalcs,
-    jobTotals,
     loading,
     error: dataError,
     reviewProgress,
@@ -191,13 +203,29 @@ export default function DetectionEditor({
   const [selectedDetectionId, setSelectedDetectionId] = useState<string | null>(null);
   const [hoveredId, setHoveredId] = useState<string | null>(null);
   const [toolMode, setToolMode] = useState<ToolMode>('select');
-  const [createClass, setCreateClass] = useState<DetectionClass>('window');
+  const [createClass, setCreateClass] = useState<DetectionClass>('siding');
+  const [lineClass, setLineClass] = useState<DetectionClass>('eave');
+  const [pointClass, setPointClass] = useState<DetectionClass>('vent');
   const [transform, setTransform] = useState<ViewTransform>(DEFAULT_TRANSFORM);
   const [showDeleted, setShowDeleted] = useState(false);
   const [showDimensions, setShowDimensions] = useState(true);
   const [showArea, setShowArea] = useState(true);
   const [isApproving, setIsApproving] = useState(false);
   const [isGeneratingMarkup, setIsGeneratingMarkup] = useState(false);
+  const [approvalResult, setApprovalResult] = useState<ApprovalResult | null>(null);
+  const [showApprovalResults, setShowApprovalResults] = useState(false);
+  const [takeoffDetails, setTakeoffDetails] = useState<TakeoffData | null>(null);
+  const [isLoadingDetails, setIsLoadingDetails] = useState(false);
+
+  // Debug: Log render state for approval modal
+  console.log('[DetectionEditor Render]', {
+    showApprovalResults,
+    hasApprovalResult: !!approvalResult,
+    approvalResultTakeoffId: approvalResult?.takeoff_id,
+    hasTakeoffDetails: !!takeoffDetails,
+    takeoffDetailsLineItems: takeoffDetails?.line_items?.length,
+    isLoadingDetails,
+  });
 
   // Canvas container size tracking for Konva
   const canvasContainerRef = useRef<HTMLDivElement>(null);
@@ -590,8 +618,21 @@ export default function DetectionEditor({
       real_height_ft?: number;
       markup_type?: MarkupType;
     }) => {
+      // For point detections (count markers), use zero measurements
+      // Points don't have area or perimeter - they're just counted
+      const isPointDetection = newCoords.markup_type === 'point';
+
       // Use pre-calculated measurements if provided (polygon), otherwise calculate from bounding box
-      const measurements = newCoords.area_sf !== undefined
+      const measurements = isPointDetection
+        ? {
+            area_sf: 0,
+            perimeter_lf: 0,
+            real_width_ft: 0,
+            real_height_ft: 0,
+            real_width_in: 0,
+            real_height_in: 0,
+          }
+        : newCoords.area_sf !== undefined
         ? {
             area_sf: newCoords.area_sf,
             perimeter_lf: newCoords.perimeter_lf!,
@@ -641,7 +682,13 @@ export default function DetectionEditor({
       addDetectionLocally(newDetection);
       setSelectedDetectionId(tempId);
       setSelectedIds(new Set([tempId]));
-      setToolMode('select');
+
+      // For point/count mode, stay in point mode so user can keep placing markers
+      // For polygon/line modes, switch back to select mode after creation
+      if (newCoords.markup_type !== 'point') {
+        setToolMode('select');
+      }
+      // Point mode: stay in point mode, user can press Escape to exit
     },
     [job?.id, currentPage?.id, currentPage?.scale_ratio, currentPageDetections.length, addDetectionLocally]
   );
@@ -1061,9 +1108,15 @@ export default function DetectionEditor({
         return;
       }
 
-      // Clear selection
+      // Escape key: exit point/line mode, or clear selection
       if (key === 'escape') {
         e.preventDefault();
+        // If in point or line mode, exit to select mode
+        if (toolMode === 'point' || toolMode === 'line') {
+          setToolMode('select');
+          return;
+        }
+        // Otherwise, clear selection
         setSelectedIds(new Set());
         return;
       }
@@ -1100,54 +1153,7 @@ export default function DetectionEditor({
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [selectedIds, canUndo, canRedo, undo, redo, hasUnsavedChanges, isValidating, handleValidate, handleVerifySelected, handleDeleteSelected, handleZoomIn, handleZoomOut, handleZoomReset]);
-
-  // ============================================================================
-  // Approval Handler
-  // ============================================================================
-
-  const handleApprove = useCallback(async () => {
-    if (!jobId) return;
-
-    setIsApproving(true);
-
-    try {
-      const webhookUrl =
-        process.env.NEXT_PUBLIC_N8N_WEBHOOK_URL ||
-        'https://n8n-production-293e.up.railway.app';
-      const response = await fetch(`${webhookUrl}/webhook/approve-extraction`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          job_id: jobId,
-          project_id: projectId,
-        }),
-      });
-
-      if (!response.ok) {
-        throw new Error(`Approval failed: ${response.statusText}`);
-      }
-
-      const data = await response.json();
-
-      if (!data.success) {
-        throw new Error(data.error || 'Approval failed');
-      }
-
-      // Refresh data and call completion callback
-      await refresh();
-      onComplete?.();
-    } catch (err) {
-      const error = err instanceof Error ? err : new Error('Approval failed');
-      onError?.(error);
-    } finally {
-      if (isMountedRef.current) {
-        setIsApproving(false);
-      }
-    }
-  }, [jobId, projectId, refresh, onComplete, onError]);
+  }, [selectedIds, canUndo, canRedo, undo, redo, hasUnsavedChanges, isValidating, handleValidate, handleVerifySelected, handleDeleteSelected, handleZoomIn, handleZoomOut, handleZoomReset, toolMode]);
 
   // ============================================================================
   // Generate Facade Markup Handler
@@ -1250,6 +1256,609 @@ export default function DetectionEditor({
     return currentPageDetections.filter((d) => ids.includes(d.id));
   }, [selectedIds, selectedDetectionId, currentPageDetections]);
 
+  // ============================================================================
+  // Live Derived Totals (for Approve & Calculate)
+  // ============================================================================
+
+  // Calculate live derived measurements from current page detections (HOVER-style)
+  const liveDerivedTotals = useMemo((): LiveDerivedTotals | null => {
+    if (!currentPage?.scale_ratio || currentPage.scale_ratio <= 0) {
+      return null;
+    }
+
+    const scaleRatio = currentPage.scale_ratio;
+    // Filter out roof detections - they belong on roof plans, not elevations
+    const pageDetections = currentPageDetections.filter(
+      (d) => d.status !== 'deleted' && d.class !== 'roof'
+    );
+
+    const totals: LiveDerivedTotals = {
+      // FACADE (building/exterior wall)
+      buildingCount: 0,
+      buildingAreaSf: 0,
+      buildingPerimeterLf: 0,
+      buildingLevelStarterLf: 0,
+      // WINDOWS
+      windowCount: 0,
+      windowAreaSf: 0,
+      windowPerimeterLf: 0,
+      windowHeadLf: 0,
+      windowJambLf: 0,
+      windowSillLf: 0,
+      // DOORS
+      doorCount: 0,
+      doorAreaSf: 0,
+      doorPerimeterLf: 0,
+      doorHeadLf: 0,
+      doorJambLf: 0,
+      // GARAGES
+      garageCount: 0,
+      garageAreaSf: 0,
+      garagePerimeterLf: 0,
+      garageHeadLf: 0,
+      garageJambLf: 0,
+      // GABLES
+      gableCount: 0,
+      gableAreaSf: 0,
+      gableRakeLf: 0,
+      // CORNERS
+      insideCornerCount: 0,
+      insideCornerLf: 0,
+      outsideCornerCount: 0,
+      outsideCornerLf: 0,
+      // ROOFLINE (line-type measurements)
+      eavesCount: 0,
+      eavesLf: 0,
+      rakesCount: 0,
+      rakesLf: 0,
+      ridgeCount: 0,
+      ridgeLf: 0,
+      valleyCount: 0,
+      valleyLf: 0,
+      // SOFFIT (area)
+      soffitCount: 0,
+      soffitAreaSf: 0,
+      // FASCIA (line)
+      fasciaCount: 0,
+      fasciaLf: 0,
+      // GUTTERS
+      gutterCount: 0,
+      gutterLf: 0,
+      downspoutCount: 0,
+      // SIDING (net area = building - openings)
+      sidingNetSf: 0,
+    };
+
+    // Track total openings for net siding calculation
+    let totalOpeningsSf = 0;
+
+    // Collect exterior wall polygons for auto-calculating corners
+    const exteriorWallPolygons: { points: PolygonPoint[], minX: number, maxX: number }[] = [];
+
+    for (const detection of pageDetections) {
+      const cls = detection.class as string;
+
+      // Get polygon points (use existing or convert from bounding box)
+      const points = detection.polygon_points && detection.polygon_points.length > 0
+        ? detection.polygon_points
+        : rectToPolygonPoints({
+            pixel_x: detection.pixel_x,
+            pixel_y: detection.pixel_y,
+            pixel_width: detection.pixel_width,
+            pixel_height: detection.pixel_height,
+          });
+
+      // Building/Facade class (handle both underscore and space versions)
+      if (cls === 'building' || cls === 'exterior_wall' || cls === 'exterior wall') {
+        const buildingMeasurements = calculateBuildingMeasurements(points, scaleRatio);
+        totals.buildingCount++;
+        totals.buildingAreaSf += buildingMeasurements.area_sf;
+        totals.buildingPerimeterLf += buildingMeasurements.perimeter_lf;
+        totals.buildingLevelStarterLf += buildingMeasurements.level_starter_lf;
+
+        // Collect for corner calculation
+        const xs = points.map(p => p.x);
+        exteriorWallPolygons.push({
+          points,
+          minX: Math.min(...xs),
+          maxX: Math.max(...xs),
+        });
+        continue;
+      }
+
+      // Window/Door/Garage/Gable derived measurements
+      const derived = getClassDerivedMeasurements(cls, points, scaleRatio);
+      const areaMeasurement = calculateAreaMeasurements(points, scaleRatio);
+
+      if (cls === 'window' && derived && 'head_lf' in derived) {
+        totals.windowCount++;
+        totals.windowAreaSf += areaMeasurement.area_sf;
+        totals.windowPerimeterLf += areaMeasurement.perimeter_lf;
+        totals.windowHeadLf += derived.head_lf;
+        totals.windowJambLf += derived.jamb_lf;
+        totals.windowSillLf += (derived as { sill_lf?: number }).sill_lf || 0;
+        totalOpeningsSf += areaMeasurement.area_sf;
+      } else if (cls === 'door' && derived && 'head_lf' in derived) {
+        totals.doorCount++;
+        totals.doorAreaSf += areaMeasurement.area_sf;
+        totals.doorPerimeterLf += areaMeasurement.perimeter_lf;
+        totals.doorHeadLf += derived.head_lf;
+        totals.doorJambLf += derived.jamb_lf;
+        totalOpeningsSf += areaMeasurement.area_sf;
+      } else if (cls === 'garage' && derived && 'head_lf' in derived) {
+        totals.garageCount++;
+        totals.garageAreaSf += areaMeasurement.area_sf;
+        totals.garagePerimeterLf += areaMeasurement.perimeter_lf;
+        totals.garageHeadLf += derived.head_lf;
+        totals.garageJambLf += derived.jamb_lf;
+        totalOpeningsSf += areaMeasurement.area_sf;
+      } else if (cls === 'gable' && derived && 'rake_lf' in derived) {
+        totals.gableCount++;
+        totals.gableAreaSf += areaMeasurement.area_sf;
+        totals.gableRakeLf += derived.rake_lf;
+      } else if (cls === 'soffit') {
+        totals.soffitCount++;
+        totals.soffitAreaSf += areaMeasurement.area_sf;
+      } else if (cls === 'inside_corner' || cls === 'inside corner') {
+        const lineMeasurement = calculateLineMeasurements(points, scaleRatio);
+        totals.insideCornerCount++;
+        totals.insideCornerLf += lineMeasurement.length_lf;
+      } else if (cls === 'outside_corner' || cls === 'outside corner') {
+        const lineMeasurement = calculateLineMeasurements(points, scaleRatio);
+        totals.outsideCornerCount++;
+        totals.outsideCornerLf += lineMeasurement.length_lf;
+      } else if (cls === 'fascia') {
+        const lineMeasurement = calculateLineMeasurements(points, scaleRatio);
+        totals.fasciaCount++;
+        totals.fasciaLf += lineMeasurement.length_lf;
+      } else if (cls === 'gutter') {
+        const lineMeasurement = calculateLineMeasurements(points, scaleRatio);
+        totals.gutterCount++;
+        totals.gutterLf += lineMeasurement.length_lf;
+      } else if (cls === 'downspout') {
+        totals.downspoutCount++;
+      }
+
+      // Line-type detections (roof elements)
+      if (cls === 'eave' || cls === 'roof_eave') {
+        const lineMeasurement = calculateLineMeasurements(points, scaleRatio);
+        totals.eavesCount++;
+        totals.eavesLf += lineMeasurement.length_lf;
+      } else if (cls === 'rake' || cls === 'roof_rake') {
+        const lineMeasurement = calculateLineMeasurements(points, scaleRatio);
+        totals.rakesCount++;
+        totals.rakesLf += lineMeasurement.length_lf;
+      } else if (cls === 'ridge' || cls === 'roof_ridge') {
+        const lineMeasurement = calculateLineMeasurements(points, scaleRatio);
+        totals.ridgeCount++;
+        totals.ridgeLf += lineMeasurement.length_lf;
+      } else if (cls === 'valley' || cls === 'roof_valley') {
+        const lineMeasurement = calculateLineMeasurements(points, scaleRatio);
+        totals.valleyCount++;
+        totals.valleyLf += lineMeasurement.length_lf;
+      }
+    }
+
+    // Calculate net siding (building area minus openings)
+    totals.sidingNetSf = Math.max(0, totals.buildingAreaSf - totalOpeningsSf);
+
+    // Calculate corners from exterior wall polygons
+    if (exteriorWallPolygons.length > 0 && scaleRatio > 0) {
+      // Calculate center Y for each wall to group by row
+      const wallsWithCenterY = exteriorWallPolygons.map((wall) => {
+        const ys = wall.points.map(p => p.y);
+        const centerY = (Math.min(...ys) + Math.max(...ys)) / 2;
+        return { ...wall, centerY };
+      });
+
+      // Sort by centerY
+      wallsWithCenterY.sort((a, b) => a.centerY - b.centerY);
+
+      // Group walls into rows (walls within ~50 pixels of each other vertically are same row)
+      const rowTolerance = 50;
+      const rows: typeof wallsWithCenterY[] = [];
+      let currentRow: typeof wallsWithCenterY = [];
+
+      wallsWithCenterY.forEach((wall) => {
+        if (currentRow.length === 0) {
+          currentRow.push(wall);
+        } else {
+          const lastWallY = currentRow[currentRow.length - 1].centerY;
+          if (Math.abs(wall.centerY - lastWallY) < rowTolerance) {
+            currentRow.push(wall);
+          } else {
+            rows.push(currentRow);
+            currentRow = [wall];
+          }
+        }
+      });
+      if (currentRow.length > 0) {
+        rows.push(currentRow);
+      }
+
+      // For each row, find leftmost and rightmost walls for outside corners
+      rows.forEach((row) => {
+        if (row.length === 0) return;
+
+        const leftmostWall = row.reduce((prev, curr) =>
+          curr.minX < prev.minX ? curr : prev
+        );
+        const rightmostWall = row.reduce((prev, curr) =>
+          curr.maxX > prev.maxX ? curr : prev
+        );
+
+        // Get left edge of leftmost wall (outside corner)
+        const leftPoints = [...leftmostWall.points].sort((a, b) => a.x - b.x).slice(0, 2);
+        if (leftPoints.length === 2) {
+          const leftEdgeHeightPixels = Math.abs(leftPoints[1].y - leftPoints[0].y);
+          const leftEdgeHeightLf = leftEdgeHeightPixels / scaleRatio;
+          totals.outsideCornerLf += leftEdgeHeightLf;
+          totals.outsideCornerCount += 1;
+        }
+
+        // Get right edge of rightmost wall (outside corner)
+        if (rightmostWall !== leftmostWall) {
+          const rightPoints = [...rightmostWall.points].sort((a, b) => b.x - a.x).slice(0, 2);
+          if (rightPoints.length === 2) {
+            const rightEdgeHeightPixels = Math.abs(rightPoints[1].y - rightPoints[0].y);
+            const rightEdgeHeightLf = rightEdgeHeightPixels / scaleRatio;
+            totals.outsideCornerLf += rightEdgeHeightLf;
+            totals.outsideCornerCount += 1;
+          }
+        } else {
+          // Only one wall in this row - it has both left and right outside corners
+          const rightPoints = [...leftmostWall.points].sort((a, b) => b.x - a.x).slice(0, 2);
+          if (rightPoints.length === 2) {
+            const rightEdgeHeightPixels = Math.abs(rightPoints[1].y - rightPoints[0].y);
+            const rightEdgeHeightLf = rightEdgeHeightPixels / scaleRatio;
+            totals.outsideCornerLf += rightEdgeHeightLf;
+            totals.outsideCornerCount += 1;
+          }
+        }
+
+        // Calculate inside corners - edges between walls in the same row (gaps)
+        if (row.length > 1) {
+          const sortedRow = [...row].sort((a, b) => a.minX - b.minX);
+          for (let i = 0; i < sortedRow.length - 1; i++) {
+            const leftWall = sortedRow[i];
+            const rightWall = sortedRow[i + 1];
+            const gapThreshold = 10;
+            if (rightWall.minX > leftWall.maxX + gapThreshold) {
+              // Left wall's right edge is an inside corner
+              const leftWallRightPoints = [...leftWall.points].sort((a, b) => b.x - a.x).slice(0, 2);
+              if (leftWallRightPoints.length === 2) {
+                const edgeHeightPixels = Math.abs(leftWallRightPoints[1].y - leftWallRightPoints[0].y);
+                const edgeHeightLf = edgeHeightPixels / scaleRatio;
+                totals.insideCornerLf += edgeHeightLf;
+                totals.insideCornerCount += 1;
+              }
+
+              // Right wall's left edge is an inside corner
+              const rightWallLeftPoints = [...rightWall.points].sort((a, b) => a.x - b.x).slice(0, 2);
+              if (rightWallLeftPoints.length === 2) {
+                const edgeHeightPixels = Math.abs(rightWallLeftPoints[1].y - rightWallLeftPoints[0].y);
+                const edgeHeightLf = edgeHeightPixels / scaleRatio;
+                totals.insideCornerLf += edgeHeightLf;
+                totals.insideCornerCount += 1;
+              }
+            }
+          }
+        }
+      });
+    }
+
+    return totals;
+  }, [currentPage, currentPageDetections]);
+
+  // ============================================================================
+  // Approval Handler - Build Payload & Call Webhook
+  // ============================================================================
+
+  // Helper function to build the ApprovePayload from liveDerivedTotals
+  const buildApprovePayload = useCallback(
+    (totals: LiveDerivedTotals): ApprovePayload => {
+      // =========================================================================
+      // DYNAMIC TRADE DETECTION
+      // Determine which trades to include based on detection classes with assigned materials
+      // Siding is always included (core business)
+      // Other trades only if user has assigned materials to relevant detection classes
+      // Roofing is EXCLUDED - feature disabled due to page_id bug
+      // =========================================================================
+      const trades = new Set<string>(['siding']);
+
+      // Map detection classes to trades
+      const CLASS_TO_TRADE: Record<string, string> = {
+        // Siding-related classes
+        siding: 'siding',
+        door: 'siding',
+        garage: 'siding',
+        gable: 'siding',
+        trim: 'siding',
+        fascia: 'siding',
+        eave: 'siding',
+        rake: 'siding',
+        soffit: 'siding',
+        corbel: 'siding',
+        belly_band: 'siding',
+        corner_inside: 'siding',
+        corner_outside: 'siding',
+        shutter: 'siding',
+        post: 'siding',
+        column: 'siding',
+        bracket: 'siding',
+        // Windows trade
+        window: 'windows',
+        // Gutters trade
+        gutter: 'gutters',
+        // Roofing - DISABLED
+        // roof: 'roofing',
+        // ridge: 'roofing',
+      };
+
+      // Check all detections with assigned materials to determine additional trades
+      const allDetections = getAllDetections();
+      const detectionsWithMaterials = allDetections.filter(
+        (d) => d.assigned_material_id && d.status !== 'deleted'
+      );
+
+      detectionsWithMaterials.forEach((detection) => {
+        const trade = CLASS_TO_TRADE[detection.class];
+        if (trade && trade !== 'siding') {
+          // Only add supported trades (roofing excluded - feature disabled)
+          if (['windows', 'gutters'].includes(trade)) {
+            trades.add(trade);
+          }
+        }
+      });
+
+      const selectedTrades = Array.from(trades);
+
+      // Log trade detection for debugging
+      const materialsByClass = detectionsWithMaterials.reduce((acc, d) => {
+        acc[d.class] = (acc[d.class] || 0) + 1;
+        return acc;
+      }, {} as Record<string, number>);
+
+      console.log('[Approve] Trade detection:', {
+        totalDetections: allDetections.length,
+        detectionsWithMaterials: detectionsWithMaterials.length,
+        materialsByClass,
+        selectedTrades,
+      });
+
+      return {
+        job_id: jobId,
+        project_id: projectId,
+        project_name: job?.project_name || 'Untitled Project',
+        // client_name and address are fetched by n8n from the project record
+        selected_trades: selectedTrades,
+
+        facade: {
+          gross_area_sf: totals.buildingAreaSf,
+          net_siding_sf: totals.sidingNetSf,
+          perimeter_lf: totals.buildingPerimeterLf,
+          level_starter_lf: totals.buildingLevelStarterLf,
+        },
+
+        windows: {
+          count: totals.windowCount,
+          area_sf: totals.windowAreaSf,
+          perimeter_lf: totals.windowPerimeterLf,
+          head_lf: totals.windowHeadLf,
+          jamb_lf: totals.windowJambLf,
+          sill_lf: totals.windowSillLf,
+        },
+
+        doors: {
+          count: totals.doorCount,
+          area_sf: totals.doorAreaSf,
+          perimeter_lf: totals.doorPerimeterLf,
+          head_lf: totals.doorHeadLf,
+          jamb_lf: totals.doorJambLf,
+        },
+
+        garages: {
+          count: totals.garageCount,
+          area_sf: totals.garageAreaSf,
+          perimeter_lf: totals.garagePerimeterLf,
+          head_lf: totals.garageHeadLf,
+          jamb_lf: totals.garageJambLf,
+        },
+
+        trim: {
+          total_head_lf:
+            totals.windowHeadLf + totals.doorHeadLf + totals.garageHeadLf,
+          total_jamb_lf:
+            totals.windowJambLf + totals.doorJambLf + totals.garageJambLf,
+          total_sill_lf: totals.windowSillLf,
+          total_trim_lf:
+            totals.windowHeadLf +
+            totals.doorHeadLf +
+            totals.garageHeadLf +
+            totals.windowJambLf +
+            totals.doorJambLf +
+            totals.garageJambLf +
+            totals.windowSillLf,
+        },
+
+        corners: {
+          outside_count: totals.outsideCornerCount,
+          outside_lf: totals.outsideCornerLf,
+          inside_count: totals.insideCornerCount,
+          inside_lf: totals.insideCornerLf,
+        },
+
+        gables: {
+          count: totals.gableCount,
+          area_sf: totals.gableAreaSf,
+          rake_lf: totals.gableRakeLf,
+        },
+
+        // Minimal product config - n8n uses auto-scope rules and DB defaults
+        products: {
+          color: null,
+          profile: 'cedarmill',
+        },
+      };
+    },
+    [jobId, projectId, job?.project_name, getAllDetections]
+  );
+
+  const handleApprove = useCallback(async () => {
+    if (!jobId || !liveDerivedTotals) {
+      console.error('[Approve] Missing job ID or calculations');
+      return;
+    }
+
+    setIsApproving(true);
+
+    try {
+      // Build the payload with all measurements
+      const payload = buildApprovePayload(liveDerivedTotals);
+      console.log('[Approve] Sending payload:', payload);
+
+      const webhookUrl =
+        process.env.NEXT_PUBLIC_N8N_WEBHOOK_URL || 'https://n8n-production-293e.up.railway.app';
+      const response = await fetch(
+        `${webhookUrl}/webhook/approve-detection-editor`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(payload),
+        }
+      );
+
+      // Check content type to determine response format
+      const contentType = response.headers.get('content-type');
+
+      if (
+        contentType?.includes(
+          'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+        )
+      ) {
+        // It's an Excel file - trigger download
+        if (!response.ok) {
+          throw new Error(`Workflow failed: ${response.status}`);
+        }
+
+        const blob = await response.blob();
+        const filename =
+          response.headers
+            .get('content-disposition')
+            ?.match(/filename="(.+)"/)?.[1] ||
+          `takeoff_${jobId.slice(0, 8)}.xlsx`;
+
+        // Create download link
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        window.URL.revokeObjectURL(url);
+
+        console.log('[Approve] Excel downloaded:', filename);
+        toast.success(`Takeoff downloaded: ${filename}`);
+      } else {
+        // It's JSON - parse response text once
+        const responseText = await response.text();
+        console.log('[Approve] Raw response:', responseText);
+
+        let data: ApprovalResult;
+        try {
+          data = JSON.parse(responseText);
+        } catch (parseError) {
+          console.error('[Approve] JSON parse error:', parseError);
+          throw new Error(`Invalid JSON response: ${responseText.slice(0, 100)}`);
+        }
+
+        console.log('[Approve] Parsed result:', data);
+
+        if (!data.success) {
+          throw new Error((data as { error?: string }).error || 'Approval failed');
+        }
+
+        // Store the approval result and show the results panel
+        console.log('[Approve] Setting approvalResult:', data.takeoff_id);
+        setApprovalResult(data);
+        console.log('[Approve] Setting showApprovalResults: true');
+        setShowApprovalResults(true);
+
+        // Format cost for toast (with defensive checks)
+        const subtotal = data?.totals?.subtotal ?? 0;
+        const lineItemsCreated = data?.line_items_created ?? 0;
+        const formattedSubtotal = new Intl.NumberFormat('en-US', {
+          style: 'currency',
+          currency: 'USD',
+        }).format(subtotal);
+
+        toast.success(`Takeoff created: ${lineItemsCreated} items, ${formattedSubtotal}`, {
+          duration: 5000,
+        });
+
+        // Fetch full takeoff details for display and Excel export
+        if (data.takeoff_id) {
+          try {
+            setIsLoadingDetails(true);
+            console.log('[Approve] Fetching takeoff details for:', data.takeoff_id);
+            const detailsResponse = await fetch(`/api/takeoffs/${data.takeoff_id}`);
+            console.log('[Approve] Details response status:', detailsResponse.status);
+
+            const details = await detailsResponse.json();
+            console.log('[Approve] Takeoff details response:', details);
+
+            if (details.success && details.takeoff && Array.isArray(details.line_items)) {
+              console.log('[Approve] Setting takeoff details:', {
+                takeoff_id: details.takeoff?.id,
+                line_items_count: details.line_items?.length,
+              });
+              setTakeoffDetails({
+                takeoff: details.takeoff,
+                line_items: details.line_items,
+              });
+            } else {
+              console.warn('[Approve] Invalid takeoff details response:', {
+                success: details.success,
+                has_takeoff: !!details.takeoff,
+                has_line_items: Array.isArray(details.line_items),
+              });
+              // Don't set takeoffDetails - we'll just show the summary from approvalResult
+            }
+          } catch (detailsErr) {
+            console.error('[Approve] Error fetching takeoff details:', detailsErr);
+            // Don't crash - we'll just show the summary data we already have
+          } finally {
+            setIsLoadingDetails(false);
+          }
+        }
+      }
+
+      // Refresh data (but don't call onComplete yet - user needs to see the results panel first)
+      console.log('[Approve] About to call refresh()');
+      await refresh();
+      console.log('[Approve] After refresh(), showApprovalResults should still be true');
+      // NOTE: onComplete is now called when user clicks "Done" button in the approval results panel
+    } catch (err) {
+      const error = err instanceof Error ? err : new Error('Approval failed');
+      console.error('[Approve] Error:', error);
+      toast.error(`Failed to generate takeoff: ${error.message}`);
+      onError?.(error);
+    } finally {
+      if (isMountedRef.current) {
+        setIsApproving(false);
+      }
+    }
+  }, [
+    jobId,
+    liveDerivedTotals,
+    buildApprovePayload,
+    refresh,
+    onError,
+  ]);
+
   // Debug: Log when visibleDetections changes
   useEffect(() => {
     if (visibleDetections.length > 0) {
@@ -1295,6 +1904,8 @@ export default function DetectionEditor({
             reviewProgress={reviewProgress}
             onApprove={handleApprove}
             isApproving={isApproving}
+            canApprove={!!liveDerivedTotals}
+            isApproved={!!approvalResult}
             onGenerateMarkup={handleGenerateMarkup}
             isGeneratingMarkup={isGeneratingMarkup}
             // Local-first editing props
@@ -1314,6 +1925,15 @@ export default function DetectionEditor({
               activeMode={toolMode}
               onModeChange={setToolMode}
               disabled={loading || isValidating}
+              createClass={createClass}
+              lineClass={lineClass}
+              pointClass={pointClass}
+              onClassSelect={(cls, mode) => {
+                // Update the appropriate class state based on the tool mode
+                if (mode === 'create') setCreateClass(cls);
+                else if (mode === 'line') setLineClass(cls);
+                else if (mode === 'point') setPointClass(cls);
+              }}
             />
 
             {/* Canvas Area - flex-1 with min-h-0 allows proper flex shrinking */}
@@ -1390,13 +2010,20 @@ export default function DetectionEditor({
                     selectedDetectionId={selectedDetectionId}
                     selectedIds={selectedIds}
                     toolMode={toolMode}
-                    activeClass={createClass}
+                    activeClass={
+                      toolMode === 'line'
+                        ? lineClass
+                        : toolMode === 'point'
+                        ? pointClass
+                        : createClass
+                    }
                     onSelectionChange={handleCanvasSelect}
                     onDetectionMove={handleDetectionMove}
                     onDetectionResize={handleDetectionResize}
                     onDetectionCreate={handleDetectionCreate}
                     onDetectionPolygonUpdate={handleDetectionPolygonUpdate}
                     onCalibrationComplete={handleCalibrationComplete}
+                    onExitDrawingMode={() => setToolMode('select')}
                     containerWidth={canvasContainerSize.width}
                     containerHeight={canvasContainerSize.height}
                   />
@@ -1457,8 +2084,6 @@ export default function DetectionEditor({
               selectedIds={selectedIds}
               onDetectionSelect={handleSelect}
               onDetectionHover={handleHover}
-              elevationCalcs={currentElevationCalcs}
-              jobTotals={jobTotals}
               showDeleted={showDeleted}
               onShowDeletedChange={setShowDeleted}
               jobId={jobId}
@@ -1468,6 +2093,7 @@ export default function DetectionEditor({
               onMaterialAssign={handleMaterialAssign}
               onNotesChange={handleNotesChange}
               pixelsPerFoot={currentPage?.scale_ratio || 64}
+              liveDerivedTotals={liveDerivedTotals}
             />
           </div>
         </>
@@ -1518,6 +2144,203 @@ export default function DetectionEditor({
         currentScaleRatio={currentPage?.scale_ratio || null}
         onApplyScale={handleApplyScale}
       />
+
+      {/* Approval Results Panel */}
+      {showApprovalResults && approvalResult && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
+          <div className="bg-white dark:bg-gray-900 rounded-lg shadow-xl max-w-4xl w-full mx-4 overflow-hidden max-h-[90vh] flex flex-col">
+            {/* Header */}
+            <div className="flex items-center justify-between px-6 py-4 bg-green-50 dark:bg-green-900/30 border-b border-green-100 dark:border-green-800">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-full bg-green-100 dark:bg-green-800 flex items-center justify-center">
+                  <CheckCircle className="w-6 h-6 text-green-600 dark:text-green-400" />
+                </div>
+                <div>
+                  <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
+                    Takeoff Created
+                  </h2>
+                  <p className="text-sm text-gray-500 dark:text-gray-400">
+                    {approvalResult?.trades_processed?.map(t => t.charAt(0).toUpperCase() + t.slice(1)).join(', ') || 'Siding'}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowApprovalResults(false)}
+                className="p-1 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Content - Scrollable */}
+            <div className="p-6 space-y-5 overflow-y-auto flex-1">
+              {/* Line Items Summary */}
+              <div className="flex items-center gap-4 p-4 bg-gray-50 dark:bg-gray-800/50 rounded-lg">
+                <FileText className="w-8 h-8 text-blue-500" />
+                <div>
+                  <p className="text-2xl font-bold text-gray-900 dark:text-white">
+                    {approvalResult?.line_items_created ?? 0}
+                  </p>
+                  <p className="text-sm text-gray-500 dark:text-gray-400">
+                    Line items created
+                    {(approvalResult?.line_items_failed ?? 0) > 0 && (
+                      <span className="text-amber-500 ml-1">
+                        ({approvalResult.line_items_failed} failed)
+                      </span>
+                    )}
+                  </p>
+                </div>
+              </div>
+
+              {/* Cost Breakdown */}
+              {approvalResult?.totals && (
+                <div className="space-y-3">
+                  <h3 className="text-sm font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide flex items-center gap-2">
+                    <DollarSign className="w-4 h-4" />
+                    Cost Breakdown
+                  </h3>
+                  <div className="bg-gray-50 dark:bg-gray-800/50 rounded-lg divide-y divide-gray-200 dark:divide-gray-700">
+                    <div className="flex justify-between px-4 py-3">
+                      <span className="text-gray-600 dark:text-gray-400">Material Cost</span>
+                      <span className="font-mono font-medium text-gray-900 dark:text-white">
+                        {new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(approvalResult.totals.material_cost ?? 0)}
+                      </span>
+                    </div>
+                    <div className="flex justify-between px-4 py-3">
+                      <span className="text-gray-600 dark:text-gray-400">Labor Cost</span>
+                      <span className="font-mono font-medium text-gray-900 dark:text-white">
+                        {new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(approvalResult.totals.labor_cost ?? 0)}
+                      </span>
+                    </div>
+                    <div className="flex justify-between px-4 py-3">
+                      <span className="text-gray-600 dark:text-gray-400">Overhead & Profit ({approvalResult.totals.markup_percent ?? 15}%)</span>
+                      <span className="font-mono font-medium text-gray-900 dark:text-white">
+                        {new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(approvalResult.totals.overhead_cost ?? 0)}
+                      </span>
+                    </div>
+                    <div className="flex justify-between px-4 py-3 bg-green-50 dark:bg-green-900/20">
+                      <span className="font-semibold text-gray-900 dark:text-white">Subtotal</span>
+                      <span className="font-mono font-bold text-lg text-green-600 dark:text-green-400">
+                        {new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(approvalResult.totals.subtotal ?? 0)}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Line Items Table */}
+              {isLoadingDetails && (
+                <div className="flex items-center justify-center py-8">
+                  <Loader2 className="w-6 h-6 text-blue-500 animate-spin" />
+                  <span className="ml-2 text-gray-500 dark:text-gray-400">Loading line items...</span>
+                </div>
+              )}
+              {!isLoadingDetails && takeoffDetails?.takeoff && Array.isArray(takeoffDetails?.line_items) && takeoffDetails.line_items.length > 0 && (
+                <div className="space-y-3">
+                  <h3 className="text-sm font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide flex items-center gap-2">
+                    <FileText className="w-4 h-4" />
+                    Line Items
+                  </h3>
+                  <div className="bg-gray-50 dark:bg-gray-800/50 rounded-lg overflow-hidden">
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-sm">
+                        <thead className="bg-gray-100 dark:bg-gray-700">
+                          <tr>
+                            <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Description</th>
+                            <th className="px-3 py-2 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Qty</th>
+                            <th className="px-3 py-2 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Unit</th>
+                            <th className="px-3 py-2 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Material</th>
+                            <th className="px-3 py-2 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Labor</th>
+                            <th className="px-3 py-2 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Total</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
+                          {takeoffDetails.line_items.map((item, idx) => (
+                            <tr key={item.id || idx} className={idx % 2 === 0 ? 'bg-white dark:bg-gray-800' : 'bg-gray-50 dark:bg-gray-800/50'}>
+                              <td className="px-3 py-2 text-gray-900 dark:text-white">
+                                <div className="max-w-xs truncate" title={item.description}>
+                                  {item.description}
+                                </div>
+                              </td>
+                              <td className="px-3 py-2 text-right font-mono text-gray-900 dark:text-white">
+                                {typeof item.quantity === 'number' ? item.quantity.toFixed(1) : item.quantity}
+                              </td>
+                              <td className="px-3 py-2 text-center text-gray-500 dark:text-gray-400">
+                                {item.unit}
+                              </td>
+                              <td className="px-3 py-2 text-right font-mono text-gray-900 dark:text-white">
+                                {new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(Number(item.material_extended) || 0)}
+                              </td>
+                              <td className="px-3 py-2 text-right font-mono text-gray-900 dark:text-white">
+                                {new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(Number(item.labor_extended) || 0)}
+                              </td>
+                              <td className="px-3 py-2 text-right font-mono font-medium text-gray-900 dark:text-white">
+                                {new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(Number(item.line_total) || 0)}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                </div>
+              )}
+              {!isLoadingDetails && (!takeoffDetails?.takeoff || !Array.isArray(takeoffDetails?.line_items) || takeoffDetails.line_items.length === 0) && (
+                <div className="text-xs text-gray-500 dark:text-gray-400 text-center py-4">
+                  Line item details not available
+                </div>
+              )}
+            </div>
+
+            {/* Footer */}
+            <div className="flex items-center justify-end px-6 py-4 bg-gray-50 dark:bg-gray-800/50 border-t border-gray-200 dark:border-gray-700">
+              <div className="flex items-center gap-3">
+                {takeoffDetails?.takeoff && Array.isArray(takeoffDetails?.line_items) && takeoffDetails.line_items.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      try {
+                        console.log('[Excel Export] Starting export with:', {
+                          takeoff_id: takeoffDetails.takeoff?.id,
+                          line_items_count: takeoffDetails.line_items?.length,
+                        });
+                        const filename = `takeoff_${approvalResult?.takeoff_id?.slice(0, 8) || jobId.slice(0, 8)}_${new Date().toISOString().split('T')[0]}.xlsx`;
+                        await exportTakeoffToExcel(takeoffDetails, filename);
+                        toast.success('Excel downloaded successfully');
+                      } catch (err) {
+                        console.error('[Excel Export] Error:', err);
+                        toast.error('Failed to download Excel');
+                      }
+                    }}
+                    className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-green-600 hover:bg-green-700 rounded-md transition-colors"
+                  >
+                    <Download className="w-4 h-4" />
+                    Download Excel
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowApprovalResults(false);
+                    // Navigate to the takeoff details page if we have a takeoff_id
+                    if (approvalResult?.takeoff_id) {
+                      router.push(`/takeoffs/${approvalResult.takeoff_id}`);
+                    } else {
+                      // Fallback to onComplete callback
+                      onComplete?.();
+                    }
+                  }}
+                  className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-md transition-colors"
+                >
+                  <ExternalLink className="w-4 h-4" />
+                  View Takeoff
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

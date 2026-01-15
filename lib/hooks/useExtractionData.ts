@@ -382,9 +382,16 @@ export function useExtractionData(
   // Get all detections from all pages (for validation submission)
   const getAllDetections = useCallback((): ExtractionDetection[] => {
     const allDetections: ExtractionDetection[] = [];
-    detections.forEach((pageDetections) => {
-      allDetections.push(...pageDetections);
+    console.log('[getAllDetections] Starting collection from', detections.size, 'pages');
+    detections.forEach((pageDetections, pageId) => {
+      // Exclude roof detections (disabled feature)
+      const filteredDetections = pageDetections.filter(d => d.class !== 'roof');
+      const deletedCount = filteredDetections.filter(d => d.status === 'deleted').length;
+      console.log(`[getAllDetections] Page ${pageId}: ${filteredDetections.length} total, ${deletedCount} deleted`);
+      allDetections.push(...filteredDetections);
     });
+    const totalDeleted = allDetections.filter(d => d.status === 'deleted').length;
+    console.log('[getAllDetections] Total:', allDetections.length, 'detections,', totalDeleted, 'deleted');
     return allDetections;
   }, [detections]);
 
@@ -468,12 +475,16 @@ export function useExtractionData(
             return;
           }
 
-          console.log('[useExtractionData] Applying realtime update for detection:', detection.id);
+          console.log('[useExtractionData] Applying realtime update for detection:', detection.id, 'status:', detection.status);
           setDetections((prev) => {
             const newMap = new Map(prev);
             const pageDetections = newMap.get(detection.page_id) || [];
             const index = pageDetections.findIndex((d) => d.id === detection.id);
             if (index >= 0) {
+              const localStatus = pageDetections[index].status;
+              if (localStatus === 'deleted' && detection.status !== 'deleted') {
+                console.warn('[useExtractionData] WARNING: Realtime would overwrite deleted status!', detection.id, 'local:', localStatus, 'remote:', detection.status);
+              }
               pageDetections[index] = detection;
               newMap.set(detection.page_id, [...pageDetections]);
             }
@@ -549,9 +560,11 @@ export function useExtractionData(
     // Filter out deleted unless includeDeleted is true
     // Also filter out 'exterior_wall' and 'building' - these are used for calculations
     // behind the scenes but don't need to be shown in the editor UI
+    // TODO: Re-enable roof when ready to support roofing jobs
     const filtered = pageDetections.filter((d) => {
       const cls = d.class as AllDetectionClasses;
-      if (cls === 'exterior_wall' || cls === 'building') return false;
+      // Roof disabled due to page_id bug and rare usage
+      if (cls === 'exterior_wall' || cls === 'building' || cls === 'roof') return false;
       if (!includeDeleted && d.status === 'deleted') return false;
       return true;
     });
@@ -569,6 +582,9 @@ export function useExtractionData(
     // Filter out deleted unless includeDeleted is true
     // BUT keep exterior_wall and building for overlay/summary calculations
     const filtered = pageDetections.filter((d) => {
+      const cls = d.class as AllDetectionClasses;
+      // Roof disabled due to page_id bug
+      if (cls === 'roof') return false;
       if (!includeDeleted && d.status === 'deleted') return false;
       return true;
     });
@@ -588,9 +604,9 @@ export function useExtractionData(
 
     detections.forEach((pageDetections) => {
       for (const detection of pageDetections) {
-        // Skip exterior_wall and building detections (hidden from UI, used for backend calculations)
+        // Skip exterior_wall, building, and roof detections (hidden from UI, used for backend calculations)
         const cls = detection.class as AllDetectionClasses;
-        if (cls === 'exterior_wall' || cls === 'building') continue;
+        if (cls === 'exterior_wall' || cls === 'building' || cls === 'roof') continue;
         if (detection.status !== 'deleted') {
           total++;
           if (detection.status === 'auto') {
@@ -622,6 +638,8 @@ export function useExtractionData(
     // Push current state to undo stack BEFORE making changes
     pushToUndoStack();
 
+    console.log('[updateDetectionLocally] Updating detection:', detection.id, 'page:', detection.page_id, 'status:', detection.status);
+
     setDetections((prev) => {
       const newMap = new Map(prev);
       const pageDetections = newMap.get(detection.page_id) || [];
@@ -631,6 +649,9 @@ export function useExtractionData(
         const updated = [...pageDetections];
         updated[index] = detection;
         newMap.set(detection.page_id, updated);
+        console.log('[updateDetectionLocally] Updated detection at index', index, 'in page', detection.page_id);
+      } else {
+        console.warn('[updateDetectionLocally] Detection not found:', detection.id, 'in page', detection.page_id, '- available pages:', Array.from(prev.keys()));
       }
 
       return newMap;

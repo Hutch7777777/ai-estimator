@@ -106,6 +106,10 @@ export interface ValidationDetection {
   matched_tag: string | null;
   polygon_points?: Array<{ x: number; y: number }> | null;
   markup_type?: 'polygon' | 'line' | 'point';
+  // Material assignment from Properties Panel
+  assigned_material_id?: string | null;
+  // User notes/comments
+  notes?: string | null;
 }
 
 export interface ValidationRequest {
@@ -511,13 +515,29 @@ export async function validateDetections(
         matched_tag: d.matched_tag,
         polygon_points: d.polygon_points ?? null,
         markup_type: d.markup_type,
+        // Include material assignment and notes
+        assigned_material_id: d.assigned_material_id ?? null,
+        notes: d.notes ?? null,
       })),
     };
+
+    // Log detailed breakdown by page and deletion status
+    const pageBreakdown = new Map<string, { total: number; deleted: number }>();
+    validationRequest.detections.forEach((d) => {
+      const current = pageBreakdown.get(d.page_id) || { total: 0, deleted: 0 };
+      current.total++;
+      if (d.is_deleted) current.deleted++;
+      pageBreakdown.set(d.page_id, current);
+    });
 
     console.log('[validateDetections] Sending validation request:', {
       jobId,
       detectionCount: detections.length,
+      deletedCount: validationRequest.detections.filter((d) => d.is_deleted).length,
       endpoint: VALIDATE_ENDPOINT,
+    });
+    pageBreakdown.forEach((counts, pageId) => {
+      console.log(`[validateDetections] Page ${pageId}: ${counts.total} total, ${counts.deleted} deleted`);
     });
 
     const response = await fetch(VALIDATE_ENDPOINT, {
