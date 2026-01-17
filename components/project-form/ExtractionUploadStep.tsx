@@ -3,7 +3,6 @@
 import { useState, useCallback, useEffect, useRef } from "react";
 import { useDropzone } from "react-dropzone";
 import { toast } from "sonner";
-import { Progress } from "@/components/ui/progress";
 import { Button } from "@/components/ui/button";
 import {
   Upload,
@@ -278,20 +277,20 @@ export function ExtractionUploadStep({
           className={cn(
             "border-2 border-dashed rounded-lg p-8 text-center cursor-pointer transition-colors",
             isDragActive
-              ? "border-primary bg-primary/10"
-              : "border-muted-foreground/25 hover:border-primary/50 hover:bg-muted/50"
+              ? "border-[#00cc6a] bg-[#dcfce7]"
+              : "border-[#e2e8f0] bg-[#f8fafc] hover:border-[#00cc6a] hover:bg-[#f1f5f9]"
           )}
         >
           <input {...getInputProps()} />
-          <Upload className="mx-auto h-10 w-10 text-muted-foreground mb-3" />
+          <Upload className="mx-auto h-10 w-10 text-[#94a3b8] mb-3" />
           {isDragActive ? (
-            <p className="text-sm text-foreground">Drop the PDF here...</p>
+            <p className="text-sm text-[#0f172a]">Drop the PDF here...</p>
           ) : (
             <>
-              <p className="text-sm font-medium text-foreground mb-1">
+              <p className="text-sm font-medium text-[#475569] mb-1">
                 Drop your construction plan PDF here
               </p>
-              <p className="text-xs text-muted-foreground">
+              <p className="text-xs text-[#94a3b8]">
                 or click to browse • Max {MAX_FILE_SIZE_MB}MB
               </p>
             </>
@@ -301,50 +300,52 @@ export function ExtractionUploadStep({
 
       {/* Selected file preview */}
       {selectedFile && uploadState === 'idle' && (
-        <div className="border border-border rounded-lg p-4">
-          <div className="flex items-center gap-3">
-            <div className="rounded-lg bg-primary/10 p-2">
-              <FileText className="h-5 w-5 text-primary" />
-            </div>
-            <div className="flex-1 min-w-0">
-              <p className="text-sm font-medium text-foreground truncate">
-                {selectedFile.name}
-              </p>
-              <p className="text-xs text-muted-foreground">
-                {formatFileSize(selectedFile.size)}
-              </p>
-            </div>
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={handleRemoveFile}
-              className="flex-shrink-0 h-8 w-8"
-            >
-              <X className="h-4 w-4" />
-            </Button>
+        <div className="flex items-center gap-3 p-3 bg-[#f8fafc] rounded-md border border-[#e2e8f0]">
+          <div className="rounded-md bg-[#dcfce7] p-2">
+            <FileText className="h-5 w-5 text-[#00cc6a]" />
           </div>
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-medium text-[#0f172a] truncate">
+              {selectedFile.name}
+            </p>
+            <p className="text-xs text-[#94a3b8]">
+              {formatFileSize(selectedFile.size)}
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={handleRemoveFile}
+            className="flex-shrink-0 p-1.5 text-[#94a3b8] hover:text-[#0f172a] transition-colors"
+          >
+            <X className="h-4 w-4" />
+          </button>
         </div>
       )}
 
       {/* Uploading State */}
       {uploadState === 'uploading' && (
-        <div className="p-4 rounded-lg bg-blue-50 dark:bg-blue-950/20 border border-blue-200 dark:border-blue-800">
+        <div className="p-4 rounded-md bg-[#f8fafc] border border-[#e2e8f0]">
           <div className="flex items-center gap-3 mb-3">
-            <Loader2 className="h-5 w-5 animate-spin text-blue-600" />
-            <span className="text-sm font-medium text-blue-900 dark:text-blue-100">
+            <Loader2 className="h-5 w-5 animate-spin text-[#00cc6a]" />
+            <span className="text-sm font-medium text-[#0f172a]">
               Uploading PDF...
             </span>
           </div>
-          <Progress value={uploadProgress} className="h-2" />
+          <div className="h-2 bg-[#e2e8f0] rounded-full overflow-hidden">
+            <div
+              className="h-full bg-[#00cc6a] transition-all duration-300"
+              style={{ width: `${uploadProgress}%` }}
+            />
+          </div>
         </div>
       )}
 
       {/* Starting Job State */}
       {uploadState === 'starting' && (
-        <div className="p-4 rounded-lg bg-blue-50 dark:bg-blue-950/20 border border-blue-200 dark:border-blue-800">
+        <div className="p-4 rounded-md bg-[#f8fafc] border border-[#e2e8f0]">
           <div className="flex items-center gap-3">
-            <Loader2 className="h-5 w-5 animate-spin text-blue-600" />
-            <span className="text-sm font-medium text-blue-900 dark:text-blue-100">
+            <Loader2 className="h-5 w-5 animate-spin text-[#00cc6a]" />
+            <span className="text-sm font-medium text-[#0f172a]">
               Starting extraction job...
             </span>
           </div>
@@ -353,10 +354,10 @@ export function ExtractionUploadStep({
 
       {/* Started State (brief - modal will close) */}
       {uploadState === 'started' && (
-        <div className="p-4 rounded-lg bg-green-50 dark:bg-green-950/20 border border-green-200 dark:border-green-800">
+        <div className="p-4 rounded-md bg-[#dcfce7] border border-[#00cc6a]/30">
           <div className="flex items-center gap-3">
-            <CheckCircle2 className="h-5 w-5 text-green-600" />
-            <span className="text-sm font-medium text-green-900 dark:text-green-100">
+            <CheckCircle2 className="h-5 w-5 text-[#00cc6a]" />
+            <span className="text-sm font-medium text-[#0f172a]">
               Job started! Closing...
             </span>
           </div>
@@ -365,10 +366,10 @@ export function ExtractionUploadStep({
 
       {/* Error State */}
       {uploadState === 'error' && (
-        <div className="p-4 rounded-lg bg-red-50 dark:bg-red-950/20 border border-red-200 dark:border-red-800">
+        <div className="p-4 rounded-md bg-red-50 border border-[#ef4444]/30">
           <div className="flex items-center gap-3 mb-3">
-            <AlertCircle className="h-5 w-5 text-red-600" />
-            <span className="text-sm font-medium text-red-900 dark:text-red-100">
+            <AlertCircle className="h-5 w-5 text-[#ef4444]" />
+            <span className="text-sm font-medium text-[#ef4444]">
               {errorMessage || 'Something went wrong'}
             </span>
           </div>
@@ -380,14 +381,14 @@ export function ExtractionUploadStep({
 
       {/* Start Button */}
       {uploadState === 'idle' && selectedFile && (
-        <Button
+        <button
+          type="button"
           onClick={handleStartExtraction}
-          className="w-full"
-          size="lg"
+          className="w-full h-12 md:h-10 bg-[#00cc6a] text-white font-medium rounded-md hover:bg-[#00b35e] active:bg-[#009e52] transition-colors flex items-center justify-center gap-2"
         >
-          <Upload className="h-4 w-4 mr-2" />
+          <Upload className="h-4 w-4" />
           Start AI Extraction
-        </Button>
+        </button>
       )}
     </div>
   );
