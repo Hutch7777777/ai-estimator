@@ -522,8 +522,8 @@ export const USER_SELECTABLE_CLASSES: DetectionClass[] = [
   'corbel',
   'gable_vent',
   'belly_band',
-  'corner_inside',
-  'corner_outside',
+  // Note: corner_inside and corner_outside are excluded from user selection
+  // They come from floor plan analysis, not manual markup
   'shutter',
   'post',
   'column',

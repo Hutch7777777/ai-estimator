@@ -841,8 +841,9 @@ export default function KonvaDetectionCanvas({
             ))}
 
           {/* Detection Points (Count Markers) */}
+          {/* Note: corner_inside and corner_outside are excluded - they come from floor plan analysis with unreliable pixel coordinates */}
           {sortedDetections
-            .filter((d) => d.markup_type === 'point')
+            .filter((d) => d.markup_type === 'point' && d.class !== 'corner_inside' && d.class !== 'corner_outside')
             .map((detection) => (
               <KonvaDetectionPoint
                 key={detection.id}
