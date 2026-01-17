@@ -19,6 +19,11 @@ import {
   AlertCircle,
   ChevronDown,
   Play,
+  Check,
+  FileUp,
+  FileSearch,
+  Layers,
+  Sparkles,
 } from 'lucide-react';
 import type { ExtractionJob, ExtractionPage, PageType } from '@/lib/types/extraction';
 
@@ -37,6 +42,76 @@ const STATUS_MESSAGES: Record<string, string> = {
   complete: 'Detection complete!',
   failed: 'Detection failed',
 };
+
+// Processing steps configuration
+const PROCESSING_STEPS = [
+  { id: 'upload', label: 'PDF uploaded', icon: FileUp },
+  { id: 'convert', label: 'Converting pages', icon: Layers },
+  { id: 'classify', label: 'Classifying page types', icon: FileSearch },
+  { id: 'detect', label: 'Running AI detection', icon: Sparkles },
+] as const;
+
+// Get step status based on job processing status
+function getStepStatus(stepId: string, processingStatus: string): 'complete' | 'active' | 'pending' {
+  const statusOrder = ['upload', 'convert', 'classify', 'detect'];
+  const stepIndex = statusOrder.indexOf(stepId);
+
+  // Map job status to current step
+  let currentStepIndex = -1;
+  if (processingStatus === 'converting') currentStepIndex = 1;
+  else if (processingStatus === 'classifying') currentStepIndex = 2;
+  else if (processingStatus === 'processing') currentStepIndex = 3;
+  else if (processingStatus === 'complete') currentStepIndex = 4; // All complete
+
+  // Upload is always complete once we're processing
+  if (stepId === 'upload') return 'complete';
+  // Classify step is complete since we're past classification review
+  if (stepId === 'classify') return 'complete';
+  // Convert is complete since pages are already converted
+  if (stepId === 'convert') return 'complete';
+
+  if (stepIndex < currentStepIndex) return 'complete';
+  if (stepIndex === currentStepIndex) return 'active';
+  return 'pending';
+}
+
+// StepItem component for processing steps
+function StepItem({
+  status,
+  label,
+  icon: Icon
+}: {
+  status: 'complete' | 'active' | 'pending';
+  label: string;
+  icon: React.ComponentType<{ className?: string }>;
+}) {
+  return (
+    <div className="flex items-center gap-3">
+      {status === 'complete' && (
+        <div className="w-8 h-8 bg-[#00cc6a] rounded-full flex items-center justify-center flex-shrink-0">
+          <Check className="w-4 h-4 text-white" />
+        </div>
+      )}
+      {status === 'active' && (
+        <div className="w-8 h-8 border-2 border-[#00cc6a] rounded-full flex items-center justify-center flex-shrink-0 bg-[#dcfce7]">
+          <div className="w-2 h-2 bg-[#00cc6a] rounded-full animate-pulse" />
+        </div>
+      )}
+      {status === 'pending' && (
+        <div className="w-8 h-8 border-2 border-[#e2e8f0] rounded-full flex items-center justify-center flex-shrink-0">
+          <Icon className="w-4 h-4 text-[#94a3b8]" />
+        </div>
+      )}
+      <div className="flex items-center gap-2">
+        <Icon className={`w-4 h-4 ${status === 'pending' ? 'text-[#94a3b8]' : 'text-[#0f172a]'}`} />
+        <span className={`text-sm ${status === 'pending' ? 'text-[#94a3b8]' : 'text-[#0f172a] font-medium'}`}>
+          {label}
+          {status === 'active' && '...'}
+        </span>
+      </div>
+    </div>
+  );
+}
 
 const PAGE_TYPES: PageType[] = [
   'cover',
@@ -317,24 +392,49 @@ export default function ClassificationReviewPage() {
   // Show processing overlay when detection is running
   if (isProcessing) {
     return (
-      <div className="container mx-auto py-12 flex flex-col items-center justify-center min-h-[60vh]">
-        <div className="flex flex-col items-center gap-6 p-8 bg-white dark:bg-gray-900 rounded-lg shadow-lg border">
-          <Loader2 className="h-12 w-12 animate-spin text-blue-500" />
-          <div className="text-center">
-            <h2 className="text-xl font-semibold mb-2">
-              {STATUS_MESSAGES[processingStatus] || 'Processing...'}
-            </h2>
-            <p className="text-muted-foreground">
-              {job?.project_name || 'Untitled Project'}
-            </p>
-            <p className="text-sm text-muted-foreground mt-4">
-              This may take a few minutes. You&apos;ll be redirected when complete.
-            </p>
+      <div className="min-h-screen bg-[#f8fafc] flex items-center justify-center p-4">
+        <div className="bg-white rounded-xl border border-[#e2e8f0] shadow-lg p-8 max-w-md w-full">
+          {/* Animated spinner icon */}
+          <div className="mb-6 flex justify-center">
+            <div className="w-20 h-20 bg-[#dcfce7] rounded-full flex items-center justify-center">
+              <div className="w-12 h-12 border-4 border-[#00cc6a] border-t-transparent rounded-full animate-spin" />
+            </div>
           </div>
-          <div className="flex items-center gap-2 text-sm text-muted-foreground">
-            <div className="w-2 h-2 rounded-full bg-blue-500 animate-pulse" />
-            <span>Polling for updates...</span>
+
+          {/* Title */}
+          <h1 className="text-2xl font-semibold text-[#0f172a] text-center mb-2">
+            Processing Your Plans
+          </h1>
+
+          {/* Project name */}
+          <p className="text-[#475569] text-center mb-8">
+            {job?.project_name || 'Untitled Project'}
+          </p>
+
+          {/* Progress steps */}
+          <div className="space-y-4 mb-8">
+            {PROCESSING_STEPS.map((step) => (
+              <StepItem
+                key={step.id}
+                status={getStepStatus(step.id, processingStatus)}
+                label={step.label}
+                icon={step.icon}
+              />
+            ))}
           </div>
+
+          {/* Subtitle */}
+          <p className="text-sm text-[#94a3b8] text-center">
+            This usually takes 1-2 minutes
+          </p>
+
+          {/* Cancel button */}
+          <button
+            onClick={handleBack}
+            className="mt-6 w-full text-sm text-[#94a3b8] hover:text-[#475569] transition-colors py-2"
+          >
+            Cancel and return to dashboard
+          </button>
         </div>
       </div>
     );
