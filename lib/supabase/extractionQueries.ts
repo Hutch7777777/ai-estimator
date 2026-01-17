@@ -468,6 +468,26 @@ export async function getFullExtractionContext(
   const detectionsPromise = withTimeout(
     getJobDetections(jobId, false).then(result => {
       console.log('[getFullExtractionContext] getJobDetections completed:', result.length, 'detections');
+      // Debug: Log breakdown by class and markup_type
+      const byClass: Record<string, number> = {};
+      const byMarkupType: Record<string, number> = {};
+      const corners = result.filter(d => d.class === 'corner_inside' || d.class === 'corner_outside');
+      result.forEach(d => {
+        byClass[d.class] = (byClass[d.class] || 0) + 1;
+        byMarkupType[d.markup_type || 'undefined'] = (byMarkupType[d.markup_type || 'undefined'] || 0) + 1;
+      });
+      console.log('[getFullExtractionContext] Detection breakdown by class:', byClass);
+      console.log('[getFullExtractionContext] Detection breakdown by markup_type:', byMarkupType);
+      if (corners.length > 0) {
+        console.log('[getFullExtractionContext] Corner detections found:', corners.map(c => ({
+          id: c.id.slice(0, 8),
+          class: c.class,
+          markup_type: c.markup_type,
+          page_id: c.page_id.slice(0, 8),
+          pixel_x: c.pixel_x,
+          pixel_y: c.pixel_y
+        })));
+      }
       return result;
     }),
     QUERY_TIMEOUT_MS,

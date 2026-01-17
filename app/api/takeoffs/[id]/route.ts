@@ -91,6 +91,22 @@ export async function GET(
 
     const takeoff = takeoffData as unknown as TakeoffRecord;
 
+    // Get extraction job ID for this project (needed for "Back to Editor" link)
+    let extractionJobId: string | null = null;
+    if (takeoff.project_id) {
+      const { data: jobData } = await supabase
+        .from('extraction_jobs')
+        .select('id')
+        .eq('project_id', takeoff.project_id)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .single();
+
+      if (jobData) {
+        extractionJobId = jobData.id;
+      }
+    }
+
     // Get all line items ordered by presentation group and item number
     const { data: allItemsData, error: itemsError } = await supabase
       .from('takeoff_line_items')
@@ -204,6 +220,7 @@ export async function GET(
       takeoff: {
         id: takeoff.id,
         project_id: takeoff.project_id || null,
+        extraction_job_id: extractionJobId,
         takeoff_name: takeoff.takeoff_name,
         project_name: takeoff.project_name,
         client_name: takeoff.client_name,

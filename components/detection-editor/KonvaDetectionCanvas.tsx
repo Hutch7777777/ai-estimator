@@ -177,6 +177,23 @@ export default function KonvaDetectionCanvas({
   const imageHeight = page.original_height || 1080;
   const imageUrl = page.original_image_url || page.image_url;
 
+  // Debug: Log detections by markup_type
+  React.useEffect(() => {
+    const pointDetections = detections?.filter(d => d.markup_type === 'point') || [];
+    const lineDetections = detections?.filter(d => d.markup_type === 'line') || [];
+    const polygonDetections = detections?.filter(d => d.markup_type !== 'line' && d.markup_type !== 'point') || [];
+    const cornerDetections = detections?.filter(d => d.class === 'corner_inside' || d.class === 'corner_outside') || [];
+
+    console.log('[KonvaCanvas] Detection breakdown:', {
+      total: detections?.length || 0,
+      polygons: polygonDetections.length,
+      lines: lineDetections.length,
+      points: pointDetections.length,
+      corners: cornerDetections.length,
+      cornerClasses: cornerDetections.map(d => ({ class: d.class, markup_type: d.markup_type, id: d.id.slice(0, 8) })),
+    });
+  }, [detections]);
+
   // Track which image we've positioned for to avoid resetting on container resize
   const positionedForImageRef = useRef<string | null>(null);
 

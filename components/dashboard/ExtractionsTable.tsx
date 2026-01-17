@@ -22,7 +22,12 @@ import {
   Layers,
   FileImage,
   Upload,
+  Pencil,
+  Check,
+  X,
 } from "lucide-react";
+import { Input } from "@/components/ui/input";
+import { toast } from "sonner";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import {
   Dialog,
@@ -63,7 +68,61 @@ export function ExtractionsTable() {
   const [tempProjectId] = useState(() => crypto.randomUUID());
   const [refreshKey, setRefreshKey] = useState(0);
 
+  // Inline editing state
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editValue, setEditValue] = useState('');
+  const [isSaving, setIsSaving] = useState(false);
+
   const { organization, isLoading: isOrgLoading } = useOrganization();
+
+  // ==========================================================================
+  // Inline Editing Functions
+  // ==========================================================================
+
+  const startEditing = (jobId: string, currentName: string | null) => {
+    setEditingId(jobId);
+    setEditValue(currentName || '');
+  };
+
+  const cancelEditing = () => {
+    setEditingId(null);
+    setEditValue('');
+  };
+
+  const saveProjectName = async (jobId: string) => {
+    if (!editValue.trim()) {
+      toast.error('Project name cannot be empty');
+      return;
+    }
+
+    setIsSaving(true);
+    try {
+      const response = await fetch(`/api/extraction-jobs/${jobId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ project_name: editValue.trim() }),
+      });
+
+      if (!response.ok) {
+        const data = await response.json();
+        throw new Error(data.error || 'Failed to update project name');
+      }
+
+      // Update local state
+      setJobs(prev => prev.map(job =>
+        job.id === jobId ? { ...job, project_name: editValue.trim() } : job
+      ));
+
+      setEditingId(null);
+      setEditValue('');
+      toast.success('Project name updated');
+    } catch (err) {
+      console.error('[ExtractionsTable] Error saving project name:', err);
+      toast.error(err instanceof Error ? err.message : 'Failed to update project name');
+    } finally {
+      setIsSaving(false);
+    }
+  };
 
   // Fetch extraction jobs using direct fetch (Supabase JS client has issues)
   useEffect(() => {
@@ -317,7 +376,56 @@ export function ExtractionsTable() {
             {jobs.map((job) => (
               <TableRow key={job.id}>
                 <TableCell className="font-medium">
-                  {job.project_name || "Untitled Project"}
+                  {editingId === job.id ? (
+                    <div className="flex items-center gap-2">
+                      <Input
+                        value={editValue}
+                        onChange={(e) => setEditValue(e.target.value)}
+                        className="h-8 w-48"
+                        autoFocus
+                        disabled={isSaving}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') saveProjectName(job.id);
+                          if (e.key === 'Escape') cancelEditing();
+                        }}
+                        placeholder="Enter project name"
+                      />
+                      <Button
+                        size="icon"
+                        variant="ghost"
+                        className="h-8 w-8"
+                        onClick={() => saveProjectName(job.id)}
+                        disabled={isSaving}
+                      >
+                        {isSaving ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <Check className="h-4 w-4 text-green-600" />
+                        )}
+                      </Button>
+                      <Button
+                        size="icon"
+                        variant="ghost"
+                        className="h-8 w-8"
+                        onClick={cancelEditing}
+                        disabled={isSaving}
+                      >
+                        <X className="h-4 w-4 text-red-600" />
+                      </Button>
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-2 group">
+                      <span>{job.project_name || "Untitled Project"}</span>
+                      <Button
+                        size="icon"
+                        variant="ghost"
+                        className="opacity-0 group-hover:opacity-100 h-6 w-6 transition-opacity"
+                        onClick={() => startEditing(job.id, job.project_name)}
+                      >
+                        <Pencil className="h-3 w-3 text-muted-foreground" />
+                      </Button>
+                    </div>
+                  )}
                 </TableCell>
                 <TableCell>
                   <Badge className={getStatusClasses(job.status)}>

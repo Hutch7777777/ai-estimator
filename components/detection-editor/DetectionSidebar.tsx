@@ -15,6 +15,8 @@ import type {
   DetectionClass,
   DetectionStatus,
   LiveDerivedTotals,
+  ExtractionJob,
+  ExtractionJobTotals,
 } from '@/lib/types/extraction';
 import ClassSelector from './PropertiesPanel/ClassSelector';
 import SelectionProperties from './PropertiesPanel/SelectionProperties';
@@ -44,6 +46,9 @@ export interface DetectionSidebarProps {
   liveDerivedTotals: LiveDerivedTotals | null;
   // All pages totals (aggregated across all elevation pages)
   allPagesTotals?: LiveDerivedTotals | null;
+  // Job and totals from intelligent analysis aggregation
+  job?: ExtractionJob | null;
+  jobTotals?: ExtractionJobTotals | null;
 }
 
 type TabType = 'pages' | 'properties' | 'totals';
@@ -197,6 +202,8 @@ const DetectionSidebar = memo(function DetectionSidebar({
   onMultiSelectModeChange,
   liveDerivedTotals,
   allPagesTotals,
+  job,
+  jobTotals,
 }: DetectionSidebarProps) {
   // Default to 'pages' tab for quick page navigation
   const [activeTab, setActiveTab] = useState<TabType>('pages');
@@ -584,28 +591,43 @@ const DetectionSidebar = memo(function DetectionSidebar({
                   </div>
                 )}
 
-                {/* Corners */}
-                {(displayTotals.insideCornerCount > 0 || displayTotals.outsideCornerCount > 0) && (
-                  <div className="bg-gray-50 dark:bg-gray-800/50 rounded-lg p-3 space-y-2">
-                    <div className="text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase">
-                      Corners
-                    </div>
-                    <div className="grid grid-cols-2 gap-x-4 text-xs text-gray-600 dark:text-gray-400">
-                      {displayTotals.insideCornerCount > 0 && (
-                        <>
-                          <span>Inside ({displayTotals.insideCornerCount}):</span>
-                          <span className="text-right font-mono">{displayTotals.insideCornerLf.toFixed(1)} LF</span>
-                        </>
-                      )}
-                      {displayTotals.outsideCornerCount > 0 && (
-                        <>
-                          <span>Outside ({displayTotals.outsideCornerCount}):</span>
-                          <span className="text-right font-mono">{displayTotals.outsideCornerLf.toFixed(1)} LF</span>
-                        </>
-                      )}
-                    </div>
-                  </div>
-                )}
+                {/* Corners from Intelligent Analysis (building total from floor plans + wall heights) */}
+                {(() => {
+                  const aggregation = job?.results_summary?.aggregation || jobTotals?.aggregated_data;
+                  const hasAggregatedCorners = aggregation?.calculated?.total_corner_lf && aggregation.calculated.total_corner_lf > 0;
+
+                  if (hasAggregatedCorners) {
+                    return (
+                      <div className="bg-blue-50 dark:bg-blue-900/20 rounded-lg p-3 space-y-2">
+                        <div className="text-xs font-semibold text-blue-700 dark:text-blue-300 uppercase flex items-center gap-2">
+                          Corners (Building Total)
+                          {aggregation?.heights?.height_source === 'fallback_9ft_per_story' && (
+                            <span className="text-[10px] font-normal text-blue-500">(est. heights)</span>
+                          )}
+                        </div>
+                        <div className="grid grid-cols-2 gap-x-4 text-xs text-gray-600 dark:text-gray-400">
+                          {(aggregation?.corners?.inside_count ?? 0) > 0 && (
+                            <>
+                              <span>Inside ({aggregation?.corners?.inside_count || 0}):</span>
+                              <span className="text-right font-mono">
+                                {(aggregation?.calculated?.inside_corner_lf ?? 0).toFixed(1)} LF
+                              </span>
+                            </>
+                          )}
+                          {(aggregation?.corners?.outside_count ?? 0) > 0 && (
+                            <>
+                              <span>Outside ({aggregation?.corners?.outside_count || 0}):</span>
+                              <span className="text-right font-mono">
+                                {(aggregation?.calculated?.outside_corner_lf ?? 0).toFixed(1)} LF
+                              </span>
+                            </>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  }
+                  return null;
+                })()}
 
                 {/* Soffit & Fascia */}
                 {(displayTotals.soffitAreaSf > 0 || displayTotals.fasciaLf > 0) && (

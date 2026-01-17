@@ -3,12 +3,13 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { ArrowLeft, Download, Loader2, AlertCircle, Home, FolderOpen, Wrench, Receipt, FileSpreadsheet, FileImage } from 'lucide-react';
+import { ArrowLeft, Download, Loader2, AlertCircle, Home, Wrench, Receipt, FileSpreadsheet, FileImage } from 'lucide-react';
 import JSZip from 'jszip';
 import { saveAs } from 'file-saver';
 import { Badge } from '@/components/ui/badge';
 import { exportTakeoffToExcel, exportVendorTakeoff, TakeoffLineItem, TakeoffHeader, LaborItem, OverheadItem } from '@/lib/utils/exportTakeoffExcel';
 import { toast } from 'sonner';
+import { DETECTION_COLORS, DEFAULT_DETECTION_COLOR, renderMarkupImage, type DetectionForRender } from '@/lib/utils/markupRenderer';
 
 // =============================================================================
 // Types
@@ -17,6 +18,7 @@ import { toast } from 'sonner';
 interface TakeoffRecord extends TakeoffHeader {
   id: string;
   project_id?: string;
+  extraction_job_id?: string | null;
   status?: string;
 }
 
@@ -74,6 +76,25 @@ const DEFAULT_GROUP_COLORS = {
   text: 'text-gray-800 dark:text-gray-200',
   border: 'border-gray-200 dark:border-gray-700',
 };
+
+// Section display order (matches Excel export order)
+const SECTION_ORDER: Record<string, number> = {
+  'siding': 1,
+  'trim': 2,
+  'corners': 3,
+  'flashing': 4,
+  'accessories': 5,
+  'fasteners': 5, // Same priority as accessories
+  'openings': 6,
+  'labor': 90,
+  'overhead': 99,
+  'other': 100,
+};
+
+function getSectionOrder(sectionName: string): number {
+  const normalized = sectionName.toLowerCase();
+  return SECTION_ORDER[normalized] ?? 99;
+}
 
 // =============================================================================
 // Helpers
@@ -216,10 +237,11 @@ export default function TakeoffDetailsPage() {
     }
   }, [takeoffId]);
 
-  // Group line items by presentation_group
+  // Group line items by presentation_group and sort by section order
   const groupedLineItems = useMemo(() => {
     if (!data?.line_items) return new Map<string, TakeoffLineItem[]>();
 
+    // First, group items
     const groups = new Map<string, TakeoffLineItem[]>();
     data.line_items.forEach((item) => {
       const group = item.presentation_group || 'Other';
@@ -229,7 +251,13 @@ export default function TakeoffDetailsPage() {
       groups.get(group)!.push(item);
     });
 
-    return groups;
+    // Sort groups by section order (Siding first, then Trim, etc.)
+    const sortedEntries = Array.from(groups.entries()).sort(
+      ([a], [b]) => getSectionOrder(a) - getSectionOrder(b)
+    );
+
+    // Return as a new Map with sorted order
+    return new Map(sortedEntries);
   }, [data?.line_items]);
 
   // Handle Excel download
@@ -282,6 +310,10 @@ export default function TakeoffDetailsPage() {
     }
   };
 
+  // ==========================================================================
+  // Markup Plans Download - Using shared utility
+  // ==========================================================================
+
   // Handle Markup Plans download (elevation images with detection overlays)
   const handleDownloadMarkupPlans = async () => {
     if (!data?.takeoff?.project_id) {
@@ -291,12 +323,25 @@ export default function TakeoffDetailsPage() {
 
     setIsDownloadingMarkup(true);
     try {
-      // Fetch extraction pages for this project
+      // Fetch extraction pages with detections for this project
+      console.log('=== MARKUP DOWNLOAD DEBUG ===');
+      console.log('[DOWNLOAD] Fetching pages for project:', data.takeoff.project_id);
+
       const response = await fetch(`/api/extraction-pages?project_id=${data.takeoff.project_id}`);
       const result = await response.json();
 
+      console.log('[DOWNLOAD] API response success:', result.success);
+      console.log('[DOWNLOAD] Pages received:', result.pages?.length);
+      if (result.pages?.length > 0) {
+        console.log('[DOWNLOAD] First page:', result.pages[0]);
+        console.log('[DOWNLOAD] First page detections count:', result.pages[0]?.detections?.length);
+        if (result.pages[0]?.detections?.length > 0) {
+          console.log('[DOWNLOAD] Sample detection:', result.pages[0].detections[0]);
+        }
+      }
+
       if (!result.success || !result.pages?.length) {
-        toast.error('No markup images found for this project');
+        toast.error('No elevation pages found for this project');
         setIsDownloadingMarkup(false);
         return;
       }
@@ -306,34 +351,48 @@ export default function TakeoffDetailsPage() {
         page_number: number;
         elevation_name: string | null;
         image_url: string;
+        detections: Array<{
+          id: string;
+          class: string;
+          pixel_x: number;
+          pixel_y: number;
+          pixel_width: number;
+          pixel_height: number;
+          polygon_points?: Array<{x: number, y: number}> | null;
+          area_sf: number | null;
+          perimeter_lf: number | null;
+        }>;
       }>;
 
-      // Create zip file with all elevation images
+      // Create zip file
       const zip = new JSZip();
       const folder = zip.folder('markup_plans');
 
-      toast.info(`Downloading ${pages.length} elevation images...`);
+      toast.info(`Rendering ${pages.length} elevation pages with detections...`);
 
-      // Download each image and add to zip
+      // Render each page with detection overlays
       for (let i = 0; i < pages.length; i++) {
         const page = pages[i];
         try {
-          const imageResponse = await fetch(page.image_url);
-          if (!imageResponse.ok) {
-            console.error(`Failed to fetch image for page ${page.page_number}`);
-            continue;
-          }
-          const blob = await imageResponse.blob();
+          toast.info(`Rendering ${page.elevation_name || `page ${page.page_number}`}...`);
+
+          // Render detections onto the image
+          const markupBlob = await renderMarkupImage(
+            page.image_url,
+            page.detections || [],
+            page.elevation_name
+          );
 
           // Create filename from elevation name or page number
           const elevationLabel = page.elevation_name
             ? page.elevation_name.replace(/[^a-z0-9]/gi, '_')
             : `page_${page.page_number}`;
-          const filename = `elevation_${String(i + 1).padStart(2, '0')}_${elevationLabel}.png`;
+          const filename = `elevation_${String(i + 1).padStart(2, '0')}_${elevationLabel}_markup.png`;
 
-          folder?.file(filename, blob);
+          folder?.file(filename, markupBlob);
         } catch (imgErr) {
-          console.error(`Error downloading image for page ${page.page_number}:`, imgErr);
+          console.error(`Error rendering page ${page.page_number}:`, imgErr);
+          // Continue with other pages
         }
       }
 
@@ -342,7 +401,7 @@ export default function TakeoffDetailsPage() {
       const zipFilename = `${data.takeoff.client_name?.replace(/[^a-z0-9]/gi, '_') || data.takeoff.takeoff_name?.replace(/\s+/g, '_') || 'project'}_markup_plans_${new Date().toISOString().split('T')[0]}.zip`;
 
       saveAs(zipBlob, zipFilename);
-      toast.success('Markup plans downloaded successfully');
+      toast.success(`Downloaded ${pages.length} markup plans with detection overlays!`);
     } catch (err) {
       console.error('Markup plans download error:', err);
       toast.error('Failed to download markup plans');
@@ -381,13 +440,13 @@ export default function TakeoffDetailsPage() {
           <div className="flex items-center gap-4">
             {/* Back navigation */}
             <div className="flex items-center gap-2">
-              {takeoff.project_id && (
+              {takeoff.project_id && takeoff.extraction_job_id && (
                 <Link
-                  href={`/projects/${takeoff.project_id}`}
+                  href={`/projects/${takeoff.project_id}/extraction/${takeoff.extraction_job_id}`}
                   className="flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white hover:bg-gray-100 dark:hover:bg-gray-800 rounded-md transition-colors"
                 >
-                  <FolderOpen className="w-4 h-4" />
-                  <span className="hidden sm:inline">Back to Project</span>
+                  <ArrowLeft className="w-4 h-4" />
+                  <span className="hidden sm:inline">Back to Editor</span>
                 </Link>
               )}
               <Link
@@ -789,13 +848,13 @@ export default function TakeoffDetailsPage() {
         {/* Bottom Actions */}
         <div className="flex items-center justify-between py-4">
           <div className="flex items-center gap-3">
-            {takeoff.project_id && (
+            {takeoff.project_id && takeoff.extraction_job_id && (
               <Link
-                href={`/projects/${takeoff.project_id}`}
+                href={`/projects/${takeoff.project_id}/extraction/${takeoff.extraction_job_id}`}
                 className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-md hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
               >
-                <FolderOpen className="w-4 h-4" />
-                Back to Project
+                <ArrowLeft className="w-4 h-4" />
+                Back to Editor
               </Link>
             )}
             <Link

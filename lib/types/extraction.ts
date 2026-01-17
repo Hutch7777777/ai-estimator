@@ -151,6 +151,29 @@ export interface ExtractionJob {
   completed_at: string | null;
   default_scale_ratio: number | null;
   plan_dpi: number | null;
+  // Results from intelligent analysis and aggregation
+  results_summary?: {
+    // From intelligent analysis
+    total_pages_analyzed?: number;
+    successful?: number;
+    failed?: number;
+    total_time_seconds?: number;
+    avg_time_per_page_ms?: number;
+    total_input_tokens?: number;
+    total_output_tokens?: number;
+    estimated_cost_usd?: number;
+    page_type_counts?: Record<string, number>;
+    element_totals?: {
+      windows?: number;
+      doors?: number;
+      garages?: number;
+      gables?: number;
+      outside_corners?: number;
+      inside_corners?: number;
+    };
+    // From aggregation service
+    aggregation?: ExtractionJobTotals['aggregated_data'];
+  };
 }
 
 export interface ExtractionPage {
@@ -318,6 +341,65 @@ export interface ExtractionJobTotals {
   // Derived values
   siding_squares: number;
   calculation_version: string | null;
+
+  // Corner data from intelligent analysis aggregation
+  outside_corners_count?: number;
+  inside_corners_count?: number;
+  outside_corners_lf?: number;
+  inside_corners_lf?: number;
+  corner_source?: string;
+  total_wall_height_ft?: number;
+  height_source?: string;
+  height_confidence?: number;
+
+  // Full aggregated data from /aggregate-job (stored in job results_summary.aggregation)
+  aggregated_data?: {
+    corners?: {
+      outside_count?: number;
+      outside_count_confidence?: number;
+      outside_count_source?: string;
+      inside_count?: number;
+      inside_count_confidence?: number;
+      inside_count_source?: string;
+    };
+    heights?: {
+      stories?: number;
+      total_wall_height_ft?: number;
+      height_source?: string;
+      height_confidence?: number;
+      story_heights?: Array<{ label: string; height_ft: number; source: string }>;
+    };
+    calculated?: {
+      outside_corner_lf?: number;
+      inside_corner_lf?: number;
+      total_corner_lf?: number;
+    };
+    elements?: {
+      windows?: { count_from_schedule?: number; count_from_elevations?: number; recommended_count?: number; source?: string };
+      doors?: { count_from_schedule?: number; count_from_elevations?: number; recommended_count?: number; source?: string };
+      gables?: { count?: number; confidence?: number; source?: string };
+      garages?: { count?: number; position?: string; widths?: number[]; source?: string };
+    };
+    materials?: {
+      siding_type?: string;
+      siding_profile?: string;
+      siding_exposure_inches?: number;
+      source?: string;
+    };
+    spatial?: {
+      stories?: number;
+      roof_style?: string;
+      roof_pitch?: string;
+      foundation_type?: string;
+      has_porch?: boolean;
+      porch_type?: string;
+    };
+    quality?: {
+      data_completeness?: number;
+      missing_data?: string[];
+      warnings?: string[];
+    };
+  };
 }
 
 // =============================================================================

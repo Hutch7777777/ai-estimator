@@ -4,6 +4,8 @@ import React, { useState, useCallback, useEffect, useMemo, useRef } from 'react'
 import { useRouter } from 'next/navigation';
 import { Loader2, AlertCircle, RefreshCw, Eye, EyeOff, X, Layers, CheckCircle, DollarSign, FileText, Download, ExternalLink } from 'lucide-react';
 import { toast } from 'sonner';
+import JSZip from 'jszip';
+import { saveAs } from 'file-saver';
 import {
   useExtractionData,
   useDetectionSync,
@@ -22,6 +24,7 @@ import {
   calculateLineMeasurements,
   calculateAreaMeasurements,
 } from '@/lib/utils/polygonUtils';
+import { renderMarkupImage } from '@/lib/utils/markupRenderer';
 import type {
   ViewTransform,
   ToolMode,
@@ -151,6 +154,7 @@ export default function DetectionEditor({
     setCurrentPageId,
     currentPageDetections,
     elevationCalcs,
+    jobTotals,
     loading,
     error: dataError,
     reviewProgress,
@@ -172,6 +176,10 @@ export default function DetectionEditor({
     restoreDrafts,
     getAllDetections,
   } = useExtractionData(jobId, { includeDeleted: true });
+
+  // Debug: Log aggregation data
+  console.log('[DetectionEditor] Job results_summary:', job?.results_summary);
+  console.log('[DetectionEditor] JobTotals:', jobTotals);
 
   // Note: In local-first mode, we only use useDetectionSync for legacy/fallback purposes
   // All edits now stay local until explicit validation
@@ -217,6 +225,7 @@ export default function DetectionEditor({
   const [showApprovalResults, setShowApprovalResults] = useState(false);
   const [takeoffDetails, setTakeoffDetails] = useState<TakeoffData | null>(null);
   const [isLoadingDetails, setIsLoadingDetails] = useState(false);
+  const [isDownloadingMarkup, setIsDownloadingMarkup] = useState(false);
 
   // Debug: Log render state for approval modal
   console.log('[DetectionEditor Render]', {
@@ -2002,6 +2011,103 @@ export default function DetectionEditor({
     onError,
   ]);
 
+  // ==========================================================================
+  // Download Markup Plans Handler
+  // ==========================================================================
+
+  const handleDownloadMarkupPlans = useCallback(async () => {
+    if (!pages || pages.length === 0) {
+      toast.error('No pages available to download');
+      return;
+    }
+
+    // Filter to elevation pages only
+    const elevationPages = pages.filter((p) => p.page_type === 'elevation');
+    if (elevationPages.length === 0) {
+      toast.error('No elevation pages found');
+      return;
+    }
+
+    setIsDownloadingMarkup(true);
+
+    try {
+      // Get all detections to map by page
+      const allDetections = getAllDetections();
+      const detectionsByPage = new Map<string, ExtractionDetection[]>();
+      for (const det of allDetections) {
+        if (det.status !== 'deleted') {
+          if (!detectionsByPage.has(det.page_id)) {
+            detectionsByPage.set(det.page_id, []);
+          }
+          detectionsByPage.get(det.page_id)!.push(det);
+        }
+      }
+
+      // Create zip file
+      const zip = new JSZip();
+      const folder = zip.folder('markup_plans');
+
+      toast.info(`Rendering ${elevationPages.length} elevation pages with detections...`);
+
+      // Render each page with detection overlays
+      for (let i = 0; i < elevationPages.length; i++) {
+        const page = elevationPages[i];
+        const imageUrl = page.original_image_url || page.image_url;
+
+        if (!imageUrl) {
+          console.warn(`[Download] Page ${page.page_number} has no image URL, skipping`);
+          continue;
+        }
+
+        try {
+          toast.info(`Rendering ${page.elevation_name || `page ${page.page_number}`}...`);
+
+          // Get detections for this page and convert to render format
+          const pageDetections = detectionsByPage.get(page.id) || [];
+          const detectionsForRender = pageDetections.map((d) => ({
+            class: d.class,
+            pixel_x: d.pixel_x,
+            pixel_y: d.pixel_y,
+            pixel_width: d.pixel_width,
+            pixel_height: d.pixel_height,
+            polygon_points: d.polygon_points,
+          }));
+
+          // Render detections onto the image
+          const markupBlob = await renderMarkupImage(
+            imageUrl,
+            detectionsForRender,
+            page.elevation_name
+          );
+
+          // Create filename from elevation name or page number
+          const elevationLabel = page.elevation_name
+            ? page.elevation_name.replace(/[^a-z0-9]/gi, '_')
+            : `page_${page.page_number}`;
+          const filename = `elevation_${String(i + 1).padStart(2, '0')}_${elevationLabel}_markup.png`;
+
+          folder?.file(filename, markupBlob);
+        } catch (imgErr) {
+          console.error(`[Download] Error rendering page ${page.page_number}:`, imgErr);
+          // Continue with other pages
+        }
+      }
+
+      // Generate and download the zip
+      const zipBlob = await zip.generateAsync({ type: 'blob' });
+      const projectName = job?.project_name?.replace(/[^a-z0-9]/gi, '_') || 'project';
+      const zipFilename = `${projectName}_markup_plans_${new Date().toISOString().split('T')[0]}.zip`;
+
+      saveAs(zipBlob, zipFilename);
+      toast.success(`Downloaded ${elevationPages.length} markup plans with detection overlays!`);
+    } catch (err) {
+      console.error('[Download] Markup plans error:', err);
+      toast.error('Failed to download markup plans');
+    } finally {
+      setIsDownloadingMarkup(false);
+    }
+  }, [pages, job?.project_name, getAllDetections]);
+
   // Debug: Log when visibleDetections changes
   useEffect(() => {
     if (visibleDetections.length > 0) {
@@ -2075,6 +2181,8 @@ export default function DetectionEditor({
                 else if (mode === 'line') setLineClass(cls);
                 else if (mode === 'point') setPointClass(cls);
               }}
+              onDownloadMarkupPlans={handleDownloadMarkupPlans}
+              isDownloadingMarkup={isDownloadingMarkup}
             />
 
             {/* Canvas Area - flex-1 with min-h-0 allows proper flex shrinking */}
@@ -2233,6 +2341,8 @@ export default function DetectionEditor({
               onMultiSelectModeChange={setMultiSelectMode}
               liveDerivedTotals={liveDerivedTotals}
               allPagesTotals={allPagesTotals}
+              job={job}
+              jobTotals={jobTotals}
             />
           </div>
         </>
