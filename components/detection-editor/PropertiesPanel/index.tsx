@@ -11,6 +11,7 @@ import type {
 import ClassSelector from './ClassSelector';
 import SelectionProperties from './SelectionProperties';
 import PageTotals from './PageTotals';
+import MaterialAssignment from './MaterialAssignment';
 
 // =============================================================================
 // Types
@@ -34,7 +35,7 @@ const PropertiesPanel = memo(function PropertiesPanel({
   allDetections,
   currentPage,
   onClassChange,
-  // onMaterialChange - reserved for future MaterialSearch component
+  onMaterialChange,
   disabled = false,
 }: PropertiesPanelProps) {
   const selectionCount = selectedDetections.length;
@@ -50,6 +51,13 @@ const PropertiesPanel = memo(function PropertiesPanel({
   const handleClassChange = (newClass: DetectionClass) => {
     if (selectedIds.length > 0) {
       onClassChange(selectedIds, newClass);
+    }
+  };
+
+  // Handler for material assignment
+  const handleMaterialAssign = (detectionIds: string[], materialId: string | null) => {
+    if (onMaterialChange) {
+      onMaterialChange(detectionIds, materialId);
     }
   };
 
@@ -96,17 +104,11 @@ const PropertiesPanel = memo(function PropertiesPanel({
           {/* Measurements */}
           <SelectionProperties selectedDetections={selectedDetections} pixelsPerFoot={currentPage?.scale_ratio || 64} />
 
-          {/* Future: Material Assignment
-          <div className="space-y-2">
-            <label className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-              Assigned Material
-            </label>
-            <MaterialSearch
-              selectedDetections={selectedDetections}
-              onMaterialChange={onMaterialChange}
-            />
-          </div>
-          */}
+          {/* Material Assignment */}
+          <MaterialAssignment
+            selectedDetections={selectedDetections}
+            onMaterialAssign={handleMaterialAssign}
+          />
         </div>
       )}
 
