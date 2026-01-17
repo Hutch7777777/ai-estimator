@@ -686,3 +686,99 @@ export function subscribeToJobTotals(
     supabase.removeChannel(channel);
   };
 }
+
+/**
+ * Subscribe to status updates for a single extraction job
+ * Use this when monitoring a specific job's progress
+ */
+export function subscribeToJobStatus(
+  jobId: string,
+  onStatusChange: (job: ExtractionJob) => void
+): () => void {
+  const supabase = getClient();
+
+  const channel = supabase
+    .channel(`job-status-${jobId}`)
+    .on(
+      'postgres_changes',
+      {
+        event: 'UPDATE',
+        schema: 'public',
+        table: 'extraction_jobs',
+        filter: `id=eq.${jobId}`,
+      },
+      (payload) => {
+        if (payload.new) {
+          console.log(`[subscribeToJobStatus] Job ${jobId} updated:`, payload.new.status);
+          onStatusChange(payload.new as ExtractionJob);
+        }
+      }
+    )
+    .subscribe((status) => {
+      if (status === 'SUBSCRIBED') {
+        console.log(`[subscribeToJobStatus] Subscribed to job: ${jobId}`);
+      }
+    });
+
+  return () => {
+    console.log(`[subscribeToJobStatus] Unsubscribing from job: ${jobId}`);
+    supabase.removeChannel(channel);
+  };
+}
+
+/**
+ * Subscribe to all extraction job updates (for dashboard)
+ * Watches for both new jobs (INSERT) and status updates (UPDATE)
+ */
+export function subscribeToAllJobs(
+  onJobUpdate: (job: ExtractionJob) => void,
+  onJobInsert?: (job: ExtractionJob) => void
+): () => void {
+  const supabase = getClient();
+
+  const channel = supabase
+    .channel('all-extraction-jobs')
+    .on(
+      'postgres_changes',
+      {
+        event: 'INSERT',
+        schema: 'public',
+        table: 'extraction_jobs',
+      },
+      (payload) => {
+        if (payload.new) {
+          console.log('[subscribeToAllJobs] New job inserted:', payload.new.id);
+          // Call onJobInsert if provided, otherwise fall back to onJobUpdate
+          if (onJobInsert) {
+            onJobInsert(payload.new as ExtractionJob);
+          } else {
+            onJobUpdate(payload.new as ExtractionJob);
+          }
+        }
+      }
+    )
+    .on(
+      'postgres_changes',
+      {
+        event: 'UPDATE',
+        schema: 'public',
+        table: 'extraction_jobs',
+      },
+      (payload) => {
+        if (payload.new) {
+          console.log('[subscribeToAllJobs] Job updated:', payload.new.id, '->', payload.new.status);
+          onJobUpdate(payload.new as ExtractionJob);
+        }
+      }
+    )
+    .subscribe((status) => {
+      if (status === 'SUBSCRIBED') {
+        console.log('[subscribeToAllJobs] Subscribed to all extraction jobs');
+      }
+    });
+
+  return () => {
+    console.log('[subscribeToAllJobs] Unsubscribing from all jobs');
+    supabase.removeChannel(channel);
+  };
+}

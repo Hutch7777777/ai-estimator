@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect } from "react";
 import Link from "next/link";
 import { useOrganization } from "@/lib/hooks/useOrganization";
 import {
@@ -37,17 +37,12 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { ExtractionUploadStep } from "@/components/project-form/ExtractionUploadStep";
-import type { JobStatus } from "@/lib/types/extraction";
+import { subscribeToAllJobs } from "@/lib/supabase/extractionQueries";
+import type { JobStatus, ExtractionJob } from "@/lib/types/extraction";
 
 // =============================================================================
 // Constants
 // =============================================================================
-
-// Status states that indicate active processing (should trigger polling)
-const ACTIVE_STATUSES: JobStatus[] = ['converting', 'classifying', 'processing'];
-
-// Polling interval in milliseconds
-const POLLING_INTERVAL = 4000;
 
 interface ExtractionJobWithProject {
   id: string;
@@ -66,7 +61,6 @@ export function ExtractionsTable() {
   const [error, setError] = useState<string | null>(null);
   const [uploadDialogOpen, setUploadDialogOpen] = useState(false);
   const [tempProjectId] = useState(() => crypto.randomUUID());
-  const [refreshKey, setRefreshKey] = useState(0);
 
   // Inline editing state
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -169,7 +163,7 @@ export function ExtractionsTable() {
     }
 
     fetchJobs();
-  }, [organization?.id, isOrgLoading, refreshKey]);
+  }, [organization?.id, isOrgLoading]);
 
   // Add timeout for organization loading to prevent infinite loading state
   useEffect(() => {
@@ -186,51 +180,57 @@ export function ExtractionsTable() {
   }, [isOrgLoading]);
 
   // ==========================================================================
-  // Auto-polling for active jobs
+  // Realtime subscription for job updates
   // ==========================================================================
 
-  // Check if any jobs are in an active (processing) state
-  const hasActiveJobs = useMemo(() =>
-    jobs.some(job => ACTIVE_STATUSES.includes(job.status)),
-    [jobs]
-  );
-
-  // Poll for updates when there are active jobs
   useEffect(() => {
-    // Don't poll if no active jobs, still loading, or no organization
-    if (!hasActiveJobs || loading || isOrgLoading || !organization?.id) return;
+    // Don't subscribe if still loading or no organization
+    if (loading || isOrgLoading || !organization?.id) return;
 
-    console.log('[ExtractionsTable] Starting polling - active jobs detected');
+    console.log('[ExtractionsTable] Setting up realtime subscription');
 
-    const interval = setInterval(async () => {
-      try {
-        // Silent refresh - don't set loading state to avoid UI flicker
-        const response = await fetch(
-          `${process.env.NEXT_PUBLIC_SUPABASE_URL}/rest/v1/extraction_jobs?select=id,project_id,project_name,status,total_pages,elevation_count,created_at,completed_at&order=created_at.desc`,
-          {
-            headers: {
-              'apikey': process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-              'Authorization': `Bearer ${process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY}`
-            }
+    const unsubscribe = subscribeToAllJobs(
+      // onJobUpdate - when an existing job's status changes
+      (updatedJob: ExtractionJob) => {
+        setJobs(prev => prev.map(job =>
+          job.id === updatedJob.id
+            ? {
+                ...job,
+                status: updatedJob.status,
+                total_pages: updatedJob.total_pages,
+                elevation_count: updatedJob.elevation_count,
+                completed_at: updatedJob.completed_at,
+              }
+            : job
+        ));
+      },
+      // onJobInsert - when a new job is created
+      (newJob: ExtractionJob) => {
+        setJobs(prev => {
+          // Check if job already exists (avoid duplicates)
+          if (prev.some(job => job.id === newJob.id)) {
+            return prev;
           }
-        );
-
-        if (response.ok) {
-          const data = await response.json();
-          setJobs(data || []);
-          console.log('[ExtractionsTable] Polling update:', data?.length, 'jobs');
-        }
-      } catch (err) {
-        console.error('[ExtractionsTable] Polling error:', err);
-        // Don't set error state for polling failures - just log and continue
+          // Add new job at the beginning (most recent first)
+          return [{
+            id: newJob.id,
+            project_id: newJob.project_id,
+            project_name: newJob.project_name,
+            status: newJob.status,
+            total_pages: newJob.total_pages,
+            elevation_count: newJob.elevation_count,
+            created_at: newJob.created_at,
+            completed_at: newJob.completed_at,
+          }, ...prev];
+        });
       }
-    }, POLLING_INTERVAL);
+    );
 
     return () => {
-      console.log('[ExtractionsTable] Stopping polling');
-      clearInterval(interval);
+      console.log('[ExtractionsTable] Cleaning up realtime subscription');
+      unsubscribe();
     };
-  }, [hasActiveJobs, loading, isOrgLoading, organization?.id]);
+  }, [loading, isOrgLoading, organization?.id]);
 
   // Format date for display
   const formatDate = (dateString: string): string => {
@@ -242,23 +242,6 @@ export function ExtractionsTable() {
       hour: "2-digit",
       minute: "2-digit",
     });
-  };
-
-  // Get status badge variant
-  const getStatusVariant = (status: JobStatus): "default" | "secondary" | "destructive" | "outline" => {
-    switch (status) {
-      case "complete":
-      case "approved":
-        return "default"; // green-ish
-      case "failed":
-        return "destructive";
-      case "converting":
-      case "classifying":
-      case "processing":
-        return "secondary"; // blue/gray
-      default:
-        return "outline";
-    }
   };
 
   // Get status display text
@@ -483,8 +466,8 @@ export function ExtractionsTable() {
           <ExtractionUploadStep
             projectId={tempProjectId}
             onComplete={() => {
+              // Just close the dialog - realtime subscription will add the new job
               setUploadDialogOpen(false);
-              setRefreshKey(prev => prev + 1);
             }}
             onError={(error) => {
               console.error("Extraction error:", error);
