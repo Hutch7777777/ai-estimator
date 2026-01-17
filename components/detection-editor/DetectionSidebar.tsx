@@ -591,10 +591,19 @@ const DetectionSidebar = memo(function DetectionSidebar({
                   </div>
                 )}
 
-                {/* Corners from Intelligent Analysis (building total from floor plans + wall heights) */}
+                {/* Corners from Intelligent Analysis or Job Totals */}
                 {(() => {
+                  // Try aggregation data first (from intelligent analysis)
                   const aggregation = job?.results_summary?.aggregation || jobTotals?.aggregated_data;
                   const hasAggregatedCorners = aggregation?.calculated?.total_corner_lf && aggregation.calculated.total_corner_lf > 0;
+
+                  // Fallback to direct jobTotals columns
+                  const hasDirectCorners = !hasAggregatedCorners && (
+                    (jobTotals?.inside_corners_count ?? 0) > 0 ||
+                    (jobTotals?.outside_corners_count ?? 0) > 0 ||
+                    (jobTotals?.inside_corners_lf ?? 0) > 0 ||
+                    (jobTotals?.outside_corners_lf ?? 0) > 0
+                  );
 
                   if (hasAggregatedCorners) {
                     return (
@@ -626,6 +635,44 @@ const DetectionSidebar = memo(function DetectionSidebar({
                       </div>
                     );
                   }
+
+                  if (hasDirectCorners) {
+                    const insideCount = jobTotals?.inside_corners_count ?? 0;
+                    const outsideCount = jobTotals?.outside_corners_count ?? 0;
+                    const insideLf = jobTotals?.inside_corners_lf ?? 0;
+                    const outsideLf = jobTotals?.outside_corners_lf ?? 0;
+                    const totalLf = insideLf + outsideLf;
+
+                    return (
+                      <div className="bg-blue-50 dark:bg-blue-900/20 rounded-lg p-3 space-y-2">
+                        <div className="text-xs font-semibold text-blue-700 dark:text-blue-300 uppercase flex items-center gap-2">
+                          Corners ({insideCount + outsideCount})
+                          <span className="text-[10px] font-normal text-blue-500">
+                            {totalLf.toFixed(1)} LF total
+                          </span>
+                        </div>
+                        <div className="grid grid-cols-2 gap-x-4 text-xs text-gray-600 dark:text-gray-400">
+                          {insideCount > 0 && (
+                            <>
+                              <span>Inside ({insideCount}):</span>
+                              <span className="text-right font-mono">
+                                {insideLf.toFixed(1)} LF
+                              </span>
+                            </>
+                          )}
+                          {outsideCount > 0 && (
+                            <>
+                              <span>Outside ({outsideCount}):</span>
+                              <span className="text-right font-mono">
+                                {outsideLf.toFixed(1)} LF
+                              </span>
+                            </>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  }
+
                   return null;
                 })()}
 
