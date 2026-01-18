@@ -1,7 +1,7 @@
 'use client';
 
 import React, { memo, useState, useRef, useCallback } from 'react';
-import { MousePointer2, Pentagon, Hand, Ruler, Minus, MapPin, ChevronRight, Download, Loader2 } from 'lucide-react';
+import { MousePointer2, Pentagon, Hand, Ruler, Minus, MapPin, ChevronRight, Download, Loader2, Scissors } from 'lucide-react';
 import type { ToolMode, DetectionClass } from '@/lib/types/extraction';
 import { DETECTION_CLASS_COLORS } from '@/lib/types/extraction';
 import ToolClassSelector from './ToolClassSelector';
@@ -27,6 +27,8 @@ interface MarkupToolbarProps {
   onDownloadMarkupPlans?: () => void;
   /** Whether markup plans are currently downloading */
   isDownloadingMarkup?: boolean;
+  /** Number of currently selected detections (for split tool enable state) */
+  selectedCount?: number;
 }
 
 interface ToolDefinition {
@@ -38,6 +40,8 @@ interface ToolDefinition {
   hasClassSelector?: boolean;
   /** The measurement type for class filtering */
   measurementType?: 'area' | 'linear' | 'count';
+  /** If true, this tool requires exactly 1 selection to be active */
+  requiresSingleSelection?: boolean;
 }
 
 // =============================================================================
@@ -49,6 +53,7 @@ const TOOLS: ToolDefinition[] = [
   { id: 'create', icon: Pentagon, label: 'Draw Detection', shortcut: 'D', hasClassSelector: true, measurementType: 'area' },
   { id: 'line', icon: Minus, label: 'Draw Line (LF)', shortcut: 'L', hasClassSelector: true, measurementType: 'linear' },
   { id: 'point', icon: MapPin, label: 'Place Marker (Count)', shortcut: 'P', hasClassSelector: true, measurementType: 'count' },
+  { id: 'split', icon: Scissors, label: 'Split Detection', shortcut: 'S', requiresSingleSelection: true },
   { id: 'pan', icon: Hand, label: 'Pan Canvas', shortcut: 'H' },
   { id: 'divider' },
   { id: 'calibrate', icon: Ruler, label: 'Calibrate Scale', shortcut: 'C' },
@@ -80,6 +85,7 @@ const MarkupToolbar = memo(function MarkupToolbar({
   onClassSelect,
   onDownloadMarkupPlans,
   isDownloadingMarkup = false,
+  selectedCount = 0,
 }: MarkupToolbarProps) {
   // Track which tool's class selector is open
   const [openSelector, setOpenSelector] = useState<'create' | 'line' | 'point' | null>(null);
@@ -157,7 +163,13 @@ const MarkupToolbar = memo(function MarkupToolbar({
           const classColor = selectedClass ? DETECTION_CLASS_COLORS[selectedClass] : undefined;
           const hasSelector = tool.hasClassSelector;
 
-          const tooltipText = `${tool.label} (${tool.shortcut})`;
+          // Check if tool requires single selection
+          const requiresSingleSelection = tool.requiresSingleSelection === true;
+          const isToolDisabled = disabled || (requiresSingleSelection && selectedCount !== 1);
+
+          const tooltipText = requiresSingleSelection && selectedCount !== 1
+            ? `${tool.label} (select exactly 1 detection)`
+            : `${tool.label} (${tool.shortcut})`;
 
           return (
             <div key={tool.id} className="relative">
@@ -169,10 +181,10 @@ const MarkupToolbar = memo(function MarkupToolbar({
                     }}
                     type="button"
                     onClick={() => handleToolClick(tool)}
-                    disabled={disabled}
+                    disabled={isToolDisabled}
                     className={`
                       w-12 h-10 flex items-center justify-center relative transition-colors
-                      ${disabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}
+                      ${isToolDisabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}
                       ${
                         isActive
                           ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 border-l-2 border-blue-600'
@@ -273,6 +285,21 @@ const MarkupToolbar = memo(function MarkupToolbar({
           {/* Exit hint */}
           <div className="text-[10px] text-gray-500 dark:text-gray-400 text-center mt-1">
             Esc to exit
+          </div>
+        </div>
+      )}
+
+      {/* Split mode indicator */}
+      {activeMode === 'split' && (
+        <div className="mt-2 mx-1 px-1.5 py-1.5 bg-red-50 dark:bg-red-900/20 rounded">
+          <div className="text-xs font-medium text-red-700 dark:text-red-300 text-center">
+            Split Mode
+          </div>
+          <div className="text-[10px] text-red-600 dark:text-red-400 text-center mt-1">
+            Draw rectangle to carve out area
+          </div>
+          <div className="text-[10px] text-gray-500 dark:text-gray-400 text-center mt-1">
+            Esc to cancel
           </div>
         </div>
       )}

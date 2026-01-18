@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { Stage, Layer, Image as KonvaImage, Line, Circle } from 'react-konva';
+import { Stage, Layer, Image as KonvaImage, Line, Circle, Rect } from 'react-konva';
 import type Konva from 'konva';
 import type {
   ExtractionPage,
@@ -101,6 +101,11 @@ export interface KonvaDetectionCanvasProps {
   multiSelectMode?: boolean;
   containerWidth: number;
   containerHeight: number;
+  /** Called when user completes a split operation */
+  onSplitDetection?: (
+    originalDetection: ExtractionDetection,
+    splitRect: { x: number; y: number; width: number; height: number }
+  ) => void;
 }
 
 // =============================================================================
@@ -139,6 +144,7 @@ export default function KonvaDetectionCanvas({
   multiSelectMode = false,
   containerWidth,
   containerHeight,
+  onSplitDetection,
 }: KonvaDetectionCanvasProps) {
   const stageRef = useRef<Konva.Stage>(null);
   const imageRef = useRef<Konva.Image>(null);
@@ -171,6 +177,10 @@ export default function KonvaDetectionCanvas({
 
   // Line drawing state (2-point line for LF measurements)
   const [lineStartPoint, setLineStartPoint] = useState<PolygonPoint | null>(null);
+
+  // Split tool state
+  const [splitRect, setSplitRect] = useState<{ x: number; y: number; width: number; height: number } | null>(null);
+  const [isSplitting, setIsSplitting] = useState(false);
 
   // Get image dimensions
   const imageWidth = page.original_width || 1920;
@@ -391,6 +401,23 @@ export default function KonvaDetectionCanvas({
         return;
       }
 
+      // Split mode - draw a rectangle to carve out from selected detection
+      if (toolMode === 'split' && selectedIds.size === 1) {
+        const stage = stageRef.current;
+        if (!stage) return;
+
+        const pointer = stage.getPointerPosition();
+        if (!pointer) return;
+
+        // Transform to image coordinates
+        const imageX = (pointer.x - position.x) / scale;
+        const imageY = (pointer.y - position.y) / scale;
+
+        setSplitRect({ x: imageX, y: imageY, width: 0, height: 0 });
+        setIsSplitting(true);
+        return;
+      }
+
       // Line mode - two clicks to draw a line (works over existing detections)
       if (toolMode === 'line') {
         const stage = stageRef.current;
@@ -551,7 +578,7 @@ export default function KonvaDetectionCanvas({
       // Pan mode handled by Konva's draggable property
       // Verify mode handled by detection click handlers
     },
-    [toolMode, onSelectionChange, isDrawingPolygon, drawingPoints.length, isNearStart, completePolygon, calibrationState.pointA, onCalibrationComplete, resetCalibration, position, scale, lineStartPoint, scaleRatio, activeClass, onDetectionCreate]
+    [toolMode, onSelectionChange, isDrawingPolygon, drawingPoints.length, isNearStart, completePolygon, calibrationState.pointA, onCalibrationComplete, resetCalibration, position, scale, lineStartPoint, scaleRatio, activeClass, onDetectionCreate, selectedIds]
   );
 
   const handleStageMouseMove = useCallback(
@@ -583,6 +610,21 @@ export default function KonvaDetectionCanvas({
         return;
       }
 
+      // Handle split mode mouse move
+      if (isSplitting && splitRect) {
+        const pointer = stage.getPointerPosition();
+        if (pointer) {
+          const imageX = (pointer.x - position.x) / scale;
+          const imageY = (pointer.y - position.y) / scale;
+          setSplitRect(prev => ({
+            ...prev!,
+            width: imageX - prev!.x,
+            height: imageY - prev!.y,
+          }));
+        }
+        return;
+      }
+
       // For other modes, use getRelativePointerPosition (works for polygon drawing)
       const pointer = stage.getRelativePointerPosition();
       if (!pointer) return;
@@ -601,7 +643,41 @@ export default function KonvaDetectionCanvas({
         setIsNearStart(false);
       }
     },
-    [toolMode, isDrawingPolygon, drawingPoints, isPointNearStart, calibrationState.pointA, position, scale, lineStartPoint]
+    [toolMode, isDrawingPolygon, drawingPoints, isPointNearStart, calibrationState.pointA, position, scale, lineStartPoint, isSplitting, splitRect]
+  );
+
+  const handleStageMouseUp = useCallback(
+    (e: Konva.KonvaEventObject<MouseEvent | TouchEvent>) => {
+      // Handle split tool completion
+      if (isSplitting && splitRect) {
+        const minSize = 10; // Minimum rectangle size in pixels
+        const absWidth = Math.abs(splitRect.width);
+        const absHeight = Math.abs(splitRect.height);
+
+        if (absWidth > minSize && absHeight > minSize) {
+          // Get the selected detection
+          const selectedId = Array.from(selectedIds)[0];
+          const selectedDetection = detections.find(d => d.id === selectedId);
+
+          if (selectedDetection && onSplitDetection) {
+            // Normalize the rectangle (handle negative width/height from drawing direction)
+            const normalizedRect = {
+              x: splitRect.width < 0 ? splitRect.x + splitRect.width : splitRect.x,
+              y: splitRect.height < 0 ? splitRect.y + splitRect.height : splitRect.y,
+              width: absWidth,
+              height: absHeight,
+            };
+
+            onSplitDetection(selectedDetection, normalizedRect);
+          }
+        }
+
+        // Reset split state
+        setSplitRect(null);
+        setIsSplitting(false);
+      }
+    },
+    [isSplitting, splitRect, selectedIds, detections, onSplitDetection]
   );
 
   const handleStageDoubleClick = useCallback(
@@ -635,16 +711,23 @@ export default function KonvaDetectionCanvas({
         return;
       }
 
-      // Exit point mode
-      if (toolMode === 'point' || toolMode === 'line') {
+      // Cancel split drawing
+      if (isSplitting) {
+        setSplitRect(null);
+        setIsSplitting(false);
+        return;
+      }
+
+      // Exit point mode or split mode
+      if (toolMode === 'point' || toolMode === 'line' || toolMode === 'split') {
         onExitDrawingMode?.();
         return;
       }
     },
-    [isDrawingPolygon, cancelDrawing, lineStartPoint, toolMode, onExitDrawingMode]
+    [isDrawingPolygon, cancelDrawing, lineStartPoint, toolMode, onExitDrawingMode, isSplitting]
   );
 
-  // Escape key to cancel drawing, calibration, or line drawing
+  // Escape key to cancel drawing, calibration, line drawing, or split
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
@@ -661,12 +744,22 @@ export default function KonvaDetectionCanvas({
           setLineStartPoint(null);
           setCalibrationMousePos(null);
         }
+        if (isSplitting) {
+          e.preventDefault();
+          setSplitRect(null);
+          setIsSplitting(false);
+        }
+        // Exit split mode on escape
+        if (toolMode === 'split') {
+          e.preventDefault();
+          onExitDrawingMode?.();
+        }
       }
     };
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isDrawingPolygon, cancelDrawing, calibrationState.isCalibrating, calibrationState.pointA, resetCalibration, lineStartPoint]);
+  }, [isDrawingPolygon, cancelDrawing, calibrationState.isCalibrating, calibrationState.pointA, resetCalibration, lineStartPoint, isSplitting, toolMode, onExitDrawingMode]);
 
   // ==========================================================================
   // Detection Handlers
@@ -717,6 +810,7 @@ export default function KonvaDetectionCanvas({
   const getCursor = () => {
     if (isDrawingPolygon) return 'crosshair';
     if (lineStartPoint) return 'crosshair';
+    if (isSplitting) return 'crosshair';
     switch (toolMode) {
       case 'pan':
         return 'grab';
@@ -727,6 +821,8 @@ export default function KonvaDetectionCanvas({
       case 'point':
         return 'crosshair';
       case 'calibrate':
+        return 'crosshair';
+      case 'split':
         return 'crosshair';
       case 'verify':
         return 'pointer';
@@ -784,10 +880,12 @@ export default function KonvaDetectionCanvas({
         onDragEnd={handleStageDragEnd}
         onMouseDown={handleStageMouseDown}
         onMouseMove={handleStageMouseMove}
+        onMouseUp={handleStageMouseUp}
         onDblClick={handleStageDoubleClick}
         onContextMenu={handleContextMenu}
         onTouchStart={handleStageMouseDown}
         onTouchMove={handleStageMouseMove}
+        onTouchEnd={handleStageMouseUp}
       >
         <Layer>
           {/* Background Image */}
@@ -1027,6 +1125,21 @@ export default function KonvaDetectionCanvas({
                 </>
               )}
             </>
+          )}
+
+          {/* Split Rectangle Preview */}
+          {splitRect && isSplitting && (
+            <Rect
+              x={Math.min(splitRect.x, splitRect.x + splitRect.width)}
+              y={Math.min(splitRect.y, splitRect.y + splitRect.height)}
+              width={Math.abs(splitRect.width)}
+              height={Math.abs(splitRect.height)}
+              stroke="#ef4444"
+              strokeWidth={2 / scale}
+              dash={[5 / scale, 5 / scale]}
+              fill="rgba(239, 68, 68, 0.15)"
+              listening={false}
+            />
           )}
         </Layer>
       </Stage>

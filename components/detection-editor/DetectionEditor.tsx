@@ -784,6 +784,164 @@ export default function DetectionEditor({
     setSelectedIds(new Set());
   }, [selectedIds, currentPageDetections, updateDetectionLocally]);
 
+  // Handle split detection - creates a new detection from carved area and shrinks original
+  const handleSplitDetection = useCallback(
+    (
+      originalDetection: ExtractionDetection,
+      splitRect: { x: number; y: number; width: number; height: number }
+    ) => {
+      console.log('[DetectionEditor] handleSplitDetection called:', {
+        originalId: originalDetection.id,
+        splitRect,
+      });
+
+      // Get original detection bounds (center-based coordinates)
+      const origLeft = originalDetection.pixel_x - (originalDetection.pixel_width / 2);
+      const origTop = originalDetection.pixel_y - (originalDetection.pixel_height / 2);
+      const origRight = origLeft + originalDetection.pixel_width;
+      const origBottom = origTop + originalDetection.pixel_height;
+
+      // Clamp crop rect to detection bounds
+      const cropLeft = Math.max(splitRect.x, origLeft);
+      const cropTop = Math.max(splitRect.y, origTop);
+      const cropRight = Math.min(splitRect.x + splitRect.width, origRight);
+      const cropBottom = Math.min(splitRect.y + splitRect.height, origBottom);
+
+      const cropWidth = cropRight - cropLeft;
+      const cropHeight = cropBottom - cropTop;
+
+      if (cropWidth < 10 || cropHeight < 10) {
+        console.warn('[DetectionEditor] Split area too small or outside detection');
+        return;
+      }
+
+      // Calculate measurements for new detection
+      const scaleRatio = currentPage?.scale_ratio || 64;
+      const newMeasurements = calculateRealWorldMeasurements(cropWidth, cropHeight, scaleRatio);
+
+      // Create new detection from carved area
+      const newDetection: ExtractionDetection = {
+        id: crypto.randomUUID(),
+        job_id: job?.id || '',
+        page_id: currentPage?.id || '',
+        class: originalDetection.class,
+        detection_index: currentPageDetections.length,
+        confidence: originalDetection.confidence,
+        pixel_x: cropLeft + cropWidth / 2,
+        pixel_y: cropTop + cropHeight / 2,
+        pixel_width: cropWidth,
+        pixel_height: cropHeight,
+        real_width_ft: newMeasurements.real_width_ft,
+        real_height_ft: newMeasurements.real_height_ft,
+        real_width_in: newMeasurements.real_width_in,
+        real_height_in: newMeasurements.real_height_in,
+        area_sf: newMeasurements.area_sf,
+        perimeter_lf: newMeasurements.perimeter_lf,
+        is_triangle: false,
+        matched_tag: null,
+        created_at: new Date().toISOString(),
+        status: 'edited',
+        edited_by: null,
+        edited_at: new Date().toISOString(),
+        original_bbox: null,
+        polygon_points: null,
+        markup_type: 'polygon',
+      };
+
+      // Determine how to shrink the original detection
+      const distToLeft = cropLeft - origLeft;
+      const distToRight = origRight - cropRight;
+      const distToTop = cropTop - origTop;
+      const distToBottom = origBottom - cropBottom;
+
+      let updatedOriginal = { ...originalDetection };
+      let shouldUpdateOriginal = true;
+
+      // If crop touches left edge
+      if (distToLeft < 10) {
+        const newLeft = cropRight;
+        const newWidth = origRight - newLeft;
+        if (newWidth > 10) {
+          updatedOriginal.pixel_x = newLeft + newWidth / 2;
+          updatedOriginal.pixel_width = newWidth;
+        } else {
+          shouldUpdateOriginal = false;
+        }
+      }
+      // If crop touches right edge
+      else if (distToRight < 10) {
+        const newRight = cropLeft;
+        const newWidth = newRight - origLeft;
+        if (newWidth > 10) {
+          updatedOriginal.pixel_x = origLeft + newWidth / 2;
+          updatedOriginal.pixel_width = newWidth;
+        } else {
+          shouldUpdateOriginal = false;
+        }
+      }
+      // If crop touches top edge
+      else if (distToTop < 10) {
+        const newTop = cropBottom;
+        const newHeight = origBottom - newTop;
+        if (newHeight > 10) {
+          updatedOriginal.pixel_y = newTop + newHeight / 2;
+          updatedOriginal.pixel_height = newHeight;
+        } else {
+          shouldUpdateOriginal = false;
+        }
+      }
+      // If crop touches bottom edge
+      else if (distToBottom < 10) {
+        const newBottom = cropTop;
+        const newHeight = newBottom - origTop;
+        if (newHeight > 10) {
+          updatedOriginal.pixel_y = origTop + newHeight / 2;
+          updatedOriginal.pixel_height = newHeight;
+        } else {
+          shouldUpdateOriginal = false;
+        }
+      }
+      // If crop is in the middle - just extract, don't modify original
+      else {
+        console.log('[DetectionEditor] Middle split - creating extraction only');
+        shouldUpdateOriginal = false;
+      }
+
+      // Update original detection measurements if modified
+      if (shouldUpdateOriginal) {
+        updatedOriginal.status = 'edited';
+        updatedOriginal.edited_at = new Date().toISOString();
+        const origMeasurements = calculateRealWorldMeasurements(
+          updatedOriginal.pixel_width,
+          updatedOriginal.pixel_height,
+          scaleRatio
+        );
+        updatedOriginal.real_width_ft = origMeasurements.real_width_ft;
+        updatedOriginal.real_height_ft = origMeasurements.real_height_ft;
+        updatedOriginal.real_width_in = origMeasurements.real_width_in;
+        updatedOriginal.real_height_in = origMeasurements.real_height_in;
+        updatedOriginal.area_sf = origMeasurements.area_sf;
+        updatedOriginal.perimeter_lf = origMeasurements.perimeter_lf;
+
+        // Update original detection
+        updateDetectionLocally(updatedOriginal);
+        console.log('[DetectionEditor] Updated original detection:', updatedOriginal.id);
+      }
+
+      // Add the new carved detection
+      addDetectionLocally(newDetection);
+      console.log('[DetectionEditor] Created new split detection:', newDetection.id);
+
+      // Select the new detection
+      setSelectedDetectionId(newDetection.id);
+      setSelectedIds(new Set([newDetection.id]));
+
+      // Switch back to select mode
+      setToolMode('select');
+    },
+    [job?.id, currentPage?.id, currentPage?.scale_ratio, currentPageDetections.length, updateDetectionLocally, addDetectionLocally]
+  );
+
   // Handle class change from PropertiesPanel
   // Local-first: Only updates local state, no sync to server
   const handleClassChange = useCallback(
@@ -2183,6 +2341,7 @@ export default function DetectionEditor({
               }}
               onDownloadMarkupPlans={handleDownloadMarkupPlans}
               isDownloadingMarkup={isDownloadingMarkup}
+              selectedCount={selectedIds.size}
             />
 
             {/* Canvas Area - flex-1 with min-h-0 allows proper flex shrinking */}
@@ -2276,6 +2435,7 @@ export default function DetectionEditor({
                     multiSelectMode={multiSelectMode}
                     containerWidth={canvasContainerSize.width}
                     containerHeight={canvasContainerSize.height}
+                    onSplitDetection={handleSplitDetection}
                   />
                 </div>
               ) : (
