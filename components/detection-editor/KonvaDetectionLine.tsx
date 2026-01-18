@@ -3,8 +3,20 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { Line, Circle, Group, Text, Label, Tag } from 'react-konva';
 import type Konva from 'konva';
-import type { ExtractionDetection, DetectionClass, PolygonPoint } from '@/lib/types/extraction';
-import { DETECTION_CLASS_COLORS, CONFIDENCE_THRESHOLDS } from '@/lib/types/extraction';
+import type { ExtractionDetection, DetectionClass, PolygonPoint, PolygonPoints } from '@/lib/types/extraction';
+import { DETECTION_CLASS_COLORS, CONFIDENCE_THRESHOLDS, isPolygonWithHoles } from '@/lib/types/extraction';
+
+/**
+ * Extract simple polygon points array from PolygonPoints union type.
+ * For lines, we only care about the simple array format.
+ */
+function getSimplePoints(points: PolygonPoints | null | undefined): PolygonPoint[] | null {
+  if (!points) return null;
+  if (isPolygonWithHoles(points)) {
+    return points.outer as PolygonPoint[];
+  }
+  return points as PolygonPoint[];
+}
 import { formatLength } from '@/lib/utils/coordinates';
 
 // =============================================================================
@@ -118,10 +130,11 @@ export default function KonvaDetectionLine({
   showLength = true,
   draggable = true,
 }: KonvaDetectionLineProps) {
-  // Get line endpoints from detection
+  // Get line endpoints from detection (handle both simple and polygon-with-holes format)
   const initialPoints = useMemo((): [PolygonPoint, PolygonPoint] => {
-    if (detection.polygon_points && detection.polygon_points.length >= 2) {
-      return [detection.polygon_points[0], detection.polygon_points[1]];
+    const simplePoints = getSimplePoints(detection.polygon_points);
+    if (simplePoints && simplePoints.length >= 2) {
+      return [simplePoints[0], simplePoints[1]];
     }
     // Fallback: create line from bounding box center with some width
     const halfWidth = detection.pixel_width / 2;
@@ -141,9 +154,10 @@ export default function KonvaDetectionLine({
 
   // Sync local state with detection prop changes (when not dragging)
   useEffect(() => {
+    const simplePoints = getSimplePoints(detection.polygon_points);
     const propsPoints: [PolygonPoint, PolygonPoint] =
-      detection.polygon_points && detection.polygon_points.length >= 2
-        ? [detection.polygon_points[0], detection.polygon_points[1]]
+      simplePoints && simplePoints.length >= 2
+        ? [simplePoints[0], simplePoints[1]]
         : initialPoints;
 
     if (lastLocalEditRef.current) {

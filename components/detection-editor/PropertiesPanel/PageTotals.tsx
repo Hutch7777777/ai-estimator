@@ -5,15 +5,30 @@ import type {
   ExtractionDetection,
   DetectionClass,
   AllDetectionClasses,
+  PolygonPoint,
+  PolygonPoints,
 } from '@/lib/types/extraction';
 import {
   DETECTION_CLASS_COLORS,
   USER_SELECTABLE_CLASSES,
+  isPolygonWithHoles,
 } from '@/lib/types/extraction';
 import {
   getClassDerivedMeasurements,
   rectToPolygonPoints,
 } from '@/lib/utils/polygonUtils';
+
+/**
+ * Extract simple polygon points array from PolygonPoints union type.
+ * For polygons with holes, returns the outer boundary.
+ */
+function getSimplePolygonPoints(points: PolygonPoints | null | undefined): PolygonPoint[] | null {
+  if (!points) return null;
+  if (isPolygonWithHoles(points)) {
+    return points.outer as PolygonPoint[];
+  }
+  return points as PolygonPoint[];
+}
 
 // =============================================================================
 // Types
@@ -275,14 +290,19 @@ const PageTotals = memo(function PageTotals({ detections, scaleRatio }: PageTota
   // Calculate totals grouped by class
   const { classTotals, grandTotal } = useMemo(() => {
     // Debug logging to diagnose derived measurement calculations
+    const detectionsWithPolygonPoints = detections.filter(d => {
+      const simplePoints = getSimplePolygonPoints(d.polygon_points);
+      return simplePoints && simplePoints.length > 0;
+    }).length;
+    const samplePoints = detections[0] ? getSimplePolygonPoints(detections[0].polygon_points) : null;
     console.log('[PageTotals Debug]', {
       totalDetections: detections.length,
       scaleRatio,
-      detectionsWithPolygonPoints: detections.filter(d => d.polygon_points && d.polygon_points.length > 0).length,
+      detectionsWithPolygonPoints,
       sampleDetection: detections[0] ? {
         class: detections[0].class,
         hasPolygonPoints: !!detections[0].polygon_points,
-        polygonPointsLength: detections[0].polygon_points?.length || 0,
+        polygonPointsLength: samplePoints?.length || 0,
         status: detections[0].status,
       } : null,
     });
@@ -340,8 +360,10 @@ const PageTotals = memo(function PageTotals({ detections, scaleRatio }: PageTota
       // Calculate derived measurements from polygon points or bounding box fallback
       if (scaleRatio && scaleRatio > 0) {
         // Use polygon_points if available, otherwise convert bounding box to polygon
-        const points = detection.polygon_points && detection.polygon_points.length > 0
-          ? detection.polygon_points
+        // Handle both simple polygons and polygons with holes
+        const simplePoints = getSimplePolygonPoints(detection.polygon_points);
+        const points = simplePoints && simplePoints.length > 0
+          ? simplePoints
           : rectToPolygonPoints({
               pixel_x: detection.pixel_x,
               pixel_y: detection.pixel_y,

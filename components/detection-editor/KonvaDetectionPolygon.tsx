@@ -1,10 +1,10 @@
 'use client';
 
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { Line, Circle, Group, Text, Label, Tag, Rect } from 'react-konva';
+import { Line, Circle, Group, Text, Label, Tag, Rect, Shape } from 'react-konva';
 import type Konva from 'konva';
 import type { ExtractionDetection, DetectionClass, PolygonPoint } from '@/lib/types/extraction';
-import { DETECTION_CLASS_COLORS, CONFIDENCE_THRESHOLDS } from '@/lib/types/extraction';
+import { DETECTION_CLASS_COLORS, CONFIDENCE_THRESHOLDS, isPolygonWithHoles, type PolygonWithHoles } from '@/lib/types/extraction';
 import { formatArea } from '@/lib/utils/coordinates';
 import {
   rectToPolygonPoints,
@@ -100,9 +100,27 @@ export default function KonvaDetectionPolygon({
   showArea = true,
   draggable = true,
 }: KonvaDetectionPolygonProps) {
-  // Get or convert polygon points from detection
+  // Check if this detection has holes (polygon with hole structure)
+  const hasHoles = useMemo(() => {
+    return detection.has_hole || isPolygonWithHoles(detection.polygon_points);
+  }, [detection.has_hole, detection.polygon_points]);
+
+  // Get polygon with holes structure if applicable
+  const polygonWithHoles = useMemo((): PolygonWithHoles | null => {
+    if (isPolygonWithHoles(detection.polygon_points)) {
+      return detection.polygon_points;
+    }
+    return null;
+  }, [detection.polygon_points]);
+
+  // Get or convert polygon points from detection (for simple polygons without holes)
   const initialPoints = useMemo(() => {
-    return detection.polygon_points ?? rectToPolygonPoints(detection);
+    // If it's a polygon with holes, use the outer boundary
+    if (isPolygonWithHoles(detection.polygon_points)) {
+      return detection.polygon_points.outer;
+    }
+    // Simple polygon points or convert from rectangle
+    return (detection.polygon_points as PolygonPoint[] | null) ?? rectToPolygonPoints(detection);
   }, [detection.polygon_points, detection.pixel_x, detection.pixel_y, detection.pixel_width, detection.pixel_height]);
 
   // Local state for smooth corner dragging
@@ -120,8 +138,13 @@ export default function KonvaDetectionPolygon({
 
   // Sync local state with detection prop changes (when not dragging)
   useEffect(() => {
-    // Get points from props
-    const propsPoints = detection.polygon_points ?? rectToPolygonPoints(detection);
+    // Get points from props, handling both simple and polygon-with-holes formats
+    let propsPoints: PolygonPoint[];
+    if (isPolygonWithHoles(detection.polygon_points)) {
+      propsPoints = detection.polygon_points.outer as PolygonPoint[];
+    } else {
+      propsPoints = (detection.polygon_points as PolygonPoint[] | null) ?? rectToPolygonPoints(detection);
+    }
 
     // If we just made a local edit and props now match it, clear the ref
     if (lastLocalEditRef.current) {
@@ -421,6 +444,53 @@ export default function KonvaDetectionPolygon({
   // ==========================================================================
 
   if (isDeleted) {
+    // Handle polygon with holes for deleted state
+    if (hasHoles && polygonWithHoles) {
+      return (
+        <Shape
+          sceneFunc={(context) => {
+            const ctx = context._context;
+            ctx.beginPath();
+
+            // Draw outer boundary
+            const outer = polygonWithHoles.outer;
+            if (outer.length > 0) {
+              ctx.moveTo(outer[0].x, outer[0].y);
+              for (let i = 1; i < outer.length; i++) {
+                ctx.lineTo(outer[i].x, outer[i].y);
+              }
+              ctx.closePath();
+            }
+
+            // Draw holes
+            if (polygonWithHoles.holes) {
+              for (const hole of polygonWithHoles.holes) {
+                if (hole.length > 0) {
+                  ctx.moveTo(hole[0].x, hole[0].y);
+                  for (let i = 1; i < hole.length; i++) {
+                    ctx.lineTo(hole[i].x, hole[i].y);
+                  }
+                  ctx.closePath();
+                }
+              }
+            }
+
+            ctx.fillStyle = color;
+            ctx.globalAlpha = 0.1;
+            ctx.fill('evenodd');
+            ctx.globalAlpha = 1;
+            ctx.strokeStyle = STROKE_COLOR;
+            ctx.lineWidth = 1;
+            ctx.setLineDash([4 / scale, 2 / scale]);
+            ctx.stroke();
+            ctx.setLineDash([]);
+          }}
+          listening={false}
+        />
+      );
+    }
+
+    // Standard polygon deleted state
     return (
       <Line
         points={flattenPoints(localPoints)}
@@ -448,24 +518,79 @@ export default function KonvaDetectionPolygon({
       onDragStart={handleShapeDragStart}
       onDragEnd={handleShapeDragEnd}
     >
-      {/* Main Polygon Shape */}
-      <Line
-        points={flattenPoints(localPoints)}
-        closed={true}
-        fill={color}
-        opacity={isSelected ? 0.3 : isHovered ? 0.25 : 0.2}
-        stroke={STROKE_COLOR}
-        strokeWidth={1}
-        strokeScaleEnabled={false}
-        dash={lowConfidence ? [4 / scale, 2 / scale] : undefined}
-        shadowColor={isSelected ? STROKE_COLOR : undefined}
-        shadowBlur={isSelected ? 4 : 0}
-        shadowOpacity={isSelected ? 0.3 : 0}
-        onClick={handleClick}
-        onTap={handleClick}
-        onMouseEnter={() => onHoverStart(detection.id)}
-        onMouseLeave={() => onHoverEnd()}
-      />
+      {/* Main Polygon Shape - with hole support */}
+      {hasHoles && polygonWithHoles ? (
+        // Render polygon with hole using custom Shape for evenodd fill rule
+        <Shape
+          sceneFunc={(context, shape) => {
+            const ctx = context._context;
+            ctx.beginPath();
+
+            // Draw outer boundary (clockwise)
+            const outer = polygonWithHoles.outer;
+            if (outer.length > 0) {
+              ctx.moveTo(outer[0].x, outer[0].y);
+              for (let i = 1; i < outer.length; i++) {
+                ctx.lineTo(outer[i].x, outer[i].y);
+              }
+              ctx.closePath();
+            }
+
+            // Draw holes (counter-clockwise for proper fill-rule)
+            if (polygonWithHoles.holes) {
+              for (const hole of polygonWithHoles.holes) {
+                if (hole.length > 0) {
+                  ctx.moveTo(hole[0].x, hole[0].y);
+                  for (let i = 1; i < hole.length; i++) {
+                    ctx.lineTo(hole[i].x, hole[i].y);
+                  }
+                  ctx.closePath();
+                }
+              }
+            }
+
+            // Use evenodd fill rule to properly render holes
+            ctx.fillStyle = color;
+            ctx.globalAlpha = isSelected ? 0.3 : isHovered ? 0.25 : 0.2;
+            ctx.fill('evenodd');
+
+            // Stroke outer boundary
+            ctx.globalAlpha = 1;
+            ctx.strokeStyle = STROKE_COLOR;
+            ctx.lineWidth = 1;
+            if (lowConfidence) {
+              ctx.setLineDash([4 / scale, 2 / scale]);
+            }
+            ctx.stroke();
+
+            // Reset line dash
+            ctx.setLineDash([]);
+          }}
+          onClick={handleClick}
+          onTap={handleClick}
+          onMouseEnter={() => onHoverStart(detection.id)}
+          onMouseLeave={() => onHoverEnd()}
+        />
+      ) : (
+        // Standard polygon without holes
+        <Line
+          points={flattenPoints(localPoints)}
+          closed={true}
+          fill={color}
+          opacity={isSelected ? 0.3 : isHovered ? 0.25 : 0.2}
+          stroke={STROKE_COLOR}
+          strokeWidth={1}
+          strokeScaleEnabled={false}
+          dash={lowConfidence ? [4 / scale, 2 / scale] : undefined}
+          shadowColor={isSelected ? STROKE_COLOR : undefined}
+          shadowBlur={isSelected ? 4 : 0}
+          shadowOpacity={isSelected ? 0.3 : 0}
+          onClick={handleClick}
+          onTap={handleClick}
+          onMouseEnter={() => onHoverStart(detection.id)}
+          onMouseLeave={() => onHoverEnd()}
+        />
+      )}
 
       {/* Edge Click Zones (only when selected) - for adding new points */}
       {isSelected && localPoints.map((point, index) => {

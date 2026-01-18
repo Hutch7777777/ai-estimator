@@ -9,7 +9,22 @@ import type {
   ExtractionJobTotals,
   DetectionClass,
   EditType,
+  PolygonPoint,
+  PolygonPoints,
 } from '@/lib/types/extraction';
+import { isPolygonWithHoles } from '@/lib/types/extraction';
+
+/**
+ * Extract simple polygon points from PolygonPoints union type.
+ * For polygons with holes, returns the outer boundary.
+ */
+function getSimplePolygonPoints(points: PolygonPoints | null | undefined): PolygonPoint[] | null {
+  if (!points) return null;
+  if (isPolygonWithHoles(points)) {
+    return points.outer as PolygonPoint[];
+  }
+  return points as PolygonPoint[];
+}
 
 // =============================================================================
 // Configuration
@@ -513,7 +528,8 @@ export async function validateDetections(
         is_deleted: d.status === 'deleted',
         detection_index: d.detection_index,
         matched_tag: d.matched_tag,
-        polygon_points: d.polygon_points ?? null,
+        // Convert polygon_points to simple format (for polygons with holes, use outer boundary)
+        polygon_points: getSimplePolygonPoints(d.polygon_points),
         markup_type: d.markup_type,
         // Include material assignment and notes
         assigned_material_id: d.assigned_material_id ?? null,

@@ -9,6 +9,30 @@
 export type { PolygonPoint } from '@/lib/utils/polygonUtils';
 
 // =============================================================================
+// Polygon with Holes Support
+// =============================================================================
+
+/** Simple polygon point */
+export interface SimplePolygonPoint {
+  x: number;
+  y: number;
+}
+
+/** Polygon with optional holes (for split detections) */
+export interface PolygonWithHoles {
+  outer: SimplePolygonPoint[];  // Outer boundary (clockwise)
+  holes?: SimplePolygonPoint[][];  // Inner holes (counter-clockwise)
+}
+
+/** Polygon points can be simple array or polygon with holes */
+export type PolygonPoints = SimplePolygonPoint[] | PolygonWithHoles;
+
+/** Type guard to check if polygon has holes */
+export function isPolygonWithHoles(points: PolygonPoints | null | undefined): points is PolygonWithHoles {
+  return points !== null && points !== undefined && typeof points === 'object' && 'outer' in points;
+}
+
+// =============================================================================
 // Literal Types
 // =============================================================================
 
@@ -235,7 +259,11 @@ export interface ExtractionDetection {
   // Polygon support (null = legacy rectangle mode)
   // When set, polygon_points contains absolute pixel coordinates for each vertex
   // The pixel_x/y/width/height fields become the bounding box of the polygon
-  polygon_points?: Array<{ x: number; y: number }> | null;
+  // Can be simple array of points or PolygonWithHoles for polygons with cut-outs
+  polygon_points?: PolygonPoints | null;
+
+  // Flag indicating this detection has a hole (for rendering optimization)
+  has_hole?: boolean;
 
   // Markup type support (polygon = area, line = linear measurement, point = count marker)
   markup_type?: MarkupType;

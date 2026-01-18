@@ -38,7 +38,9 @@ import type {
   ApprovePayload,
   ApprovalResult,
   CountClass,
+  PolygonPoints,
 } from '@/lib/types/extraction';
+import { isPolygonWithHoles } from '@/lib/types/extraction';
 import DetectionToolbar from './DetectionToolbar';
 import MarkupToolbar from './MarkupToolbar';
 import KonvaDetectionCanvas, { type CalibrationData } from './KonvaDetectionCanvas';
@@ -87,6 +89,26 @@ const CLASS_SHORTCUTS: AllDetectionClasses[] = [
   'gable',
   'building', // Internal class - still accessible via shortcut for power users
 ];
+
+// =============================================================================
+// Helper Functions
+// =============================================================================
+
+/**
+ * Extract simple polygon points from a detection's polygon_points field.
+ * For standard polygons, returns the points directly.
+ * For polygons with holes (from split operation), returns the outer boundary.
+ * This allows measurement functions to work uniformly with both types.
+ */
+function getSimplePolygonPoints(polygonPoints: PolygonPoints | null | undefined): PolygonPoint[] | null {
+  if (!polygonPoints) return null;
+  if (isPolygonWithHoles(polygonPoints)) {
+    // Return outer boundary for polygons with holes
+    return polygonPoints.outer as PolygonPoint[];
+  }
+  // Standard polygon - return as-is
+  return polygonPoints as PolygonPoint[];
+}
 
 // =============================================================================
 // Helper Components
@@ -784,7 +806,7 @@ export default function DetectionEditor({
     setSelectedIds(new Set());
   }, [selectedIds, currentPageDetections, updateDetectionLocally]);
 
-  // Handle split detection - "cookie cutter" approach that creates separate detections for all pieces
+  // Handle split detection - creates carved piece + remaining piece with hole
   const handleSplitDetection = useCallback(
     (
       originalDetection: ExtractionDetection,
@@ -796,7 +818,6 @@ export default function DetectionEditor({
       });
 
       const scaleRatio = currentPage?.scale_ratio || 64;
-      const MIN_PIECE_SIZE = 20; // Minimum size for a piece to be created
 
       // Original detection bounds (convert from center-based to edges)
       const orig = {
@@ -830,94 +851,107 @@ export default function DetectionEditor({
         return;
       }
 
-      const newDetections: ExtractionDetection[] = [];
-      let detectionIndex = currentPageDetections.length;
+      // Calculate measurements for carved piece
+      const carvedMeasurements = calculateRealWorldMeasurements(cropWidth, cropHeight, scaleRatio);
 
-      // Helper to create a detection from bounds
-      const createDetectionFromBounds = (
-        left: number,
-        top: number,
-        right: number,
-        bottom: number,
-        label: string
-      ): ExtractionDetection | null => {
-        const width = right - left;
-        const height = bottom - top;
-        if (width < MIN_PIECE_SIZE || height < MIN_PIECE_SIZE) return null;
-
-        const measurements = calculateRealWorldMeasurements(width, height, scaleRatio);
-
-        return {
-          id: crypto.randomUUID(),
-          job_id: job?.id || '',
-          page_id: currentPage?.id || '',
-          class: originalDetection.class,
-          detection_index: detectionIndex++,
-          confidence: originalDetection.confidence,
-          pixel_x: left + width / 2,
-          pixel_y: top + height / 2,
-          pixel_width: width,
-          pixel_height: height,
-          real_width_ft: measurements.real_width_ft,
-          real_height_ft: measurements.real_height_ft,
-          real_width_in: measurements.real_width_in,
-          real_height_in: measurements.real_height_in,
-          area_sf: measurements.area_sf,
-          perimeter_lf: measurements.perimeter_lf,
-          is_triangle: false,
-          matched_tag: null,
-          created_at: new Date().toISOString(),
-          status: 'edited',
-          edited_by: null,
-          edited_at: new Date().toISOString(),
-          original_bbox: null,
-          polygon_points: null,
-          markup_type: 'polygon',
-          notes: `Split from ${originalDetection.id.slice(0, 8)} (${label})`,
-        };
+      // 1. Create CARVED piece (simple rectangle detection)
+      const carvedPiece: ExtractionDetection = {
+        id: crypto.randomUUID(),
+        job_id: job?.id || '',
+        page_id: currentPage?.id || '',
+        class: originalDetection.class,
+        detection_index: currentPageDetections.length,
+        confidence: originalDetection.confidence,
+        pixel_x: clampedCrop.left + cropWidth / 2,
+        pixel_y: clampedCrop.top + cropHeight / 2,
+        pixel_width: cropWidth,
+        pixel_height: cropHeight,
+        real_width_ft: carvedMeasurements.real_width_ft,
+        real_height_ft: carvedMeasurements.real_height_ft,
+        real_width_in: carvedMeasurements.real_width_in,
+        real_height_in: carvedMeasurements.real_height_in,
+        area_sf: carvedMeasurements.area_sf,
+        perimeter_lf: carvedMeasurements.perimeter_lf,
+        is_triangle: false,
+        matched_tag: null,
+        created_at: new Date().toISOString(),
+        status: 'edited',
+        edited_by: null,
+        edited_at: new Date().toISOString(),
+        original_bbox: null,
+        polygon_points: null,
+        markup_type: 'polygon',
+        notes: `Carved from ${originalDetection.id.slice(0, 8)}`,
       };
 
-      // 1. TOP piece (above the carved area, full width of original)
-      if (clampedCrop.top > orig.top + MIN_PIECE_SIZE) {
-        const piece = createDetectionFromBounds(orig.left, orig.top, orig.right, clampedCrop.top, 'top');
-        if (piece) newDetections.push(piece);
-      }
+      // 2. Create REMAINING piece (polygon with hole)
+      // Outer boundary (clockwise)
+      const outerPoints = [
+        { x: orig.left, y: orig.top },
+        { x: orig.right, y: orig.top },
+        { x: orig.right, y: orig.bottom },
+        { x: orig.left, y: orig.bottom },
+      ];
 
-      // 2. BOTTOM piece (below the carved area, full width of original)
-      if (clampedCrop.bottom < orig.bottom - MIN_PIECE_SIZE) {
-        const piece = createDetectionFromBounds(orig.left, clampedCrop.bottom, orig.right, orig.bottom, 'bottom');
-        if (piece) newDetections.push(piece);
-      }
+      // Inner hole (counter-clockwise for proper fill-rule)
+      const holePoints = [
+        { x: clampedCrop.left, y: clampedCrop.top },
+        { x: clampedCrop.left, y: clampedCrop.bottom },
+        { x: clampedCrop.right, y: clampedCrop.bottom },
+        { x: clampedCrop.right, y: clampedCrop.top },
+      ];
 
-      // 3. LEFT piece (left of carved area, only in the middle band between top and bottom pieces)
-      const middleTop = Math.max(orig.top, clampedCrop.top);
-      const middleBottom = Math.min(orig.bottom, clampedCrop.bottom);
+      // Calculate remaining area (original - carved) in pixels
+      const originalAreaPx = originalDetection.pixel_width * originalDetection.pixel_height;
+      const carvedAreaPx = cropWidth * cropHeight;
+      const remainingAreaPx = originalAreaPx - carvedAreaPx;
 
-      if (clampedCrop.left > orig.left + MIN_PIECE_SIZE && middleBottom > middleTop + MIN_PIECE_SIZE) {
-        const piece = createDetectionFromBounds(orig.left, middleTop, clampedCrop.left, middleBottom, 'left');
-        if (piece) newDetections.push(piece);
-      }
+      // Calculate remaining perimeter (outer + inner perimeters) in pixels
+      const outerPerimeterPx = 2 * (originalDetection.pixel_width + originalDetection.pixel_height);
+      const innerPerimeterPx = 2 * (cropWidth + cropHeight);
+      const remainingPerimeterPx = outerPerimeterPx + innerPerimeterPx;
 
-      // 4. RIGHT piece (right of carved area, only in the middle band between top and bottom pieces)
-      if (clampedCrop.right < orig.right - MIN_PIECE_SIZE && middleBottom > middleTop + MIN_PIECE_SIZE) {
-        const piece = createDetectionFromBounds(clampedCrop.right, middleTop, orig.right, middleBottom, 'right');
-        if (piece) newDetections.push(piece);
-      }
+      // Convert to real-world measurements
+      const pixelsPerFoot = scaleRatio;
+      const remainingAreaSf = remainingAreaPx / (pixelsPerFoot * pixelsPerFoot);
+      const remainingPerimeterLf = remainingPerimeterPx / pixelsPerFoot;
 
-      // 5. CARVED piece (the area user drew - this is the "cut out" piece)
-      const carvedPiece = createDetectionFromBounds(
-        clampedCrop.left,
-        clampedCrop.top,
-        clampedCrop.right,
-        clampedCrop.bottom,
-        'carved'
-      );
-      if (carvedPiece) newDetections.push(carvedPiece);
-
-      if (newDetections.length === 0) {
-        console.warn('[DetectionEditor] No valid pieces created from split');
-        return;
-      }
+      const remainingPiece: ExtractionDetection = {
+        id: crypto.randomUUID(),
+        job_id: job?.id || '',
+        page_id: currentPage?.id || '',
+        class: originalDetection.class,
+        detection_index: currentPageDetections.length + 1,
+        confidence: originalDetection.confidence,
+        // Center and bounding box remain the same as original
+        pixel_x: originalDetection.pixel_x,
+        pixel_y: originalDetection.pixel_y,
+        pixel_width: originalDetection.pixel_width,
+        pixel_height: originalDetection.pixel_height,
+        // Keep original dimensions for reference
+        real_width_ft: originalDetection.real_width_ft,
+        real_height_ft: originalDetection.real_height_ft,
+        real_width_in: originalDetection.real_width_in,
+        real_height_in: originalDetection.real_height_in,
+        // Adjusted measurements (minus the hole)
+        area_sf: remainingAreaSf,
+        perimeter_lf: remainingPerimeterLf,
+        is_triangle: false,
+        matched_tag: null,
+        created_at: new Date().toISOString(),
+        status: 'edited',
+        edited_by: null,
+        edited_at: new Date().toISOString(),
+        original_bbox: null,
+        // Store polygon with hole structure
+        polygon_points: {
+          outer: outerPoints,
+          holes: [holePoints],
+        },
+        markup_type: 'polygon',
+        notes: `Remaining from ${originalDetection.id.slice(0, 8)} (with hole)`,
+        has_hole: true,
+      };
 
       // Mark original as deleted (soft delete via status)
       const deletedOriginal: ExtractionDetection = {
@@ -928,19 +962,18 @@ export default function DetectionEditor({
       updateDetectionLocally(deletedOriginal);
       console.log('[DetectionEditor] Marked original detection as deleted:', originalDetection.id);
 
-      // Add all new pieces
-      newDetections.forEach((detection) => {
-        addDetectionLocally(detection);
-        console.log(`[DetectionEditor] Created split piece: ${detection.id} (${detection.notes})`);
-      });
+      // Add the two new pieces
+      addDetectionLocally(carvedPiece);
+      console.log(`[DetectionEditor] Created carved piece: ${carvedPiece.id}`);
 
-      console.log(`[DetectionEditor] Split detection into ${newDetections.length} pieces`);
+      addDetectionLocally(remainingPiece);
+      console.log(`[DetectionEditor] Created remaining piece with hole: ${remainingPiece.id}`);
+
+      console.log('[DetectionEditor] Split: created carved piece and remaining piece with hole');
 
       // Select the carved piece (the one the user explicitly drew)
-      if (carvedPiece) {
-        setSelectedDetectionId(carvedPiece.id);
-        setSelectedIds(new Set([carvedPiece.id]));
-      }
+      setSelectedDetectionId(carvedPiece.id);
+      setSelectedIds(new Set([carvedPiece.id]));
 
       // Switch back to select mode
       setToolMode('select');
@@ -1471,8 +1504,10 @@ export default function DetectionEditor({
       }
 
       // Get polygon points (use existing or convert from bounding box)
-      const points = detection.polygon_points && detection.polygon_points.length > 0
-        ? detection.polygon_points
+      // For polygons with holes (from split), use the outer boundary for measurements
+      const simplePoints = getSimplePolygonPoints(detection.polygon_points);
+      const points = simplePoints && simplePoints.length > 0
+        ? simplePoints
         : rectToPolygonPoints({
             pixel_x: detection.pixel_x,
             pixel_y: detection.pixel_y,
@@ -1766,9 +1801,10 @@ export default function DetectionEditor({
           continue;
         }
 
-        // Get polygon points
-        const points = detection.polygon_points && detection.polygon_points.length > 0
-          ? detection.polygon_points
+        // Get polygon points (handle both simple and polygon-with-holes formats)
+        const simplePoints = getSimplePolygonPoints(detection.polygon_points);
+        const points = simplePoints && simplePoints.length > 0
+          ? simplePoints
           : rectToPolygonPoints({
               pixel_x: detection.pixel_x,
               pixel_y: detection.pixel_y,
@@ -2227,6 +2263,7 @@ export default function DetectionEditor({
           toast.info(`Rendering ${page.elevation_name || `page ${page.page_number}`}...`);
 
           // Get detections for this page and convert to render format
+          // For polygons with holes, use the outer boundary for rendering
           const pageDetections = detectionsByPage.get(page.id) || [];
           const detectionsForRender = pageDetections.map((d) => ({
             class: d.class,
@@ -2234,7 +2271,7 @@ export default function DetectionEditor({
             pixel_y: d.pixel_y,
             pixel_width: d.pixel_width,
             pixel_height: d.pixel_height,
-            polygon_points: d.polygon_points,
+            polygon_points: getSimplePolygonPoints(d.polygon_points),
           }));
 
           // Render detections onto the image

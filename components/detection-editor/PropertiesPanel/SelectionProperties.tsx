@@ -3,6 +3,7 @@
 import React, { memo, useMemo } from 'react';
 import { Badge } from '@/components/ui/badge';
 import type { ExtractionDetection, DetectionStatus, PolygonPoint } from '@/lib/types/extraction';
+import { isPolygonWithHoles } from '@/lib/types/extraction';
 import { calculatePolygonArea, calculatePolygonPerimeter } from '@/lib/utils/polygonUtils';
 
 // =============================================================================
@@ -27,42 +28,63 @@ function formatValue(value: number | null | undefined, suffix: string = ''): str
  * Calculate real-world measurements from detection data.
  * ALWAYS calculates live from polygon_points when available to ensure
  * measurements match the canvas display exactly.
+ * Supports polygons with holes for split detections.
  */
 function calculateMeasurementsFromPixels(
   detection: ExtractionDetection,
   pixelsPerFoot: number
-): { widthFt: number; heightFt: number; areaSf: number; perimeterLf: number; lengthLf?: number; isLine: boolean; isPoint: boolean } {
+): { widthFt: number; heightFt: number; areaSf: number; perimeterLf: number; lengthLf?: number; isLine: boolean; isPoint: boolean; hasHole: boolean } {
   const isLine = detection.markup_type === 'line';
   const isPoint = detection.markup_type === 'point';
 
   // For points, return zeroes (count markers only)
   if (isPoint) {
-    return { widthFt: 0, heightFt: 0, areaSf: 0, perimeterLf: 0, isLine: false, isPoint: true };
+    return { widthFt: 0, heightFt: 0, areaSf: 0, perimeterLf: 0, isLine: false, isPoint: true, hasHole: false };
   }
 
   // For lines, calculate length from polygon_points
-  if (isLine && detection.polygon_points && detection.polygon_points.length >= 2) {
-    const p1 = detection.polygon_points[0];
-    const p2 = detection.polygon_points[1];
-    const pixelLength = Math.sqrt(Math.pow(p2.x - p1.x, 2) + Math.pow(p2.y - p1.y, 2));
-    const lengthLf = pixelLength / pixelsPerFoot;
-    return { widthFt: 0, heightFt: 0, areaSf: 0, perimeterLf: 0, lengthLf, isLine: true, isPoint: false };
+  if (isLine && detection.polygon_points && !isPolygonWithHoles(detection.polygon_points)) {
+    const points = detection.polygon_points as PolygonPoint[];
+    if (points.length >= 2) {
+      const p1 = points[0];
+      const p2 = points[1];
+      const pixelLength = Math.sqrt(Math.pow(p2.x - p1.x, 2) + Math.pow(p2.y - p1.y, 2));
+      const lengthLf = pixelLength / pixelsPerFoot;
+      return { widthFt: 0, heightFt: 0, areaSf: 0, perimeterLf: 0, lengthLf, isLine: true, isPoint: false, hasHole: false };
+    }
   }
 
-  // For polygons - calculate LIVE from polygon_points if available
-  // This ensures measurements always match the canvas display exactly
-  if (detection.polygon_points && detection.polygon_points.length >= 3 && pixelsPerFoot > 0) {
-    // Calculate area using shoelace formula (same as canvas label)
-    const areaPixelsSq = calculatePolygonArea(detection.polygon_points);
-    const areaSf = areaPixelsSq / (pixelsPerFoot * pixelsPerFoot);
+  // Handle polygon with holes (from split operation)
+  if (detection.polygon_points && isPolygonWithHoles(detection.polygon_points) && pixelsPerFoot > 0) {
+    const polygonWithHoles = detection.polygon_points;
 
-    // Calculate perimeter
-    const perimeterPixels = calculatePolygonPerimeter(detection.polygon_points);
-    const perimeterLf = perimeterPixels / pixelsPerFoot;
+    // Calculate outer area
+    const outerAreaPixelsSq = calculatePolygonArea(polygonWithHoles.outer);
 
-    // Calculate bounding box for width/height
-    const xs = detection.polygon_points.map(p => p.x);
-    const ys = detection.polygon_points.map(p => p.y);
+    // Calculate holes area
+    let holesAreaPixelsSq = 0;
+    if (polygonWithHoles.holes) {
+      for (const hole of polygonWithHoles.holes) {
+        holesAreaPixelsSq += calculatePolygonArea(hole);
+      }
+    }
+
+    // Net area = outer - holes
+    const netAreaPixelsSq = outerAreaPixelsSq - holesAreaPixelsSq;
+    const areaSf = netAreaPixelsSq / (pixelsPerFoot * pixelsPerFoot);
+
+    // Calculate perimeter (outer perimeter + all hole perimeters)
+    let totalPerimeterPixels = calculatePolygonPerimeter(polygonWithHoles.outer);
+    if (polygonWithHoles.holes) {
+      for (const hole of polygonWithHoles.holes) {
+        totalPerimeterPixels += calculatePolygonPerimeter(hole);
+      }
+    }
+    const perimeterLf = totalPerimeterPixels / pixelsPerFoot;
+
+    // Calculate bounding box from outer polygon
+    const xs = polygonWithHoles.outer.map(p => p.x);
+    const ys = polygonWithHoles.outer.map(p => p.y);
     const minX = Math.min(...xs);
     const maxX = Math.max(...xs);
     const minY = Math.min(...ys);
@@ -70,7 +92,34 @@ function calculateMeasurementsFromPixels(
     const widthFt = (maxX - minX) / pixelsPerFoot;
     const heightFt = (maxY - minY) / pixelsPerFoot;
 
-    return { widthFt, heightFt, areaSf, perimeterLf, isLine: false, isPoint: false };
+    return { widthFt, heightFt, areaSf, perimeterLf, isLine: false, isPoint: false, hasHole: true };
+  }
+
+  // For standard polygons - calculate LIVE from polygon_points if available
+  // This ensures measurements always match the canvas display exactly
+  if (detection.polygon_points && !isPolygonWithHoles(detection.polygon_points)) {
+    const points = detection.polygon_points as PolygonPoint[];
+    if (points.length >= 3 && pixelsPerFoot > 0) {
+      // Calculate area using shoelace formula (same as canvas label)
+      const areaPixelsSq = calculatePolygonArea(points);
+      const areaSf = areaPixelsSq / (pixelsPerFoot * pixelsPerFoot);
+
+      // Calculate perimeter
+      const perimeterPixels = calculatePolygonPerimeter(points);
+      const perimeterLf = perimeterPixels / pixelsPerFoot;
+
+      // Calculate bounding box for width/height
+      const xs = points.map(p => p.x);
+      const ys = points.map(p => p.y);
+      const minX = Math.min(...xs);
+      const maxX = Math.max(...xs);
+      const minY = Math.min(...ys);
+      const maxY = Math.max(...ys);
+      const widthFt = (maxX - minX) / pixelsPerFoot;
+      const heightFt = (maxY - minY) / pixelsPerFoot;
+
+      return { widthFt, heightFt, areaSf, perimeterLf, isLine: false, isPoint: false, hasHole: false };
+    }
   }
 
   // Fallback: calculate from pixel dimensions (bounding box approximation)
@@ -80,7 +129,7 @@ function calculateMeasurementsFromPixels(
   const areaSf = widthFt * heightFt;
   const perimeterLf = 2 * (widthFt + heightFt);
 
-  return { widthFt, heightFt, areaSf, perimeterLf, isLine: false, isPoint: false };
+  return { widthFt, heightFt, areaSf, perimeterLf, isLine: false, isPoint: false, hasHole: false };
 }
 
 // =============================================================================
