@@ -8,9 +8,22 @@
  * - material: Physical materials with material_unit_cost
  * - labor: Installation labor with labor_unit_cost (includes L&I insurance)
  * - overhead: Overhead costs stored in equipment_unit_cost
+ *
+ * V2 NOTE (Mike Skjei Methodology):
+ * In V2 responses, labor is calculated separately by squares (SQ = 100 SF)
+ * and returned in the `labor` section of the API response.
+ * Overhead is also calculated separately and returned in the `overhead` section.
+ * All line_items in V2 responses are materials only.
  */
 
 import { LineItemWithState } from "@/lib/types/database";
+import {
+  LaborSection,
+  LaborLineItem,
+  OverheadSection,
+  OverheadLineItem,
+  ProjectTotals,
+} from "@/lib/types/extraction";
 
 // ============================================================================
 // TYPE DEFINITIONS
@@ -90,6 +103,11 @@ export const PRESENTATION_GROUP_CONFIG: Record<
 
 /**
  * Separate line items by type (material, labor, overhead)
+ *
+ * @note In V2 responses (Mike Skjei methodology), all line_items are materials.
+ * Labor and overhead come from separate API response sections.
+ * This function is still useful for legacy responses where labor/overhead
+ * items were mixed with materials.
  */
 export function separateItemsByType(
   lineItems: LineItemWithState[]
@@ -200,6 +218,10 @@ export function calculateMaterialTotal(item: LineItemWithState): number {
  * Two methods:
  * 1. Parse from formula_used (more accurate, includes exact L&I)
  * 2. Calculate: quantity × labor_unit_cost × (1 + L&I rate)
+ *
+ * @note In V2 responses, labor is calculated by the API using squares.
+ * Use getLaborSubtotal(labor) for the authoritative labor total.
+ * This function is for legacy line-item-based labor calculations.
  */
 export function calculateLaborTotal(item: LineItemWithState): number {
   // Method 1: Try parsing from formula_used
@@ -227,6 +249,10 @@ export function calculateLaborTotal(item: LineItemWithState): number {
 /**
  * Calculate total for an overhead item
  * (equipment_unit_cost already contains the total)
+ *
+ * @note In V2 responses, overhead is calculated by the API.
+ * Use getOverheadSubtotal(overhead) for the authoritative overhead total.
+ * This function is for legacy line-item-based overhead calculations.
  */
 export function calculateOverheadTotal(item: LineItemWithState): number {
   return item.equipment_unit_cost || 0;
@@ -321,4 +347,249 @@ export function getPresentationGroupConfig(groupKey: string): {
   return (
     PRESENTATION_GROUP_CONFIG[groupKey] || PRESENTATION_GROUP_CONFIG["other"]
   );
+}
+
+// ============================================================================
+// V2 LABOR HELPERS (Mike Skjei Methodology)
+// ============================================================================
+
+/**
+ * Get labor subtotal from the V2 labor section
+ * This is the authoritative source for installation labor cost
+ */
+export function getLaborSubtotal(labor: LaborSection | undefined): number {
+  return labor?.installation_subtotal || 0;
+}
+
+/**
+ * Get total labor items count
+ */
+export function getLaborItemsCount(labor: LaborSection | undefined): number {
+  return labor?.installation_items?.length || 0;
+}
+
+/**
+ * Get labor items array safely
+ */
+export function getLaborItems(labor: LaborSection | undefined): LaborLineItem[] {
+  return labor?.installation_items || [];
+}
+
+// ============================================================================
+// V2 OVERHEAD HELPERS
+// ============================================================================
+
+/**
+ * Get overhead subtotal from the V2 overhead section
+ */
+export function getOverheadSubtotal(overhead: OverheadSection | undefined): number {
+  return overhead?.subtotal || 0;
+}
+
+/**
+ * Get overhead items count
+ */
+export function getOverheadItemsCount(overhead: OverheadSection | undefined): number {
+  return overhead?.items?.length || 0;
+}
+
+/**
+ * Get overhead items array safely
+ */
+export function getOverheadItems(overhead: OverheadSection | undefined): OverheadLineItem[] {
+  return overhead?.items || [];
+}
+
+// ============================================================================
+// V2 PROJECT TOTALS HELPERS
+// ============================================================================
+
+/**
+ * Project insurance rate: $24.38 per $1,000
+ */
+export const PROJECT_INSURANCE_RATE = 24.38;
+
+/**
+ * Default markup rate: 26%
+ */
+export const DEFAULT_MARKUP_RATE = 0.26;
+
+/**
+ * Calculate project insurance amount
+ * Formula: (subtotal / 1000) * $24.38
+ */
+export function calculateProjectInsurance(subtotal: number): number {
+  return (subtotal / 1000) * PROJECT_INSURANCE_RATE;
+}
+
+/**
+ * Display-ready totals structure
+ */
+export interface DisplayTotals {
+  materialCost: number;
+  materialMarkup: number;
+  materialTotal: number;
+  laborCost: number;
+  overheadCost: number;
+  laborSubtotal: number;
+  laborMarkup: number;
+  laborTotal: number;
+  subtotal: number;
+  projectInsurance: number;
+  grandTotal: number;
+}
+
+/**
+ * Get display-ready totals from projectTotals or calculate from components
+ *
+ * Priority:
+ * 1. Use projectTotals if available (V2 response - most accurate)
+ * 2. Fall back to calculating from labor/overhead sections
+ * 3. Fall back to calculating from line items (legacy)
+ */
+export function getDisplayTotals(
+  projectTotals?: ProjectTotals,
+  lineItems?: LineItemWithState[],
+  labor?: LaborSection,
+  overhead?: OverheadSection,
+  markupRate: number = DEFAULT_MARKUP_RATE
+): DisplayTotals {
+  // Prefer projectTotals if available (V2 response)
+  if (projectTotals) {
+    return {
+      materialCost: projectTotals.material_cost,
+      materialMarkup: projectTotals.material_markup_amount,
+      materialTotal: projectTotals.material_total,
+      laborCost: projectTotals.installation_labor_subtotal,
+      overheadCost: projectTotals.overhead_subtotal,
+      laborSubtotal: projectTotals.labor_cost_before_markup,
+      laborMarkup: projectTotals.labor_markup_amount,
+      laborTotal: projectTotals.labor_total,
+      subtotal: projectTotals.subtotal,
+      projectInsurance: projectTotals.project_insurance,
+      grandTotal: projectTotals.grand_total,
+    };
+  }
+
+  // Fallback calculation for legacy responses
+  const materialCost = lineItems?.reduce(
+    (sum, item) => sum + calculateMaterialTotal(item),
+    0
+  ) || 0;
+  const laborCost = labor?.installation_subtotal || 0;
+  const overheadCost = overhead?.subtotal || 0;
+
+  const materialMarkup = materialCost * markupRate;
+  const materialTotal = materialCost + materialMarkup;
+
+  const laborSubtotal = laborCost + overheadCost;
+  const laborMarkup = laborSubtotal * markupRate;
+  const laborTotal = laborSubtotal + laborMarkup;
+
+  const subtotal = materialTotal + laborTotal;
+  const projectInsurance = calculateProjectInsurance(subtotal);
+  const grandTotal = subtotal + projectInsurance;
+
+  return {
+    materialCost,
+    materialMarkup,
+    materialTotal,
+    laborCost,
+    overheadCost,
+    laborSubtotal,
+    laborMarkup,
+    laborTotal,
+    subtotal,
+    projectInsurance,
+    grandTotal,
+  };
+}
+
+/**
+ * Check if response has V2 project totals
+ */
+export function hasV2ProjectTotals(projectTotals?: ProjectTotals): boolean {
+  return projectTotals !== undefined && projectTotals !== null;
+}
+
+// ============================================================================
+// V2 FORMATTING HELPERS
+// ============================================================================
+
+/**
+ * Format a number as percentage
+ */
+export function formatPercent(rate: number, decimals: number = 0): string {
+  return `${(rate * 100).toFixed(decimals)}%`;
+}
+
+/**
+ * Format quantity with appropriate decimals based on unit
+ */
+export function formatQuantity(quantity: number, unit: string): string {
+  // Squares (SQ) shown to 2 decimals
+  if (unit === "SQ") {
+    return quantity.toFixed(2);
+  }
+  // Linear feet (LF) shown to 1 decimal
+  if (unit === "LF") {
+    return quantity.toFixed(1);
+  }
+  // Pieces (EA, PC) shown as integers
+  if (["EA", "PC", "ea", "pc"].includes(unit)) {
+    return Math.round(quantity).toString();
+  }
+  // Default: 2 decimals
+  return quantity.toFixed(2);
+}
+
+/**
+ * Format labor rate ($/SQ)
+ */
+export function formatLaborRate(rate: number): string {
+  return formatCurrency(rate) + "/SQ";
+}
+
+// ============================================================================
+// DEPRECATION NOTES
+// ============================================================================
+
+/**
+ * @deprecated In V2 responses, all line_items are materials.
+ * Labor comes from the separate `labor` section of the API response.
+ * Use getLaborSubtotal(labor) or projectTotals.installation_labor_subtotal.
+ *
+ * This function is kept for backward compatibility with legacy responses
+ * where labor items were mixed with materials.
+ */
+export function calculateLaborFromLineItems(lineItems: LineItemWithState[]): number {
+  if (process.env.NODE_ENV === "development") {
+    console.warn(
+      "[DEPRECATED] calculateLaborFromLineItems: " +
+      "In V2 responses, labor is calculated by the API based on squares. " +
+      "Use getLaborSubtotal(labor) from the API response instead."
+    );
+  }
+  const { labor } = separateItemsByType(lineItems);
+  return labor.reduce((sum, item) => sum + calculateLaborTotal(item), 0);
+}
+
+/**
+ * @deprecated In V2 responses, all line_items are materials.
+ * Overhead comes from the separate `overhead` section of the API response.
+ * Use getOverheadSubtotal(overhead) or projectTotals.overhead_subtotal.
+ *
+ * This function is kept for backward compatibility with legacy responses
+ * where overhead items were mixed with materials.
+ */
+export function calculateOverheadFromLineItems(lineItems: LineItemWithState[]): number {
+  if (process.env.NODE_ENV === "development") {
+    console.warn(
+      "[DEPRECATED] calculateOverheadFromLineItems: " +
+      "In V2 responses, overhead is calculated by the API. " +
+      "Use getOverheadSubtotal(overhead) from the API response instead."
+    );
+  }
+  const { overhead } = separateItemsByType(lineItems);
+  return overhead.reduce((sum, item) => sum + calculateOverheadTotal(item), 0);
 }

@@ -5,15 +5,24 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { Badge } from "@/components/ui/badge";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Takeoff, LineItemWithState, TakeoffSection } from "@/lib/types/database";
+import {
+  LaborSection,
+  OverheadSection,
+  ProjectTotals,
+  LaborLineItem,
+  OverheadLineItem,
+} from "@/lib/types/extraction";
 import {
   Download,
   Send,
   CheckCircle,
   FileSpreadsheet,
-  TrendingUp,
   DollarSign,
   FileText,
+  ChevronDown,
+  ChevronRight,
 } from "lucide-react";
 import { exportProfessionalEstimate, exportVendorTakeoff } from "@/lib/utils/excelExportProfessional";
 import {
@@ -34,6 +43,14 @@ interface EstimateSummaryProps {
   };
   onApprove?: () => void;
   onSend?: () => void;
+  // NEW: V2 response data from Mike Skjei methodology
+  labor?: LaborSection;
+  overhead?: OverheadSection;
+  projectTotals?: ProjectTotals;
+  // Optional display flags
+  showBreakdown?: boolean;
+  showLaborDetails?: boolean;
+  showOverheadDetails?: boolean;
 }
 
 const formatCurrency = (value: number): string => {
@@ -69,31 +86,88 @@ export function EstimateSummary({
   projectInfo,
   onApprove,
   onSend,
+  // NEW V2 props
+  labor: laborSection,
+  overhead: overheadSection,
+  projectTotals,
+  showBreakdown = true,
+  showLaborDetails = false,
+  showOverheadDetails = false,
 }: EstimateSummaryProps) {
   // State for proposal generation
   const [isGeneratingProposal, setIsGeneratingProposal] = useState(false);
+  // State for collapsible sections
+  const [laborDetailsOpen, setLaborDetailsOpen] = useState(showLaborDetails);
+  const [overheadDetailsOpen, setOverheadDetailsOpen] = useState(showOverheadDetails);
 
-  // Separate items by type (material, labor, overhead)
-  const { materials, labor, overhead } = separateItemsByType(lineItems);
+  // Determine if we have V2 project totals from the API
+  const hasProjectTotals = !!projectTotals;
 
-  // Calculate current totals from line items (reflects unsaved changes)
-  const currentTotals = {
+  // Separate items by type (material, labor, overhead) - for fallback calculation
+  const { materials, labor: laborItems, overhead: overheadItems } = separateItemsByType(lineItems);
+
+  // Calculate current totals from line items (reflects unsaved changes) - FALLBACK
+  const legacyTotals = {
     material: materials.reduce((sum, item) => sum + calculateMaterialTotal(item), 0),
-    labor: labor.reduce((sum, item) => sum + calculateLaborTotal(item), 0),
-    overhead: overhead.reduce((sum, item) => sum + calculateOverheadTotal(item), 0),
-    total: 0, // Will be calculated below
-    markup: 0, // Will be calculated below
+    labor: laborItems.reduce((sum, item) => sum + calculateLaborTotal(item), 0),
+    overhead: overheadItems.reduce((sum, item) => sum + calculateOverheadTotal(item), 0),
+    total: 0,
+    markup: 0,
   };
 
-  const totalCosts = currentTotals.material + currentTotals.labor + currentTotals.overhead;
-  // Calculate markup using markup_percent field (check multiple sources with fallback to 15%)
-  const markupRate = takeoff?.markup_percent ?? 15;
-  const markupAmount = totalCosts * (markupRate / 100);
-  const grandTotal = totalCosts + markupAmount;
-  const markup = markupAmount;
+  const legacyTotalCosts = legacyTotals.material + legacyTotals.labor + legacyTotals.overhead;
+  const legacyMarkupRate = takeoff?.markup_percent ?? 15;
+  const legacyMarkupAmount = legacyTotalCosts * (legacyMarkupRate / 100);
+  legacyTotals.total = legacyTotalCosts + legacyMarkupAmount;
+  legacyTotals.markup = legacyMarkupAmount;
 
-  currentTotals.total = grandTotal;
-  currentTotals.markup = markup;
+  // Use project_totals if available, otherwise fall back to line item calculation
+  const displayData = hasProjectTotals ? {
+    // Materials
+    materialCost: projectTotals.material_cost,
+    materialMarkup: projectTotals.material_markup_amount,
+    materialTotal: projectTotals.material_total,
+    materialMarkupRate: projectTotals.material_markup_rate,
+
+    // Labor breakdown
+    installationLabor: projectTotals.installation_labor_subtotal,
+    overheadCost: projectTotals.overhead_subtotal,
+    laborSubtotal: projectTotals.labor_cost_before_markup,
+    laborMarkup: projectTotals.labor_markup_amount,
+    laborTotal: projectTotals.labor_total,
+    laborMarkupRate: projectTotals.labor_markup_rate,
+
+    // Final totals
+    subtotal: projectTotals.subtotal,
+    projectInsurance: projectTotals.project_insurance,
+    grandTotal: projectTotals.grand_total,
+  } : {
+    // Fallback to legacy calculation from line items
+    materialCost: legacyTotals.material,
+    materialMarkup: legacyTotals.material * (legacyMarkupRate / 100),
+    materialTotal: legacyTotals.material * (1 + legacyMarkupRate / 100),
+    materialMarkupRate: legacyMarkupRate / 100,
+
+    installationLabor: legacyTotals.labor,
+    overheadCost: legacyTotals.overhead,
+    laborSubtotal: legacyTotals.labor + legacyTotals.overhead,
+    laborMarkup: (legacyTotals.labor + legacyTotals.overhead) * (legacyMarkupRate / 100),
+    laborTotal: (legacyTotals.labor + legacyTotals.overhead) * (1 + legacyMarkupRate / 100),
+    laborMarkupRate: legacyMarkupRate / 100,
+
+    subtotal: legacyTotals.total,
+    projectInsurance: 0, // Not calculated in legacy mode
+    grandTotal: legacyTotals.total,
+  };
+
+  // For backward compatibility with existing UI code
+  const currentTotals = {
+    material: displayData.materialCost,
+    labor: displayData.installationLabor,
+    overhead: displayData.overheadCost,
+    markup: displayData.materialMarkup + displayData.laborMarkup,
+    total: displayData.grandTotal,
+  };
 
   // Handle Excel export for full estimate (professional format)
   const handleExportFullEstimate = async () => {
@@ -246,68 +320,181 @@ export function EstimateSummary({
           </div>
         </div>
 
-        {/* Cost Breakdown */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-          <div className="p-4 bg-white border border-[#e2e8f0] rounded-lg">
-            <div className="flex items-center justify-between mb-2">
-              <p className="text-xs text-green-600 uppercase tracking-wide font-medium">
-                Material
-              </p>
-              <Badge variant="outline" className="text-xs">
-                {materialPercent.toFixed(1)}%
-              </Badge>
+        {/* Cost Breakdown - V2 Detailed View */}
+        {hasProjectTotals && showBreakdown ? (
+          <div className="space-y-4">
+            {/* Materials Section */}
+            <div className="p-4 bg-white border border-[#e2e8f0] rounded-lg">
+              <div className="flex items-center justify-between mb-3">
+                <p className="text-sm font-semibold text-green-700 uppercase tracking-wide">
+                  Materials
+                </p>
+                <Badge variant="outline" className="text-xs bg-green-50">
+                  {((displayData.materialMarkupRate ?? 0) * 100).toFixed(0)}% Markup
+                </Badge>
+              </div>
+              <div className="space-y-2 text-sm">
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Material Cost</span>
+                  <span>{formatCurrency(displayData.materialCost)}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Markup ({((displayData.materialMarkupRate ?? 0) * 100).toFixed(0)}%)</span>
+                  <span>{formatCurrency(displayData.materialMarkup)}</span>
+                </div>
+                <Separator className="my-2" />
+                <div className="flex justify-between font-semibold">
+                  <span>Material Total</span>
+                  <span className="text-green-700">{formatCurrency(displayData.materialTotal)}</span>
+                </div>
+              </div>
             </div>
-            <p className="text-2xl font-bold text-[#0f172a]">
-              {formatCurrency(currentTotals.material)}
-            </p>
-          </div>
 
-          <div className="p-4 bg-white border border-[#e2e8f0] rounded-lg">
-            <div className="flex items-center justify-between mb-2">
-              <p className="text-xs text-amber-600 uppercase tracking-wide font-medium">
-                Labor
-              </p>
-              <Badge variant="outline" className="text-xs">
-                {laborPercent.toFixed(1)}%
-              </Badge>
+            {/* Labor Section */}
+            <div className="p-4 bg-white border border-[#e2e8f0] rounded-lg">
+              <div className="flex items-center justify-between mb-3">
+                <p className="text-sm font-semibold text-amber-700 uppercase tracking-wide">
+                  Labor
+                </p>
+                <Badge variant="outline" className="text-xs bg-amber-50">
+                  {((displayData.laborMarkupRate ?? 0) * 100).toFixed(0)}% Markup
+                </Badge>
+              </div>
+              <div className="space-y-2 text-sm">
+                {/* Installation Labor with optional details */}
+                <Collapsible open={laborDetailsOpen} onOpenChange={setLaborDetailsOpen}>
+                  <div className="flex justify-between items-center">
+                    <CollapsibleTrigger className="flex items-center gap-1 text-muted-foreground hover:text-foreground transition-colors">
+                      {laborDetailsOpen ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+                      Installation Labor
+                    </CollapsibleTrigger>
+                    <span>{formatCurrency(displayData.installationLabor)}</span>
+                  </div>
+                  <CollapsibleContent className="pl-4 mt-2 space-y-1 border-l-2 border-amber-200">
+                    {laborSection?.installation_items?.map((item: LaborLineItem, index: number) => (
+                      <div key={item.rate_id || index} className="flex justify-between text-xs text-muted-foreground">
+                        <span>{item.rate_name} ({item.quantity.toFixed(2)} {item.unit})</span>
+                        <span>{formatCurrency(item.total_cost)}</span>
+                      </div>
+                    ))}
+                  </CollapsibleContent>
+                </Collapsible>
+
+                {/* Overhead with optional details */}
+                <Collapsible open={overheadDetailsOpen} onOpenChange={setOverheadDetailsOpen}>
+                  <div className="flex justify-between items-center">
+                    <CollapsibleTrigger className="flex items-center gap-1 text-muted-foreground hover:text-foreground transition-colors">
+                      {overheadDetailsOpen ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+                      Overhead
+                    </CollapsibleTrigger>
+                    <span>{formatCurrency(displayData.overheadCost)}</span>
+                  </div>
+                  <CollapsibleContent className="pl-4 mt-2 space-y-1 border-l-2 border-purple-200">
+                    {overheadSection?.items?.map((item: OverheadLineItem, index: number) => (
+                      <div key={item.cost_id || index} className="flex justify-between text-xs text-muted-foreground">
+                        <span>{item.cost_name}</span>
+                        <span>{formatCurrency(item.amount)}</span>
+                      </div>
+                    ))}
+                  </CollapsibleContent>
+                </Collapsible>
+
+                <div className="flex justify-between pt-1">
+                  <span className="text-muted-foreground">Labor Subtotal</span>
+                  <span>{formatCurrency(displayData.laborSubtotal)}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Markup ({((displayData.laborMarkupRate ?? 0) * 100).toFixed(0)}%)</span>
+                  <span>{formatCurrency(displayData.laborMarkup)}</span>
+                </div>
+                <Separator className="my-2" />
+                <div className="flex justify-between font-semibold">
+                  <span>Labor Total</span>
+                  <span className="text-amber-700">{formatCurrency(displayData.laborTotal)}</span>
+                </div>
+              </div>
             </div>
-            <p className="text-2xl font-bold text-[#0f172a]">
-              {formatCurrency(currentTotals.labor)}
-            </p>
-          </div>
 
-          <div className="p-4 bg-white border border-[#e2e8f0] rounded-lg">
-            <div className="flex items-center justify-between mb-2">
-              <p className="text-xs text-purple-600 uppercase tracking-wide font-medium">
-                Overhead
-              </p>
-              <Badge variant="outline" className="text-xs">
-                {overheadPercent.toFixed(1)}%
-              </Badge>
+            {/* Totals Section */}
+            <div className="p-4 bg-slate-50 border border-[#e2e8f0] rounded-lg">
+              <div className="space-y-2 text-sm">
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Subtotal (Materials + Labor)</span>
+                  <span>{formatCurrency(displayData.subtotal)}</span>
+                </div>
+                {displayData.projectInsurance > 0 && (
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Project Insurance ($24.38/$1,000)</span>
+                    <span>{formatCurrency(displayData.projectInsurance)}</span>
+                  </div>
+                )}
+              </div>
             </div>
-            <p className="text-2xl font-bold text-[#0f172a]">
-              {formatCurrency(currentTotals.overhead)}
-            </p>
           </div>
+        ) : (
+          /* Legacy 4-column grid view */
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="p-4 bg-white border border-[#e2e8f0] rounded-lg">
+              <div className="flex items-center justify-between mb-2">
+                <p className="text-xs text-green-600 uppercase tracking-wide font-medium">
+                  Material
+                </p>
+                <Badge variant="outline" className="text-xs">
+                  {materialPercent.toFixed(1)}%
+                </Badge>
+              </div>
+              <p className="text-2xl font-bold text-[#0f172a]">
+                {formatCurrency(currentTotals.material)}
+              </p>
+            </div>
 
-          <div className="p-4 bg-white border border-[#e2e8f0] rounded-lg">
-            <div className="flex items-center justify-between mb-2">
-              <p className={`text-xs uppercase tracking-wide font-medium ${
-                currentTotals.markup < 0 ? 'text-red-600' : 'text-blue-600'
+            <div className="p-4 bg-white border border-[#e2e8f0] rounded-lg">
+              <div className="flex items-center justify-between mb-2">
+                <p className="text-xs text-amber-600 uppercase tracking-wide font-medium">
+                  Labor
+                </p>
+                <Badge variant="outline" className="text-xs">
+                  {laborPercent.toFixed(1)}%
+                </Badge>
+              </div>
+              <p className="text-2xl font-bold text-[#0f172a]">
+                {formatCurrency(currentTotals.labor)}
+              </p>
+            </div>
+
+            <div className="p-4 bg-white border border-[#e2e8f0] rounded-lg">
+              <div className="flex items-center justify-between mb-2">
+                <p className="text-xs text-purple-600 uppercase tracking-wide font-medium">
+                  Overhead
+                </p>
+                <Badge variant="outline" className="text-xs">
+                  {overheadPercent.toFixed(1)}%
+                </Badge>
+              </div>
+              <p className="text-2xl font-bold text-[#0f172a]">
+                {formatCurrency(currentTotals.overhead)}
+              </p>
+            </div>
+
+            <div className="p-4 bg-white border border-[#e2e8f0] rounded-lg">
+              <div className="flex items-center justify-between mb-2">
+                <p className={`text-xs uppercase tracking-wide font-medium ${
+                  currentTotals.markup < 0 ? 'text-red-600' : 'text-blue-600'
+                }`}>
+                  Markup
+                </p>
+                <Badge variant="outline" className="text-xs">
+                  {markupPercent.toFixed(1)}%
+                </Badge>
+              </div>
+              <p className={`text-2xl font-bold ${
+                currentTotals.markup < 0 ? 'text-red-600' : 'text-[#0f172a]'
               }`}>
-                Markup
+                {formatCurrency(currentTotals.markup)}
               </p>
-              <Badge variant="outline" className="text-xs">
-                {markupPercent.toFixed(1)}%
-              </Badge>
             </div>
-            <p className={`text-2xl font-bold ${
-              currentTotals.markup < 0 ? 'text-red-600' : 'text-[#0f172a]'
-            }`}>
-              {formatCurrency(currentTotals.markup)}
-            </p>
           </div>
-        </div>
+        )}
 
         {/* Visual Breakdown Bar */}
         <div className="space-y-2">

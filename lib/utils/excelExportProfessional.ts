@@ -13,6 +13,13 @@
 
 import ExcelJS from 'exceljs';
 import { separateItemsByType } from './itemHelpers';
+import type {
+  LaborSection,
+  LaborLineItem,
+  OverheadSection,
+  OverheadLineItem,
+  ProjectTotals,
+} from '@/lib/types/extraction';
 
 // ============================================================================
 // TYPES
@@ -64,6 +71,21 @@ interface Takeoff {
   final_price?: number;
 }
 
+/**
+ * V2 Export Options - includes Mike Skjei methodology data
+ */
+interface V2ExportOptions {
+  labor?: LaborSection;
+  overhead?: OverheadSection;
+  projectTotals?: ProjectTotals;
+  metadata?: {
+    calculationMethod?: string;
+    markupRate?: number;
+    crewSize?: number;
+    estimatedWeeks?: number;
+  };
+}
+
 // ============================================================================
 // COLOR SCHEME (Professional Standards - matches n8n output)
 // ============================================================================
@@ -85,6 +107,17 @@ const COLORS = {
   ATTENTION_BG: 'FFFFFF00',
   WARNING_TEXT: 'FFFF0000',
   ALT_ROW_BG: 'FFF2F2F2',
+  // V2 Mike Skjei methodology colors
+  V2_LABOR_HEADER_BG: 'FF70AD47',      // Green
+  V2_LABOR_HEADER_TEXT: 'FFFFFFFF',
+  V2_LABOR_ROW_BG: 'FFE2EFDA',          // Light green
+  V2_OVERHEAD_HEADER_BG: 'FFFFC000',    // Orange
+  V2_OVERHEAD_HEADER_TEXT: 'FFFFFFFF',
+  V2_OVERHEAD_ROW_BG: 'FFFFF2CC',       // Light orange
+  V2_MATERIAL_HEADER_BG: 'FF4472C4',    // Blue
+  V2_MATERIAL_ROW_BG: 'FFD9E1F2',       // Light blue
+  V2_TOTALS_BG: 'FFF3F3F3',             // Light gray
+  V2_INSURANCE_BG: 'FFFFEB9C',          // Yellow tint
 };
 
 // ============================================================================
@@ -269,6 +302,330 @@ function styleDataCell(cell: ExcelJS.Cell, isAltRow = false) {
   if (isAltRow) {
     cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COLORS.ALT_ROW_BG } };
   }
+}
+
+// ============================================================================
+// V2 LABOR SECTION (Mike Skjei Methodology)
+// ============================================================================
+/**
+ * Add V2 Installation Labor section to worksheet
+ * Shows labor items calculated by squares (SQ = 100 SF)
+ */
+function addV2LaborSection(
+  worksheet: ExcelJS.Worksheet,
+  startRow: number,
+  labor: LaborSection | undefined,
+  projectTotals: ProjectTotals | undefined
+): number {
+  if (!labor && !projectTotals) return startRow;
+
+  let row = startRow;
+
+  // Section header - green background
+  const headerRow = worksheet.getRow(row);
+  worksheet.mergeCells(`A${row}:G${row}`);
+  headerRow.getCell(1).value = 'INSTALLATION LABOR (Mike Skjei Methodology)';
+  headerRow.getCell(1).fill = {
+    type: 'pattern',
+    pattern: 'solid',
+    fgColor: { argb: COLORS.V2_LABOR_HEADER_BG },
+  };
+  headerRow.getCell(1).font = { bold: true, color: { argb: COLORS.V2_LABOR_HEADER_TEXT }, size: 12 };
+  headerRow.getCell(1).alignment = { horizontal: 'center' };
+  headerRow.getCell(1).border = {
+    top: { style: 'medium' }, left: { style: 'medium' },
+    bottom: { style: 'thin' }, right: { style: 'medium' }
+  };
+  row++;
+
+  // Column headers
+  const headers = ['#', 'Description', 'Qty (SQ)', 'Unit', 'Rate ($/SQ)', 'Extended', 'Notes'];
+  const colHeaderRow = worksheet.getRow(row);
+  headers.forEach((header, idx) => {
+    const cell = colHeaderRow.getCell(idx + 1);
+    cell.value = header;
+    cell.font = { bold: true, size: 10 };
+    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COLORS.V2_LABOR_ROW_BG } };
+    cell.border = { top: { style: 'thin' }, left: { style: 'thin' }, bottom: { style: 'thin' }, right: { style: 'thin' } };
+    cell.alignment = { horizontal: idx >= 2 && idx <= 5 ? 'right' : 'left' };
+  });
+  row++;
+
+  // Labor items
+  if (labor?.installation_items && labor.installation_items.length > 0) {
+    labor.installation_items.forEach((item, idx) => {
+      const itemRow = worksheet.getRow(row);
+      const isAltRow = idx % 2 === 1;
+
+      itemRow.getCell(1).value = idx + 1;
+      styleDataCell(itemRow.getCell(1), isAltRow);
+
+      itemRow.getCell(2).value = item.description || item.rate_name;
+      styleDataCell(itemRow.getCell(2), isAltRow);
+
+      itemRow.getCell(3).value = item.quantity;
+      itemRow.getCell(3).numFmt = '#,##0.00';
+      itemRow.getCell(3).alignment = { horizontal: 'right' };
+      styleDataCell(itemRow.getCell(3), isAltRow);
+
+      itemRow.getCell(4).value = item.unit; // 'SQ'
+      itemRow.getCell(4).alignment = { horizontal: 'center' };
+      styleDataCell(itemRow.getCell(4), isAltRow);
+
+      itemRow.getCell(5).value = item.unit_cost;
+      itemRow.getCell(5).numFmt = '"$"#,##0.00';
+      itemRow.getCell(5).alignment = { horizontal: 'right' };
+      styleDataCell(itemRow.getCell(5), isAltRow);
+
+      itemRow.getCell(6).value = item.total_cost;
+      itemRow.getCell(6).numFmt = '"$"#,##0.00';
+      itemRow.getCell(6).alignment = { horizontal: 'right' };
+      styleDataCell(itemRow.getCell(6), isAltRow);
+
+      itemRow.getCell(7).value = item.notes || '';
+      styleDataCell(itemRow.getCell(7), isAltRow);
+
+      row++;
+    });
+  } else if (projectTotals) {
+    // Fallback: show subtotal from project_totals
+    const itemRow = worksheet.getRow(row);
+    itemRow.getCell(2).value = 'Installation Labor (calculated by squares)';
+    styleDataCell(itemRow.getCell(2));
+    itemRow.getCell(6).value = projectTotals.installation_labor_subtotal;
+    itemRow.getCell(6).numFmt = '"$"#,##0.00';
+    itemRow.getCell(6).alignment = { horizontal: 'right' };
+    styleDataCell(itemRow.getCell(6));
+    row++;
+  }
+
+  // Subtotal row
+  const subtotalRow = worksheet.getRow(row);
+  subtotalRow.getCell(5).value = 'Installation Subtotal:';
+  subtotalRow.getCell(5).font = { bold: true };
+  subtotalRow.getCell(5).alignment = { horizontal: 'right' };
+  subtotalRow.getCell(5).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COLORS.SUBTOTAL_BG } };
+  subtotalRow.getCell(6).value = labor?.installation_subtotal || projectTotals?.installation_labor_subtotal || 0;
+  subtotalRow.getCell(6).numFmt = '"$"#,##0.00';
+  subtotalRow.getCell(6).font = { bold: true };
+  subtotalRow.getCell(6).alignment = { horizontal: 'right' };
+  subtotalRow.getCell(6).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COLORS.SUBTOTAL_BG } };
+  row++;
+
+  return row;
+}
+
+// ============================================================================
+// V2 OVERHEAD SECTION (Mike Skjei Methodology)
+// ============================================================================
+/**
+ * Add V2 Overhead & Burden section to worksheet
+ * Shows overhead items like labor burden, equipment, setup costs
+ */
+function addV2OverheadSection(
+  worksheet: ExcelJS.Worksheet,
+  startRow: number,
+  overhead: OverheadSection | undefined,
+  projectTotals: ProjectTotals | undefined
+): number {
+  if (!overhead && !projectTotals) return startRow;
+
+  let row = startRow;
+
+  // Section header - orange background
+  const headerRow = worksheet.getRow(row);
+  worksheet.mergeCells(`A${row}:G${row}`);
+  headerRow.getCell(1).value = 'OVERHEAD & BURDEN';
+  headerRow.getCell(1).fill = {
+    type: 'pattern',
+    pattern: 'solid',
+    fgColor: { argb: COLORS.V2_OVERHEAD_HEADER_BG },
+  };
+  headerRow.getCell(1).font = { bold: true, color: { argb: COLORS.V2_OVERHEAD_HEADER_TEXT }, size: 12 };
+  headerRow.getCell(1).alignment = { horizontal: 'center' };
+  headerRow.getCell(1).border = {
+    top: { style: 'medium' }, left: { style: 'medium' },
+    bottom: { style: 'thin' }, right: { style: 'medium' }
+  };
+  row++;
+
+  // Column headers
+  const headers = ['#', 'Cost Item', 'Qty', 'Unit', 'Rate', 'Amount', 'Category'];
+  const colHeaderRow = worksheet.getRow(row);
+  headers.forEach((header, idx) => {
+    const cell = colHeaderRow.getCell(idx + 1);
+    cell.value = header;
+    cell.font = { bold: true, size: 10 };
+    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COLORS.V2_OVERHEAD_ROW_BG } };
+    cell.border = { top: { style: 'thin' }, left: { style: 'thin' }, bottom: { style: 'thin' }, right: { style: 'thin' } };
+    cell.alignment = { horizontal: idx >= 2 && idx <= 5 ? 'right' : 'left' };
+  });
+  row++;
+
+  // Overhead items
+  if (overhead?.items && overhead.items.length > 0) {
+    overhead.items.forEach((item, idx) => {
+      const itemRow = worksheet.getRow(row);
+      const isAltRow = idx % 2 === 1;
+
+      itemRow.getCell(1).value = idx + 1;
+      styleDataCell(itemRow.getCell(1), isAltRow);
+
+      itemRow.getCell(2).value = item.cost_name;
+      styleDataCell(itemRow.getCell(2), isAltRow);
+
+      itemRow.getCell(3).value = item.quantity ?? '';
+      itemRow.getCell(3).alignment = { horizontal: 'right' };
+      styleDataCell(itemRow.getCell(3), isAltRow);
+
+      itemRow.getCell(4).value = item.unit ?? '';
+      itemRow.getCell(4).alignment = { horizontal: 'center' };
+      styleDataCell(itemRow.getCell(4), isAltRow);
+
+      if (item.rate !== undefined && item.rate !== null) {
+        itemRow.getCell(5).value = item.rate;
+        itemRow.getCell(5).numFmt = item.calculation_type === 'percentage' ? '0.00%' : '"$"#,##0.00';
+      } else {
+        itemRow.getCell(5).value = '';
+      }
+      itemRow.getCell(5).alignment = { horizontal: 'right' };
+      styleDataCell(itemRow.getCell(5), isAltRow);
+
+      itemRow.getCell(6).value = item.amount;
+      itemRow.getCell(6).numFmt = '"$"#,##0.00';
+      itemRow.getCell(6).alignment = { horizontal: 'right' };
+      styleDataCell(itemRow.getCell(6), isAltRow);
+
+      itemRow.getCell(7).value = item.category || '';
+      styleDataCell(itemRow.getCell(7), isAltRow);
+
+      row++;
+    });
+  } else if (projectTotals) {
+    // Fallback: show subtotal from project_totals
+    const itemRow = worksheet.getRow(row);
+    itemRow.getCell(2).value = 'Project Overhead (consolidated)';
+    styleDataCell(itemRow.getCell(2));
+    itemRow.getCell(6).value = projectTotals.overhead_subtotal;
+    itemRow.getCell(6).numFmt = '"$"#,##0.00';
+    itemRow.getCell(6).alignment = { horizontal: 'right' };
+    styleDataCell(itemRow.getCell(6));
+    row++;
+  }
+
+  // Subtotal row
+  const subtotalRow = worksheet.getRow(row);
+  subtotalRow.getCell(5).value = 'Overhead Subtotal:';
+  subtotalRow.getCell(5).font = { bold: true };
+  subtotalRow.getCell(5).alignment = { horizontal: 'right' };
+  subtotalRow.getCell(5).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COLORS.OVERHEAD_SUMMARY_BG } };
+  subtotalRow.getCell(6).value = overhead?.subtotal || projectTotals?.overhead_subtotal || 0;
+  subtotalRow.getCell(6).numFmt = '"$"#,##0.00';
+  subtotalRow.getCell(6).font = { bold: true };
+  subtotalRow.getCell(6).alignment = { horizontal: 'right' };
+  subtotalRow.getCell(6).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COLORS.OVERHEAD_SUMMARY_BG } };
+  row++;
+
+  return row;
+}
+
+// ============================================================================
+// V2 PROJECT TOTALS SECTION (Mike Skjei Methodology)
+// ============================================================================
+/**
+ * Add V2 Project Totals section with full breakdown
+ * Material Cost → Markup → Material Total
+ * Labor Cost → Overhead → Markup → Labor Total
+ * Subtotal → Insurance → Grand Total
+ */
+function addV2TotalsSection(
+  worksheet: ExcelJS.Worksheet,
+  startRow: number,
+  projectTotals: ProjectTotals
+): number {
+  let row = startRow;
+
+  // Section header
+  const headerRow = worksheet.getRow(row);
+  worksheet.mergeCells(`A${row}:G${row}`);
+  headerRow.getCell(1).value = 'PROJECT TOTALS (Mike Skjei Methodology)';
+  headerRow.getCell(1).fill = {
+    type: 'pattern',
+    pattern: 'solid',
+    fgColor: { argb: COLORS.HEADER_BG },
+  };
+  headerRow.getCell(1).font = { bold: true, color: { argb: COLORS.HEADER_TEXT }, size: 12 };
+  headerRow.getCell(1).alignment = { horizontal: 'center' };
+  headerRow.getCell(1).border = {
+    top: { style: 'medium' }, left: { style: 'medium' },
+    bottom: { style: 'thin' }, right: { style: 'medium' }
+  };
+  row++;
+
+  // Materials breakdown
+  row = addTotalsRow(worksheet, row, 'Material Cost', projectTotals.material_cost, COLORS.V2_MATERIAL_ROW_BG);
+  row = addTotalsRow(worksheet, row, `Material Markup (${(projectTotals.material_markup_rate * 100).toFixed(0)}%)`, projectTotals.material_markup_amount, COLORS.V2_MATERIAL_ROW_BG);
+  row = addTotalsRow(worksheet, row, 'MATERIAL TOTAL', projectTotals.material_total, COLORS.V2_MATERIAL_ROW_BG, true);
+
+  row++; // Blank row
+
+  // Labor breakdown
+  row = addTotalsRow(worksheet, row, 'Installation Labor', projectTotals.installation_labor_subtotal, COLORS.V2_LABOR_ROW_BG);
+  row = addTotalsRow(worksheet, row, 'Overhead', projectTotals.overhead_subtotal, COLORS.V2_OVERHEAD_ROW_BG);
+  row = addTotalsRow(worksheet, row, 'Labor Subtotal (Before Markup)', projectTotals.labor_cost_before_markup, COLORS.V2_TOTALS_BG);
+  row = addTotalsRow(worksheet, row, `Labor Markup (${(projectTotals.labor_markup_rate * 100).toFixed(0)}%)`, projectTotals.labor_markup_amount, COLORS.V2_TOTALS_BG);
+  row = addTotalsRow(worksheet, row, 'LABOR TOTAL', projectTotals.labor_total, COLORS.V2_LABOR_ROW_BG, true);
+
+  row++; // Blank row
+
+  // Final totals
+  row = addTotalsRow(worksheet, row, 'Subtotal (Materials + Labor)', projectTotals.subtotal, COLORS.SUBTOTAL_BG, true);
+
+  if (projectTotals.project_insurance > 0) {
+    row = addTotalsRow(worksheet, row, 'Project Insurance ($24.38 per $1,000)', projectTotals.project_insurance, COLORS.V2_INSURANCE_BG);
+  }
+
+  // Grand Total
+  const grandTotalRow = worksheet.getRow(row);
+  grandTotalRow.getCell(5).value = 'GRAND TOTAL';
+  grandTotalRow.getCell(5).font = { bold: true, size: 12 };
+  grandTotalRow.getCell(5).alignment = { horizontal: 'right' };
+  styleGrandTotal(grandTotalRow.getCell(5));
+  grandTotalRow.getCell(6).value = projectTotals.grand_total;
+  grandTotalRow.getCell(6).numFmt = '"$"#,##0.00';
+  styleGrandTotal(grandTotalRow.getCell(6), undefined, projectTotals.grand_total);
+  row++;
+
+  return row;
+}
+
+/**
+ * Helper to add a single totals row
+ */
+function addTotalsRow(
+  worksheet: ExcelJS.Worksheet,
+  row: number,
+  label: string,
+  value: number,
+  bgColor: string,
+  isBold = false
+): number {
+  const rowObj = worksheet.getRow(row);
+
+  rowObj.getCell(5).value = label;
+  rowObj.getCell(5).font = { bold: isBold, size: isBold ? 11 : 10 };
+  rowObj.getCell(5).alignment = { horizontal: 'right' };
+  rowObj.getCell(5).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: bgColor } };
+  rowObj.getCell(5).border = { top: { style: 'thin' }, left: { style: 'thin' }, bottom: { style: 'thin' }, right: { style: 'thin' } };
+
+  rowObj.getCell(6).value = value;
+  rowObj.getCell(6).numFmt = '"$"#,##0.00';
+  rowObj.getCell(6).font = { bold: isBold, size: isBold ? 11 : 10 };
+  rowObj.getCell(6).alignment = { horizontal: 'right' };
+  rowObj.getCell(6).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: bgColor } };
+  rowObj.getCell(6).border = { top: { style: 'thin' }, left: { style: 'thin' }, bottom: { style: 'thin' }, right: { style: 'thin' } };
+
+  return row + 1;
 }
 
 // ============================================================================
@@ -936,28 +1293,255 @@ function createTradeSheet(
 }
 
 // ============================================================================
+// V2 ESTIMATE SHEET (Mike Skjei Methodology - All-in-One)
+// ============================================================================
+/**
+ * Creates a comprehensive V2 estimate sheet with:
+ * - Project header
+ * - Materials section (grouped by trade/category)
+ * - Installation Labor section
+ * - Overhead & Burden section
+ * - Project Totals with markup breakdown
+ */
+function createV2EstimateSheet(
+  workbook: ExcelJS.Workbook,
+  sections: Section[],
+  lineItemsBySection: Record<string, LineItem[]>,
+  projectInfo: ProjectInfo,
+  v2Options: V2ExportOptions
+): ExcelJS.Worksheet {
+  const sheet = workbook.addWorksheet('Professional Estimate', {
+    views: [{ state: 'frozen', xSplit: 0, ySplit: 6 }]
+  });
+
+  let row = 1;
+
+  // ============================================================================
+  // PROJECT HEADER
+  // ============================================================================
+  const customerCell = sheet.getCell(`A${row}`);
+  customerCell.value = projectInfo.customerName;
+  customerCell.font = { bold: true, size: 18 };
+  sheet.mergeCells(`A${row}:G${row}`);
+  row++;
+
+  const addressCell = sheet.getCell(`A${row}`);
+  addressCell.value = projectInfo.jobAddress;
+  addressCell.font = { size: 12 };
+  sheet.mergeCells(`A${row}:G${row}`);
+  row++;
+
+  const dateCell = sheet.getCell(`A${row}`);
+  dateCell.value = `Estimate Date: ${new Date().toLocaleDateString('en-US', {
+    year: 'numeric', month: 'long', day: 'numeric'
+  })}`;
+  dateCell.font = { size: 10, italic: true };
+  sheet.mergeCells(`A${row}:G${row}`);
+  row++;
+
+  // Methodology note
+  if (v2Options.metadata?.calculationMethod) {
+    const methodCell = sheet.getCell(`A${row}`);
+    methodCell.value = `Pricing Method: ${v2Options.metadata.calculationMethod}`;
+    methodCell.font = { size: 9, italic: true, color: { argb: 'FF666666' } };
+    sheet.mergeCells(`A${row}:G${row}`);
+    row++;
+  }
+
+  row++; // Blank row
+
+  // Set column widths
+  sheet.getColumn('A').width = 8;   // #
+  sheet.getColumn('B').width = 40;  // Description
+  sheet.getColumn('C').width = 12;  // Qty
+  sheet.getColumn('D').width = 10;  // Unit
+  sheet.getColumn('E').width = 14;  // Rate
+  sheet.getColumn('F').width = 14;  // Extended
+  sheet.getColumn('G').width = 25;  // Notes
+
+  // ============================================================================
+  // MATERIALS SECTION (Blue)
+  // ============================================================================
+  const materialsHeaderRow = sheet.getRow(row);
+  sheet.mergeCells(`A${row}:G${row}`);
+  materialsHeaderRow.getCell(1).value = 'MATERIALS';
+  materialsHeaderRow.getCell(1).fill = {
+    type: 'pattern',
+    pattern: 'solid',
+    fgColor: { argb: COLORS.V2_MATERIAL_HEADER_BG },
+  };
+  materialsHeaderRow.getCell(1).font = { bold: true, color: { argb: COLORS.HEADER_TEXT }, size: 12 };
+  materialsHeaderRow.getCell(1).alignment = { horizontal: 'center' };
+  materialsHeaderRow.getCell(1).border = {
+    top: { style: 'medium' }, left: { style: 'medium' },
+    bottom: { style: 'thin' }, right: { style: 'medium' }
+  };
+  row++;
+
+  // Materials column headers
+  const matHeaders = ['#', 'Description', 'Qty', 'Unit', 'Unit Cost', 'Extended', 'Notes'];
+  const matHeaderRow = sheet.getRow(row);
+  matHeaders.forEach((header, idx) => {
+    const cell = matHeaderRow.getCell(idx + 1);
+    cell.value = header;
+    cell.font = { bold: true, size: 10 };
+    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COLORS.V2_MATERIAL_ROW_BG } };
+    cell.border = { top: { style: 'thin' }, left: { style: 'thin' }, bottom: { style: 'thin' }, right: { style: 'thin' } };
+    cell.alignment = { horizontal: idx >= 2 && idx <= 5 ? 'right' : 'left' };
+  });
+  row++;
+
+  // Collect all material items across sections
+  let materialItemNum = 0;
+  let materialTotal = 0;
+
+  sections.forEach(section => {
+    const items = lineItemsBySection[section.id] || [];
+    const { materials } = separateItemsByType(items);
+
+    if (materials.length > 0) {
+      // Section sub-header
+      const sectionHeaderRow = sheet.getRow(row);
+      sheet.mergeCells(`A${row}:G${row}`);
+      sectionHeaderRow.getCell(1).value = section.section_name;
+      sectionHeaderRow.getCell(1).font = { bold: true, size: 10, italic: true };
+      sectionHeaderRow.getCell(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF0F0F0' } };
+      sectionHeaderRow.getCell(1).border = { top: { style: 'thin' }, bottom: { style: 'thin' } };
+      row++;
+
+      materials.forEach((item, idx) => {
+        materialItemNum++;
+        const itemRow = sheet.getRow(row);
+        const isAltRow = idx % 2 === 1;
+
+        itemRow.getCell(1).value = materialItemNum;
+        styleDataCell(itemRow.getCell(1), isAltRow);
+
+        itemRow.getCell(2).value = item.description;
+        styleDataCell(itemRow.getCell(2), isAltRow);
+
+        itemRow.getCell(3).value = item.quantity;
+        itemRow.getCell(3).numFmt = '#,##0.00';
+        itemRow.getCell(3).alignment = { horizontal: 'right' };
+        styleDataCell(itemRow.getCell(3), isAltRow);
+
+        itemRow.getCell(4).value = item.unit;
+        itemRow.getCell(4).alignment = { horizontal: 'center' };
+        styleDataCell(itemRow.getCell(4), isAltRow);
+
+        itemRow.getCell(5).value = item.material_unit_cost;
+        itemRow.getCell(5).numFmt = '"$"#,##0.00';
+        itemRow.getCell(5).alignment = { horizontal: 'right' };
+        styleDataCell(itemRow.getCell(5), isAltRow);
+
+        const extended = safeNum(item.quantity) * safeNum(item.material_unit_cost);
+        materialTotal += extended;
+        itemRow.getCell(6).value = extended;
+        itemRow.getCell(6).numFmt = '"$"#,##0.00';
+        itemRow.getCell(6).alignment = { horizontal: 'right' };
+        styleDataCell(itemRow.getCell(6), isAltRow);
+
+        itemRow.getCell(7).value = item.notes || '';
+        styleDataCell(itemRow.getCell(7), isAltRow);
+
+        row++;
+      });
+    }
+  });
+
+  // Materials subtotal
+  const matSubtotalRow = sheet.getRow(row);
+  matSubtotalRow.getCell(5).value = 'Material Cost:';
+  matSubtotalRow.getCell(5).font = { bold: true };
+  matSubtotalRow.getCell(5).alignment = { horizontal: 'right' };
+  matSubtotalRow.getCell(5).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COLORS.SUBTOTAL_BG } };
+  matSubtotalRow.getCell(6).value = v2Options.projectTotals?.material_cost || materialTotal;
+  matSubtotalRow.getCell(6).numFmt = '"$"#,##0.00';
+  matSubtotalRow.getCell(6).font = { bold: true };
+  matSubtotalRow.getCell(6).alignment = { horizontal: 'right' };
+  matSubtotalRow.getCell(6).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COLORS.SUBTOTAL_BG } };
+  row += 2;
+
+  // ============================================================================
+  // INSTALLATION LABOR SECTION (Green)
+  // ============================================================================
+  row = addV2LaborSection(sheet, row, v2Options.labor, v2Options.projectTotals);
+  row++; // Blank row
+
+  // ============================================================================
+  // OVERHEAD & BURDEN SECTION (Orange)
+  // ============================================================================
+  row = addV2OverheadSection(sheet, row, v2Options.overhead, v2Options.projectTotals);
+  row++; // Blank row
+
+  // ============================================================================
+  // PROJECT TOTALS SECTION
+  // ============================================================================
+  if (v2Options.projectTotals) {
+    row = addV2TotalsSection(sheet, row, v2Options.projectTotals);
+  }
+
+  // ============================================================================
+  // NOTES SECTION
+  // ============================================================================
+  row += 2;
+  sheet.getCell(`A${row}`).value = 'Notes:';
+  sheet.getCell(`A${row}`).font = { bold: true, size: 11 };
+  row++;
+
+  sheet.getCell(`A${row}`).value = '• All prices include materials and labor with applicable markups';
+  sheet.getCell(`A${row}`).font = { size: 10 };
+  row++;
+
+  sheet.getCell(`A${row}`).value = '• Labor costs calculated using Mike Skjei methodology (squares-based)';
+  sheet.getCell(`A${row}`).font = { size: 10 };
+  row++;
+
+  if (v2Options.projectTotals?.project_insurance && v2Options.projectTotals.project_insurance > 0) {
+    sheet.getCell(`A${row}`).value = '• Project insurance included at $24.38 per $1,000';
+    sheet.getCell(`A${row}`).font = { size: 10 };
+    row++;
+  }
+
+  sheet.getCell(`A${row}`).value = '• Pricing valid for 90 days from estimate date';
+  sheet.getCell(`A${row}`).font = { size: 10, color: { argb: COLORS.WARNING_TEXT } };
+
+  return sheet;
+}
+
+// ============================================================================
 // MAIN EXPORT FUNCTION
 // ============================================================================
 export async function exportProfessionalEstimate(
   takeoff: Takeoff,
   sections: Section[],
   lineItemsBySection: Record<string, LineItem[]>,
-  projectInfo: ProjectInfo
+  projectInfo: ProjectInfo,
+  v2Options?: V2ExportOptions
 ): Promise<void> {
   const workbook = new ExcelJS.Workbook();
   workbook.creator = 'Exterior Finishes Estimator';
   workbook.created = new Date();
 
-  // Create Summary sheet
-  createSummarySheet(workbook, sections, lineItemsBySection, projectInfo);
+  // Check if we have V2 data (Mike Skjei methodology)
+  const hasV2Data = v2Options?.projectTotals !== undefined;
 
-  // Create individual trade sheets
-  sections.forEach(section => {
-    const items = lineItemsBySection[section.id] || [];
-    if (items.length > 0) {
-      createTradeSheet(workbook, section, items, projectInfo);
-    }
-  });
+  if (hasV2Data && v2Options?.projectTotals) {
+    // V2 Export: Create comprehensive worksheet with all sections
+    createV2EstimateSheet(workbook, sections, lineItemsBySection, projectInfo, v2Options);
+  } else {
+    // Legacy Export: Original multi-sheet format
+    // Create Summary sheet
+    createSummarySheet(workbook, sections, lineItemsBySection, projectInfo);
+
+    // Create individual trade sheets
+    sections.forEach(section => {
+      const items = lineItemsBySection[section.id] || [];
+      if (items.length > 0) {
+        createTradeSheet(workbook, section, items, projectInfo);
+      }
+    });
+  }
 
   // Generate buffer and download
   const buffer = await workbook.xlsx.writeBuffer();

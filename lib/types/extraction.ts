@@ -488,7 +488,7 @@ export const DETECTION_CLASS_COLORS: Record<DetectionClass | InternalDetectionCl
   window: '#3B82F6',         // Blue
   door: '#F59E0B',           // Amber
   garage: '#6366F1',         // Indigo
-  siding: '#10B981',         // Emerald
+  siding: '#6B7280',         // Grey (gray-500)
   roof: '#EF4444',           // Red
   gable: '#EC4899',          // Pink
   // Linear measurement classes (LF)
@@ -617,6 +617,218 @@ export const STATUS_CONFIG: Record<
 };
 
 // =============================================================================
+// Class Normalization (backend aliases → frontend canonical classes)
+// =============================================================================
+
+/**
+ * Maps backend/ML detection class names to canonical frontend DetectionClass values.
+ * This handles variations from:
+ * - Python ML models (snake_case: "exterior_wall", "gable_vent")
+ * - Backend services (mixed case, spaces: "Exterior Wall", "Gable Vent")
+ * - Legacy data (old class names)
+ */
+export const CLASS_ALIAS_MAP: Record<string, DetectionClass> = {
+  // Siding/Wall aliases
+  'exterior wall': 'siding',
+  'exterior_wall': 'siding',
+  'wall': 'siding',
+  'facade': 'siding',
+  'cladding': 'siding',
+
+  // Gable aliases
+  'gable end': 'gable',
+  'gable_end': 'gable',
+  'gable wall': 'gable',
+  'gable_wall': 'gable',
+
+  // Window aliases
+  'windows': 'window',
+
+  // Door aliases
+  'doors': 'door',
+  'entry door': 'door',
+  'entry_door': 'door',
+
+  // Garage aliases
+  'garage door': 'garage',
+  'garage_door': 'garage',
+
+  // Roof aliases
+  'roofing': 'roof',
+  'roof area': 'roof',
+  'roof_area': 'roof',
+
+  // Trim aliases
+  'window trim': 'trim',
+  'window_trim': 'trim',
+  'door trim': 'trim',
+  'door_trim': 'trim',
+
+  // Fascia aliases
+  'fascia board': 'fascia',
+  'fascia_board': 'fascia',
+
+  // Gutter aliases
+  'gutters': 'gutter',
+  'rain gutter': 'gutter',
+  'rain_gutter': 'gutter',
+
+  // Eave aliases
+  'eaves': 'eave',
+  'roof eave': 'eave',
+  'roof_eave': 'eave',
+
+  // Rake aliases
+  'rakes': 'rake',
+  'gable rake': 'rake',
+  'gable_rake': 'rake',
+  'roof rake': 'rake',
+  'roof_rake': 'rake',
+
+  // Ridge aliases
+  'ridges': 'ridge',
+  'roof ridge': 'ridge',
+  'roof_ridge': 'ridge',
+
+  // Soffit aliases
+  'soffits': 'soffit',
+  'eave soffit': 'soffit',
+  'eave_soffit': 'soffit',
+
+  // Valley aliases
+  'valleys': 'valley',
+  'roof valley': 'valley',
+  'roof_valley': 'valley',
+
+  // Vent aliases
+  'vents': 'vent',
+  'roof vent': 'vent',
+  'roof_vent': 'vent',
+
+  // Flashing aliases
+  'flashings': 'flashing',
+  'step flashing': 'flashing',
+  'step_flashing': 'flashing',
+
+  // Downspout aliases
+  'downspouts': 'downspout',
+  'down spout': 'downspout',
+  'down_spout': 'downspout',
+
+  // Outlet aliases
+  'outlets': 'outlet',
+  'electrical outlet': 'outlet',
+  'electrical_outlet': 'outlet',
+
+  // Hose bib aliases
+  'hose bib': 'hose_bib',
+  'hosebib': 'hose_bib',
+  'hose bibb': 'hose_bib',
+  'spigot': 'hose_bib',
+
+  // Light fixture aliases
+  'light fixture': 'light_fixture',
+  'light': 'light_fixture',
+  'exterior light': 'light_fixture',
+  'exterior_light': 'light_fixture',
+
+  // Corbel aliases
+  'corbels': 'corbel',
+
+  // Gable vent aliases
+  'gable vent': 'gable_vent',
+  'gable_vents': 'gable_vent',
+  'gable vents': 'gable_vent',
+
+  // Belly band aliases
+  'belly band': 'belly_band',
+  'bellyband': 'belly_band',
+  'band board': 'belly_band',
+  'band_board': 'belly_band',
+
+  // Corner aliases
+  'corner inside': 'corner_inside',
+  'inside corner': 'corner_inside',
+  'inside_corner': 'corner_inside',
+  'interior corner': 'corner_inside',
+  'interior_corner': 'corner_inside',
+
+  'corner outside': 'corner_outside',
+  'outside corner': 'corner_outside',
+  'outside_corner': 'corner_outside',
+  'exterior corner': 'corner_outside',
+  'exterior_corner': 'corner_outside',
+
+  // Shutter aliases
+  'shutters': 'shutter',
+  'window shutter': 'shutter',
+  'window_shutter': 'shutter',
+
+  // Post aliases
+  'posts': 'post',
+  'porch post': 'post',
+  'porch_post': 'post',
+
+  // Column aliases
+  'columns': 'column',
+  'porch column': 'column',
+  'porch_column': 'column',
+
+  // Bracket aliases
+  'brackets': 'bracket',
+  'decorative bracket': 'bracket',
+  'decorative_bracket': 'bracket',
+};
+
+/**
+ * Normalizes a class name to a canonical DetectionClass.
+ * Handles null/undefined, case differences, and known aliases.
+ *
+ * @param className - Raw class name from backend/ML/database
+ * @returns Canonical DetectionClass or '' if unrecognized
+ */
+export function normalizeClass(className: string | undefined | null): DetectionClass {
+  if (!className) return '';
+
+  const normalized = className.toLowerCase().trim();
+
+  // Check alias map first
+  if (CLASS_ALIAS_MAP[normalized]) {
+    return CLASS_ALIAS_MAP[normalized];
+  }
+
+  // Check if it's already a valid DetectionClass
+  if (USER_SELECTABLE_CLASSES.includes(normalized as DetectionClass)) {
+    return normalized as DetectionClass;
+  }
+
+  // Check internal classes (building, exterior_wall)
+  if (normalized === 'building' || normalized === 'exterior_wall') {
+    // Map internal classes to their display equivalents
+    return normalized === 'exterior_wall' ? 'siding' : '' as DetectionClass;
+  }
+
+  return '';
+}
+
+/**
+ * Gets the display label for a detection class.
+ * Normalizes the class first, then formats for display.
+ *
+ * @param className - Raw class name
+ * @returns Human-readable label (e.g., "Exterior Wall" for "siding")
+ */
+export function getClassDisplayLabel(className: string | undefined | null): string {
+  const normalized = normalizeClass(className);
+  if (!normalized) return 'Unclassified';
+
+  return normalized
+    .split('_')
+    .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(' ');
+}
+
+// =============================================================================
 // Phase 4 Enhanced Data Types (from extraction-api)
 // =============================================================================
 
@@ -660,6 +872,111 @@ export interface Phase4Data {
   };
 }
 
+// ============================================
+// LABOR INTERFACES (Mike Skjei methodology)
+// ============================================
+
+/**
+ * Individual labor line item from squares-based calculation
+ */
+export interface LaborLineItem {
+  rate_id: string;
+  rate_name: string;
+  description: string;
+  quantity: number;        // In squares (SQ)
+  unit: string;            // 'SQ' = 100 SF
+  unit_cost: number;       // $/SQ
+  total_cost: number;      // quantity * unit_cost
+  notes?: string;
+}
+
+/**
+ * Labor section of calculation response
+ */
+export interface LaborSection {
+  installation_items: LaborLineItem[];
+  installation_subtotal: number;
+}
+
+// ============================================
+// OVERHEAD INTERFACES
+// ============================================
+
+/**
+ * Individual overhead cost line item
+ */
+export interface OverheadLineItem {
+  cost_id: string;
+  cost_name: string;
+  description: string;
+  category: string;        // 'labor_burden', 'equipment', 'setup', etc.
+  quantity?: number;
+  unit?: string;
+  rate?: number;
+  amount: number;
+  calculation_type: string; // 'percentage', 'calculated', 'flat_fee', 'per_day'
+  notes?: string;
+}
+
+/**
+ * Overhead section of calculation response
+ */
+export interface OverheadSection {
+  items: OverheadLineItem[];
+  subtotal: number;
+}
+
+// ============================================
+// PROJECT TOTALS INTERFACE
+// ============================================
+
+/**
+ * Full project totals breakdown following Mike Skjei methodology
+ */
+export interface ProjectTotals {
+  // Materials
+  material_cost: number;
+  material_markup_rate: number;      // 0.26 (26%)
+  material_markup_amount: number;
+  material_total: number;
+
+  // Labor breakdown
+  installation_labor_subtotal: number;
+  overhead_subtotal: number;
+  labor_cost_before_markup: number;  // installation + overhead
+  labor_markup_rate: number;         // 0.26 (26%)
+  labor_markup_amount: number;
+  labor_total: number;
+
+  // Final totals
+  subtotal: number;                  // material_total + labor_total
+  project_insurance: number;         // $24.38 per $1,000
+  grand_total: number;               // subtotal + project_insurance
+}
+
+// ============================================
+// CALCULATION METADATA
+// ============================================
+
+/**
+ * Enhanced metadata from calculation API
+ */
+export interface CalculationMetadata {
+  pricing_method: 'hybrid-v2';
+  calculation_method: string;        // 'mike_skjei_v1'
+  markup_rate: number;               // 0.26
+  crew_size: number;                 // Default: 4
+  estimated_weeks: number;           // Default: 2
+  items_before_consolidation: number;
+  items_after_consolidation: number;
+  has_auto_scope_items: boolean;
+  total_auto_scope_items: number;
+  total_assigned_items: number;
+  total_pricing_lookups: number;
+  pricing_lookup_success_rate: number;
+  warnings?: string[];
+}
+
 // =============================================================================
 // Helper Functions
 // =============================================================================
@@ -673,8 +990,23 @@ export function getConfidenceLevel(confidence: number): ConfidenceLevel {
   return 'very_low';
 }
 
-export function getDetectionColor(detectionClass: DetectionClass | InternalDetectionClass): string {
-  return DETECTION_CLASS_COLORS[detectionClass] ?? DETECTION_CLASS_COLORS[''];
+/**
+ * Gets the color for a detection class.
+ * Normalizes the class first to handle aliases, then looks up color.
+ *
+ * @param detectionClass - Raw class name (can be alias or canonical)
+ * @returns Hex color code for the class
+ */
+export function getDetectionColor(detectionClass: DetectionClass | InternalDetectionClass | string | null | undefined): string {
+  // Handle internal classes directly (they have their own colors)
+  if (detectionClass === 'building' || detectionClass === 'exterior_wall') {
+    return DETECTION_CLASS_COLORS[detectionClass];
+  }
+
+  // Normalize to canonical class
+  const normalized = normalizeClass(detectionClass as string);
+
+  return DETECTION_CLASS_COLORS[normalized] ?? DETECTION_CLASS_COLORS[''];
 }
 
 // =============================================================================
@@ -739,6 +1071,20 @@ export interface LiveDerivedTotals {
   // COUNTS (point markers grouped by class)
   countsByClass: Record<string, number>;
   totalPointCount: number;
+}
+
+// =============================================================================
+// Material Assignment (for ID-based pricing lookup)
+// =============================================================================
+
+export interface MaterialAssignment {
+  detection_id: string;
+  detection_class: string;
+  pricing_item_id: string;  // UUID from pricing_items.id
+  quantity: number;
+  unit: 'SF' | 'LF' | 'EA';
+  area_sf?: number | null;
+  perimeter_lf?: number | null;
 }
 
 // =============================================================================
@@ -812,6 +1158,12 @@ export interface ApprovePayload {
     color: string | null;
     profile: string;
   };
+
+  // NEW: Material assignments from detections (for ID-based pricing)
+  material_assignments?: MaterialAssignment[];
+
+  // NEW: Organization context for multi-tenant pricing
+  organization_id?: string;
 }
 
 // =============================================================================
@@ -821,6 +1173,8 @@ export interface ApprovePayload {
 export interface ApprovalResult {
   success: boolean;
   takeoff_id: string;
+  pricing_snapshot_id?: string | null;   // For audit trail - which pricing snapshot was used
+  organization_id?: string | null;        // For multi-tenant support
   sections_created: number;
   line_items_created: number;
   line_items_failed: number;
@@ -831,5 +1185,11 @@ export interface ApprovalResult {
     overhead_cost: number;
     subtotal: number;
     markup_percent: number;
+    markup_amount?: number;              // Calculated markup dollar amount
+    final_price?: number;                // subtotal + markup_amount
   };
+  // NEW fields for V2 response
+  labor?: LaborSection;
+  overhead?: OverheadSection;
+  project_totals?: ProjectTotals;
 }

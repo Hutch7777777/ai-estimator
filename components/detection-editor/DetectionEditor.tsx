@@ -6,6 +6,7 @@ import { Loader2, AlertCircle, RefreshCw, Eye, EyeOff, X, Layers, CheckCircle, D
 import { toast } from 'sonner';
 import JSZip from 'jszip';
 import { saveAs } from 'file-saver';
+import polygonClipping from 'polygon-clipping';
 import {
   useExtractionData,
   useDetectionSync,
@@ -39,6 +40,10 @@ import type {
   ApprovalResult,
   CountClass,
   PolygonPoints,
+  MaterialAssignment,
+  LaborSection,
+  OverheadSection,
+  ProjectTotals,
 } from '@/lib/types/extraction';
 import { isPolygonWithHoles } from '@/lib/types/extraction';
 import DetectionToolbar from './DetectionToolbar';
@@ -48,6 +53,7 @@ import type { PolygonUpdatePayload } from './KonvaDetectionPolygon';
 import DetectionSidebar from './DetectionSidebar';
 import CalibrationModal from './CalibrationModal';
 import { exportTakeoffToExcel, type TakeoffData } from '@/lib/utils/exportTakeoffExcel';
+import { useOrganization } from '@/lib/hooks/useOrganization';
 
 // =============================================================================
 // Types
@@ -110,6 +116,24 @@ function getSimplePolygonPoints(polygonPoints: PolygonPoints | null | undefined)
   return polygonPoints as PolygonPoint[];
 }
 
+/**
+ * Check if the API response uses the new V2 format with project_totals
+ * V2 responses include labor, overhead, and project_totals from Mike Skjei methodology
+ */
+function isV2Response(response: unknown): response is ApprovalResult & {
+  labor: LaborSection;
+  overhead: OverheadSection;
+  project_totals: ProjectTotals;
+} {
+  return (
+    response !== null &&
+    typeof response === 'object' &&
+    'project_totals' in response &&
+    'labor' in response &&
+    'overhead' in response
+  );
+}
+
 // =============================================================================
 // Helper Components
 // =============================================================================
@@ -163,6 +187,9 @@ export default function DetectionEditor({
   onError,
 }: DetectionEditorProps) {
   const router = useRouter();
+
+  // Get organization context for multi-tenant pricing
+  const { organization } = useOrganization();
 
   // ============================================================================
   // Data Hooks
@@ -248,6 +275,11 @@ export default function DetectionEditor({
   const [takeoffDetails, setTakeoffDetails] = useState<TakeoffData | null>(null);
   const [isLoadingDetails, setIsLoadingDetails] = useState(false);
   const [isDownloadingMarkup, setIsDownloadingMarkup] = useState(false);
+
+  // V2 response data (Mike Skjei methodology)
+  const [laborSection, setLaborSection] = useState<LaborSection | undefined>();
+  const [overheadSection, setOverheadSection] = useState<OverheadSection | undefined>();
+  const [projectTotals, setProjectTotals] = useState<ProjectTotals | undefined>();
 
   // Debug: Log render state for approval modal
   console.log('[DetectionEditor Render]', {
@@ -806,18 +838,26 @@ export default function DetectionEditor({
     setSelectedIds(new Set());
   }, [selectedIds, currentPageDetections, updateDetectionLocally]);
 
-  // Handle split detection - creates carved piece + remaining piece with hole
+  // Handle split detection - creates carved piece + remaining pieces using TRUE polygon subtraction
   const handleSplitDetection = useCallback(
     (
       originalDetection: ExtractionDetection,
-      splitRect: { x: number; y: number; width: number; height: number }
+      splitPolygon: PolygonPoint[]
     ) => {
       console.log('[DetectionEditor] handleSplitDetection called:', {
         originalId: originalDetection.id,
-        splitRect,
+        splitPolygonVertices: splitPolygon.length,
+        originalPolygonPoints: originalDetection.polygon_points,
+        originalPixel: {
+          x: originalDetection.pixel_x,
+          y: originalDetection.pixel_y,
+          width: originalDetection.pixel_width,
+          height: originalDetection.pixel_height,
+        },
       });
 
       const scaleRatio = currentPage?.scale_ratio || 64;
+      const pixelsPerFoot = scaleRatio;
 
       // Original detection bounds (convert from center-based to edges)
       const orig = {
@@ -827,131 +867,254 @@ export default function DetectionEditor({
         bottom: originalDetection.pixel_y + originalDetection.pixel_height / 2,
       };
 
-      // Normalize crop rectangle (handle drawing in any direction)
-      const crop = {
-        left: Math.min(splitRect.x, splitRect.x + splitRect.width),
-        top: Math.min(splitRect.y, splitRect.y + splitRect.height),
-        right: Math.max(splitRect.x, splitRect.x + splitRect.width),
-        bottom: Math.max(splitRect.y, splitRect.y + splitRect.height),
-      };
-
-      // Clamp crop to original bounds
-      const clampedCrop = {
-        left: Math.max(crop.left, orig.left),
-        top: Math.max(crop.top, orig.top),
-        right: Math.min(crop.right, orig.right),
-        bottom: Math.min(crop.bottom, orig.bottom),
-      };
-
-      const cropWidth = clampedCrop.right - clampedCrop.left;
-      const cropHeight = clampedCrop.bottom - clampedCrop.top;
-
-      if (cropWidth < 10 || cropHeight < 10) {
-        console.warn('[DetectionEditor] Split area too small or outside detection');
+      // Validate split polygon has enough points
+      if (splitPolygon.length < 3) {
+        console.warn('[DetectionEditor] Split polygon must have at least 3 points');
         return;
       }
 
-      // Calculate measurements for carved piece
-      const carvedMeasurements = calculateRealWorldMeasurements(cropWidth, cropHeight, scaleRatio);
+      // Get original polygon points, or create rectangle from bounding box
+      let originalPolygon: [number, number][];
+      if (originalDetection.polygon_points && Array.isArray(originalDetection.polygon_points) && originalDetection.polygon_points.length >= 3) {
+        // Use existing polygon points
+        originalPolygon = originalDetection.polygon_points.map(p => [p.x, p.y] as [number, number]);
+        console.log('[DetectionEditor] Using original polygon_points for clipping');
+      } else if (originalDetection.polygon_points && isPolygonWithHoles(originalDetection.polygon_points)) {
+        // Handle polygon with holes - use outer boundary
+        originalPolygon = originalDetection.polygon_points.outer.map(p => [p.x, p.y] as [number, number]);
+        console.log('[DetectionEditor] Using outer boundary of polygon-with-holes for clipping');
+      } else {
+        // Create rectangle from bounding box
+        originalPolygon = [
+          [orig.left, orig.top],
+          [orig.right, orig.top],
+          [orig.right, orig.bottom],
+          [orig.left, orig.bottom],
+        ];
+        console.log('[DetectionEditor] Created rectangle from bounding box for clipping');
+      }
 
-      // 1. Create CARVED piece (simple rectangle detection)
-      const carvedPiece: ExtractionDetection = {
-        id: crypto.randomUUID(),
-        job_id: job?.id || '',
-        page_id: currentPage?.id || '',
-        class: originalDetection.class,
-        detection_index: currentPageDetections.length,
-        confidence: originalDetection.confidence,
-        pixel_x: clampedCrop.left + cropWidth / 2,
-        pixel_y: clampedCrop.top + cropHeight / 2,
-        pixel_width: cropWidth,
-        pixel_height: cropHeight,
-        real_width_ft: carvedMeasurements.real_width_ft,
-        real_height_ft: carvedMeasurements.real_height_ft,
-        real_width_in: carvedMeasurements.real_width_in,
-        real_height_in: carvedMeasurements.real_height_in,
-        area_sf: carvedMeasurements.area_sf,
-        perimeter_lf: carvedMeasurements.perimeter_lf,
-        is_triangle: false,
-        matched_tag: null,
-        created_at: new Date().toISOString(),
-        status: 'edited',
-        edited_by: null,
-        edited_at: new Date().toISOString(),
-        original_bbox: null,
-        polygon_points: null,
-        markup_type: 'polygon',
-        notes: `Carved from ${originalDetection.id.slice(0, 8)}`,
+      // Convert split polygon points to polygon-clipping format
+      const cutPolygon: [number, number][] = splitPolygon.map(p => [p.x, p.y] as [number, number]);
+
+      // Use polygon-clipping for TRUE subtraction
+      // intersection = carved piece (original AND cut polygon)
+      // difference = remaining piece(s) (original MINUS cut polygon)
+      const carvedResult = polygonClipping.intersection(
+        [[originalPolygon]],
+        [[cutPolygon]]
+      );
+      const remainingResult = polygonClipping.difference(
+        [[originalPolygon]],
+        [[cutPolygon]]
+      );
+
+      console.log('[DetectionEditor] Polygon clipping results:', {
+        carvedPolygons: carvedResult.length,
+        remainingPolygons: remainingResult.length,
+      });
+
+      if (carvedResult.length === 0) {
+        console.warn('[DetectionEditor] No intersection found between detection and cut rectangle');
+        return;
+      }
+
+      // Helper: Calculate polygon area using shoelace formula
+      const calculateArea = (points: [number, number][]): number => {
+        let area = 0;
+        for (let i = 0; i < points.length; i++) {
+          const j = (i + 1) % points.length;
+          area += points[i][0] * points[j][1];
+          area -= points[j][0] * points[i][1];
+        }
+        return Math.abs(area / 2);
       };
 
-      // 2. Create REMAINING piece (polygon with hole)
-      // Outer boundary (clockwise)
-      const outerPoints = [
-        { x: orig.left, y: orig.top },
-        { x: orig.right, y: orig.top },
-        { x: orig.right, y: orig.bottom },
-        { x: orig.left, y: orig.bottom },
-      ];
-
-      // Inner hole (counter-clockwise for proper fill-rule)
-      const holePoints = [
-        { x: clampedCrop.left, y: clampedCrop.top },
-        { x: clampedCrop.left, y: clampedCrop.bottom },
-        { x: clampedCrop.right, y: clampedCrop.bottom },
-        { x: clampedCrop.right, y: clampedCrop.top },
-      ];
-
-      // Calculate remaining area (original - carved) in pixels
-      const originalAreaPx = originalDetection.pixel_width * originalDetection.pixel_height;
-      const carvedAreaPx = cropWidth * cropHeight;
-      const remainingAreaPx = originalAreaPx - carvedAreaPx;
-
-      // Calculate remaining perimeter (outer + inner perimeters) in pixels
-      const outerPerimeterPx = 2 * (originalDetection.pixel_width + originalDetection.pixel_height);
-      const innerPerimeterPx = 2 * (cropWidth + cropHeight);
-      const remainingPerimeterPx = outerPerimeterPx + innerPerimeterPx;
-
-      // Convert to real-world measurements
-      const pixelsPerFoot = scaleRatio;
-      const remainingAreaSf = remainingAreaPx / (pixelsPerFoot * pixelsPerFoot);
-      const remainingPerimeterLf = remainingPerimeterPx / pixelsPerFoot;
-
-      const remainingPiece: ExtractionDetection = {
-        id: crypto.randomUUID(),
-        job_id: job?.id || '',
-        page_id: currentPage?.id || '',
-        class: originalDetection.class,
-        detection_index: currentPageDetections.length + 1,
-        confidence: originalDetection.confidence,
-        // Center and bounding box remain the same as original
-        pixel_x: originalDetection.pixel_x,
-        pixel_y: originalDetection.pixel_y,
-        pixel_width: originalDetection.pixel_width,
-        pixel_height: originalDetection.pixel_height,
-        // Keep original dimensions for reference
-        real_width_ft: originalDetection.real_width_ft,
-        real_height_ft: originalDetection.real_height_ft,
-        real_width_in: originalDetection.real_width_in,
-        real_height_in: originalDetection.real_height_in,
-        // Adjusted measurements (minus the hole)
-        area_sf: remainingAreaSf,
-        perimeter_lf: remainingPerimeterLf,
-        is_triangle: false,
-        matched_tag: null,
-        created_at: new Date().toISOString(),
-        status: 'edited',
-        edited_by: null,
-        edited_at: new Date().toISOString(),
-        original_bbox: null,
-        // Store polygon with hole structure
-        polygon_points: {
-          outer: outerPoints,
-          holes: [holePoints],
-        },
-        markup_type: 'polygon',
-        notes: `Remaining from ${originalDetection.id.slice(0, 8)} (with hole)`,
-        has_hole: true,
+      // Helper: Calculate polygon perimeter
+      const calculatePerimeter = (points: [number, number][]): number => {
+        let perimeter = 0;
+        for (let i = 0; i < points.length; i++) {
+          const j = (i + 1) % points.length;
+          const dx = points[j][0] - points[i][0];
+          const dy = points[j][1] - points[i][1];
+          perimeter += Math.sqrt(dx * dx + dy * dy);
+        }
+        return perimeter;
       };
+
+      // Helper: Get bounding box of polygon
+      const getBoundingBox = (points: [number, number][]) => {
+        const xs = points.map(p => p[0]);
+        const ys = points.map(p => p[1]);
+        const minX = Math.min(...xs);
+        const maxX = Math.max(...xs);
+        const minY = Math.min(...ys);
+        const maxY = Math.max(...ys);
+        return {
+          centerX: (minX + maxX) / 2,
+          centerY: (minY + maxY) / 2,
+          width: maxX - minX,
+          height: maxY - minY,
+        };
+      };
+
+      // Helper: Convert Ring (Pair[]) to PolygonPoint[]
+      const toPolygonPoints = (ring: [number, number][]): PolygonPoint[] => {
+        return ring.map(([x, y]) => ({ x, y }));
+      };
+
+      const newDetections: ExtractionDetection[] = [];
+
+      // 1. Create CARVED piece(s) from intersection result
+      // carvedResult is MultiPolygon = Polygon[] where Polygon = Ring[]
+      for (const polygon of carvedResult) {
+        // polygon[0] is the outer ring (Ring = Pair[])
+        const outerRing = polygon[0];
+        if (!outerRing || outerRing.length < 3) continue;
+
+        const bbox = getBoundingBox(outerRing);
+        const areaPx = calculateArea(outerRing);
+        const perimeterPx = calculatePerimeter(outerRing);
+
+        const carvedPiece: ExtractionDetection = {
+          id: crypto.randomUUID(),
+          job_id: job?.id || '',
+          page_id: currentPage?.id || '',
+          class: originalDetection.class,
+          detection_index: currentPageDetections.length + newDetections.length,
+          confidence: 1.0, // Manual split = user verified = high confidence
+          pixel_x: bbox.centerX,
+          pixel_y: bbox.centerY,
+          pixel_width: bbox.width,
+          pixel_height: bbox.height,
+          real_width_ft: bbox.width / pixelsPerFoot,
+          real_height_ft: bbox.height / pixelsPerFoot,
+          real_width_in: (bbox.width / pixelsPerFoot) * 12,
+          real_height_in: (bbox.height / pixelsPerFoot) * 12,
+          area_sf: areaPx / (pixelsPerFoot * pixelsPerFoot),
+          perimeter_lf: perimeterPx / pixelsPerFoot,
+          is_triangle: false,
+          matched_tag: null,
+          created_at: new Date().toISOString(),
+          status: 'edited',
+          edited_by: null,
+          edited_at: new Date().toISOString(),
+          original_bbox: null,
+          polygon_points: toPolygonPoints(outerRing),
+          markup_type: 'polygon',
+          notes: `Carved from ${originalDetection.id.slice(0, 8)}`,
+        };
+        newDetections.push(carvedPiece);
+      }
+
+      // 2. Create REMAINING piece(s) from difference result
+      // Each polygon in remainingResult can have multiple rings:
+      // - Ring 0 = outer boundary
+      // - Ring 1+ = holes (if cut is in the middle of the polygon)
+      for (const polygon of remainingResult) {
+        const outerRing = polygon[0];
+        if (!outerRing || outerRing.length < 3) continue;
+
+        // Check for holes (additional rings beyond the outer)
+        const holeRings = polygon.slice(1).filter(ring => ring && ring.length >= 3);
+        const hasHoles = holeRings.length > 0;
+
+        const bbox = getBoundingBox(outerRing);
+        const outerPoints = toPolygonPoints(outerRing);
+
+        // Calculate area: outer area minus hole areas
+        let areaPx = calculateArea(outerRing);
+        let perimeterPx = calculatePerimeter(outerRing);
+
+        // Subtract hole areas and add hole perimeters
+        for (const holeRing of holeRings) {
+          areaPx -= calculateArea(holeRing);
+          perimeterPx += calculatePerimeter(holeRing);
+        }
+
+        // Build polygon_points - either simple array or PolygonWithHoles
+        let polygonData: PolygonPoint[] | { outer: PolygonPoint[]; holes?: PolygonPoint[][] };
+        if (hasHoles) {
+          // Has holes - use PolygonWithHoles structure
+          polygonData = {
+            outer: outerPoints,
+            holes: holeRings.map(ring => toPolygonPoints(ring)),
+          };
+        } else {
+          // No holes - simple polygon array
+          polygonData = outerPoints;
+        }
+
+        const remainingPiece: ExtractionDetection = {
+          id: crypto.randomUUID(),
+          job_id: job?.id || '',
+          page_id: currentPage?.id || '',
+          class: originalDetection.class,
+          detection_index: currentPageDetections.length + newDetections.length,
+          confidence: 1.0, // Manual split = user verified = high confidence
+          pixel_x: bbox.centerX,
+          pixel_y: bbox.centerY,
+          pixel_width: bbox.width,
+          pixel_height: bbox.height,
+          real_width_ft: bbox.width / pixelsPerFoot,
+          real_height_ft: bbox.height / pixelsPerFoot,
+          real_width_in: (bbox.width / pixelsPerFoot) * 12,
+          real_height_in: (bbox.height / pixelsPerFoot) * 12,
+          area_sf: areaPx / (pixelsPerFoot * pixelsPerFoot),
+          perimeter_lf: perimeterPx / pixelsPerFoot,
+          is_triangle: false,
+          matched_tag: null,
+          created_at: new Date().toISOString(),
+          status: 'edited',
+          edited_by: null,
+          edited_at: new Date().toISOString(),
+          original_bbox: null,
+          polygon_points: polygonData,
+          markup_type: 'polygon',
+          notes: `Remaining from ${originalDetection.id.slice(0, 8)}${hasHoles ? ' (with hole)' : ''}`,
+          // Only set has_hole if there are actual holes
+          ...(hasHoles ? { has_hole: true } : {}),
+        };
+        newDetections.push(remainingPiece);
+      }
+
+      // Debug: Log polygon-clipping results first
+      console.log('=== POLYGON-CLIPPING RESULTS ===');
+      console.log('Carved polygons:', carvedResult.map(poly => ({
+        rings: poly.length,
+        outerPoints: poly[0]?.length || 0,
+      })));
+      console.log('Remaining polygons:', remainingResult.map(poly => ({
+        rings: poly.length,
+        outerPoints: poly[0]?.length || 0,
+        holes: poly.slice(1).map(h => h?.length || 0),
+      })));
+
+      // Debug: Log all pieces BEFORE adding
+      console.log('=== SPLIT DETECTION DEBUG (TRUE SUBTRACTION) ===');
+      console.log(`Created ${newDetections.length} new detections:`);
+      newDetections.forEach((det, idx) => {
+        const areaSf = det.area_sf ?? 0;
+        const hasHolesFlag = (det as ExtractionDetection & { has_hole?: boolean }).has_hole;
+        const polygonPoints = det.polygon_points;
+        const isPolygonWithHolesType = polygonPoints && typeof polygonPoints === 'object' && 'outer' in polygonPoints;
+        console.log(`  [${idx}] ${det.notes}:`, {
+          id: det.id.slice(0, 8),
+          pixel_x: det.pixel_x.toFixed(1),
+          pixel_y: det.pixel_y.toFixed(1),
+          pixel_width: det.pixel_width.toFixed(1),
+          pixel_height: det.pixel_height.toFixed(1),
+          area_sf: areaSf.toFixed(2),
+          vertices: isPolygonWithHolesType
+            ? (polygonPoints as { outer: PolygonPoint[] }).outer.length
+            : (polygonPoints as PolygonPoint[])?.length || 0,
+          hasHoles: hasHolesFlag || false,
+          holesCount: isPolygonWithHolesType
+            ? (polygonPoints as { outer: PolygonPoint[]; holes?: PolygonPoint[][] }).holes?.length || 0
+            : 0,
+        });
+      });
+      console.log('=== END SPLIT DEBUG ===');
 
       // Mark original as deleted (soft delete via status)
       const deletedOriginal: ExtractionDetection = {
@@ -962,18 +1125,20 @@ export default function DetectionEditor({
       updateDetectionLocally(deletedOriginal);
       console.log('[DetectionEditor] Marked original detection as deleted:', originalDetection.id);
 
-      // Add the two new pieces
-      addDetectionLocally(carvedPiece);
-      console.log(`[DetectionEditor] Created carved piece: ${carvedPiece.id}`);
+      // Add all new pieces
+      for (const detection of newDetections) {
+        addDetectionLocally(detection);
+        console.log(`[DetectionEditor] Created detection: ${detection.id} (${detection.notes})`);
+      }
 
-      addDetectionLocally(remainingPiece);
-      console.log(`[DetectionEditor] Created remaining piece with hole: ${remainingPiece.id}`);
+      console.log(`[DetectionEditor] Split complete: created ${newDetections.length} new detections via true polygon subtraction`);
 
-      console.log('[DetectionEditor] Split: created carved piece and remaining piece with hole');
-
-      // Select the carved piece (the one the user explicitly drew)
-      setSelectedDetectionId(carvedPiece.id);
-      setSelectedIds(new Set([carvedPiece.id]));
+      // Select the first carved piece (the one the user explicitly drew)
+      const carvedPiece = newDetections.find(d => d.notes?.includes('Carved'));
+      if (carvedPiece) {
+        setSelectedDetectionId(carvedPiece.id);
+        setSelectedIds(new Set([carvedPiece.id]));
+      }
 
       // Switch back to select mode
       setToolMode('select');
@@ -1903,6 +2068,150 @@ export default function DetectionEditor({
   }, [pages, getAllDetections]);
 
   // ============================================================================
+  // Material Assignment Helpers (for ID-based pricing) - V2 FIXED
+  // ============================================================================
+
+  /**
+   * Determine the quantity unit based on detection class
+   * V2: Handle both space and underscore in class names
+   */
+  const getUnitForClass = (detectionClass: string): 'SF' | 'LF' | 'EA' => {
+    // Normalize: lowercase and replace spaces with underscores
+    const normalized = detectionClass.toLowerCase().replace(/\s+/g, '_');
+
+    const areaClasses = [
+      'siding', 'exterior_wall', 'exterior_walls',
+      'window', 'door', 'garage',
+      'roof', 'gable', 'soffit', 'wall'
+    ];
+    const linearClasses = [
+      'trim', 'fascia', 'gutter', 'downspout',
+      'eave', 'rake', 'ridge', 'valley',
+      'corner_inside', 'corner_outside', 'belly_band',
+      'outside_corner', 'inside_corner'
+    ];
+
+    if (areaClasses.some(c => normalized.includes(c))) return 'SF';
+    if (linearClasses.some(c => normalized.includes(c))) return 'LF';
+    return 'EA';
+  };
+
+  /**
+   * Calculate quantity based on detection class and measurements
+   * V3: Calculate from pixel dimensions when area_sf/perimeter_lf is null
+   * Falls back to stored values if available, otherwise calculates from pixels + scale
+   */
+  const calculateQuantityForDetection = (
+    detection: ExtractionDetection,
+    unit: 'SF' | 'LF' | 'EA',
+    scaleRatio?: number
+  ): number => {
+    // Get scale - use passed value, page scale, or fallback to 48 (1/4"=1'-0" at 200 DPI)
+    const scale = scaleRatio || currentPage?.scale_ratio || 48;
+
+    switch (unit) {
+      case 'SF': {
+        // First try stored area_sf
+        if (detection.area_sf && detection.area_sf > 0) {
+          console.log(`[Qty] ${detection.class}: area_sf=${detection.area_sf.toFixed(2)} (stored)`);
+          return detection.area_sf;
+        }
+
+        // Calculate from pixel dimensions
+        if (detection.pixel_width && detection.pixel_height && scale > 0) {
+          const widthFt = Number(detection.pixel_width) / scale;
+          const heightFt = Number(detection.pixel_height) / scale;
+          const areaSF = widthFt * heightFt;
+          console.log(`[Qty] ${detection.class}: area_sf=${areaSF.toFixed(2)} (calculated: ${detection.pixel_width}×${detection.pixel_height}px @ ${scale.toFixed(1)}px/ft)`);
+          return areaSF;
+        }
+
+        console.warn(`[Qty] ${detection.class}: area_sf=0 (no dimensions or scale)`);
+        return 0;
+      }
+
+      case 'LF': {
+        // First try stored perimeter_lf or linear_ft
+        const storedLinear = detection.perimeter_lf || (detection as unknown as { linear_ft?: number }).linear_ft;
+        if (storedLinear && storedLinear > 0) {
+          console.log(`[Qty] ${detection.class}: perimeter_lf=${storedLinear.toFixed(2)} (stored)`);
+          return storedLinear;
+        }
+
+        // Calculate from pixel dimensions - use longer dimension for linear items
+        if (detection.pixel_width && detection.pixel_height && scale > 0) {
+          const widthFt = Number(detection.pixel_width) / scale;
+          const heightFt = Number(detection.pixel_height) / scale;
+          const linearFt = Math.max(widthFt, heightFt);
+          console.log(`[Qty] ${detection.class}: linear_ft=${linearFt.toFixed(2)} (calculated from pixels)`);
+          return linearFt;
+        }
+
+        console.warn(`[Qty] ${detection.class}: linear_ft=0 (no dimensions or scale)`);
+        return 0;
+      }
+
+      case 'EA':
+        return 1;
+
+      default:
+        return detection.area_sf || 1;
+    }
+  };
+
+  /**
+   * Build material assignments from detections with assigned materials
+   * V3: Calculate quantities from pixel dimensions when area_sf is null
+   */
+  const buildMaterialAssignments = (
+    detections: ExtractionDetection[]
+  ): MaterialAssignment[] => {
+    console.log('[MaterialAssignments] ═══════════════════════════════════');
+    console.log(`[MaterialAssignments] Total detections: ${detections.length}`);
+
+    const withMaterials = detections.filter(d =>
+      d.assigned_material_id &&
+      d.status !== 'deleted'
+    );
+
+    console.log(`[MaterialAssignments] With assigned materials: ${withMaterials.length}`);
+
+    if (withMaterials.length === 0) {
+      console.warn('[MaterialAssignments] ⚠️ No detections have assigned materials!');
+      console.log('[MaterialAssignments] Sample detections:');
+      detections.slice(0, 3).forEach(d => {
+        console.log(`  - ${d.class}: assigned_material_id=${d.assigned_material_id}, status=${d.status}`);
+      });
+    }
+
+    const assignments = withMaterials.map(d => {
+      const unit = getUnitForClass(d.class);
+
+      // Get scale for this detection's page
+      const detectionPage = pages?.find(p => p.id === d.page_id);
+      const scale = detectionPage?.scale_ratio || currentPage?.scale_ratio || 48;
+      const quantity = calculateQuantityForDetection(d, unit, scale);
+
+      console.log(`[MaterialAssignments] ✅ ${d.class}: ${quantity.toFixed(2)} ${unit} → pricing_item_id: ${d.assigned_material_id}`);
+
+      return {
+        detection_id: d.id,
+        detection_class: d.class,
+        pricing_item_id: d.assigned_material_id!,
+        quantity,
+        unit,
+        area_sf: d.area_sf,
+        perimeter_lf: d.perimeter_lf,
+      };
+    });
+
+    console.log(`[MaterialAssignments] Built ${assignments.length} assignments`);
+    console.log('[MaterialAssignments] ═══════════════════════════════════');
+
+    return assignments;
+  };
+
+  // ============================================================================
   // Approval Handler - Build Payload & Call Webhook
   // ============================================================================
 
@@ -2051,9 +2360,15 @@ export default function DetectionEditor({
           color: null,
           profile: 'cedarmill',
         },
+
+        // NEW: Include material assignments for ID-based pricing
+        material_assignments: buildMaterialAssignments(allDetections),
+
+        // NEW: Include organization_id for multi-tenant pricing overrides
+        organization_id: organization?.id,
       };
     },
-    [jobId, projectId, job?.project_name, getAllDetections]
+    [jobId, projectId, job?.project_name, getAllDetections, organization?.id]
   );
 
   const handleApprove = useCallback(async () => {
@@ -2068,6 +2383,10 @@ export default function DetectionEditor({
       // Build the payload with all measurements
       const payload = buildApprovePayload(liveDerivedTotals);
       console.log('[Approve] Sending payload:', payload);
+      console.log('[Approve] Material assignments:', payload.material_assignments?.length || 0);
+      if (payload.material_assignments?.length) {
+        console.log('[Approve] Sample assignment:', payload.material_assignments[0]);
+      }
 
       const webhookUrl =
         process.env.NEXT_PUBLIC_N8N_WEBHOOK_URL || 'https://n8n-production-293e.up.railway.app';
@@ -2131,6 +2450,33 @@ export default function DetectionEditor({
 
         if (!data.success) {
           throw new Error((data as { error?: string }).error || 'Approval failed');
+        }
+
+        // Parse V2 response format (Mike Skjei methodology)
+        if (isV2Response(data)) {
+          console.log('✅ Received V2 response with project_totals');
+
+          // Set the new state for V2 data
+          setLaborSection(data.labor);
+          setOverheadSection(data.overhead);
+          setProjectTotals(data.project_totals);
+
+          // Log for debugging
+          console.log('📊 Project Totals:', data.project_totals);
+          console.log('👷 Labor Items:', data.labor?.installation_items?.length || 0);
+          console.log('🏗️ Overhead Items:', data.overhead?.items?.length || 0);
+
+          // Check for warnings in metadata
+          const metadata = (data as { metadata?: { warnings?: string[] } }).metadata;
+          if (metadata?.warnings?.length) {
+            console.warn('⚠️ Calculation warnings:', metadata.warnings);
+          }
+        } else {
+          console.log('⚠️ Received legacy response format (no project_totals)');
+          // Clear V2 state if using legacy format
+          setLaborSection(undefined);
+          setOverheadSection(undefined);
+          setProjectTotals(undefined);
         }
 
         // Store the approval result and show the results panel
@@ -2645,8 +2991,120 @@ export default function DetectionEditor({
                 </div>
               </div>
 
-              {/* Cost Breakdown */}
-              {approvalResult?.totals && (
+              {/* Cost Breakdown - V2 format when projectTotals available */}
+              {projectTotals ? (
+                <div className="space-y-4">
+                  <h3 className="text-sm font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide flex items-center gap-2">
+                    <DollarSign className="w-4 h-4" />
+                    Cost Breakdown (Mike Skjei Methodology)
+                  </h3>
+
+                  {/* Materials Section */}
+                  <div className="bg-green-50 dark:bg-green-900/20 rounded-lg p-4 space-y-2">
+                    <h4 className="text-sm font-semibold text-green-700 dark:text-green-400 uppercase">Materials</h4>
+                    <div className="flex justify-between text-sm">
+                      <span className="text-gray-600 dark:text-gray-400">Material Cost</span>
+                      <span className="font-mono text-gray-900 dark:text-white">
+                        {new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(projectTotals.material_cost)}
+                      </span>
+                    </div>
+                    <div className="flex justify-between text-sm">
+                      <span className="text-gray-600 dark:text-gray-400">Markup ({(projectTotals.material_markup_rate * 100).toFixed(0)}%)</span>
+                      <span className="font-mono text-gray-900 dark:text-white">
+                        {new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(projectTotals.material_markup_amount)}
+                      </span>
+                    </div>
+                    <div className="flex justify-between text-sm font-semibold pt-1 border-t border-green-200 dark:border-green-800">
+                      <span className="text-green-700 dark:text-green-400">Material Total</span>
+                      <span className="font-mono text-green-700 dark:text-green-400">
+                        {new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(projectTotals.material_total)}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Labor Section */}
+                  <div className="bg-amber-50 dark:bg-amber-900/20 rounded-lg p-4 space-y-2">
+                    <h4 className="text-sm font-semibold text-amber-700 dark:text-amber-400 uppercase">Labor</h4>
+                    <div className="flex justify-between text-sm">
+                      <span className="text-gray-600 dark:text-gray-400">Installation Labor</span>
+                      <span className="font-mono text-gray-900 dark:text-white">
+                        {new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(projectTotals.installation_labor_subtotal)}
+                      </span>
+                    </div>
+                    {/* Labor Details - Expandable */}
+                    {laborSection?.installation_items && laborSection.installation_items.length > 0 && (
+                      <div className="pl-3 border-l-2 border-amber-200 dark:border-amber-700 space-y-1">
+                        {laborSection.installation_items.map((item, idx) => (
+                          <div key={item.rate_id || idx} className="flex justify-between text-xs text-gray-500 dark:text-gray-400">
+                            <span>{item.rate_name} ({item.quantity.toFixed(2)} {item.unit})</span>
+                            <span className="font-mono">{new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(item.total_cost)}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    <div className="flex justify-between text-sm">
+                      <span className="text-gray-600 dark:text-gray-400">Overhead</span>
+                      <span className="font-mono text-gray-900 dark:text-white">
+                        {new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(projectTotals.overhead_subtotal)}
+                      </span>
+                    </div>
+                    {/* Overhead Details - Expandable */}
+                    {overheadSection?.items && overheadSection.items.length > 0 && (
+                      <div className="pl-3 border-l-2 border-purple-200 dark:border-purple-700 space-y-1">
+                        {overheadSection.items.map((item, idx) => (
+                          <div key={item.cost_id || idx} className="flex justify-between text-xs text-gray-500 dark:text-gray-400">
+                            <span>{item.cost_name}</span>
+                            <span className="font-mono">{new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(item.amount)}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    <div className="flex justify-between text-sm pt-1">
+                      <span className="text-gray-600 dark:text-gray-400">Labor Subtotal</span>
+                      <span className="font-mono text-gray-900 dark:text-white">
+                        {new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(projectTotals.labor_cost_before_markup)}
+                      </span>
+                    </div>
+                    <div className="flex justify-between text-sm">
+                      <span className="text-gray-600 dark:text-gray-400">Markup ({(projectTotals.labor_markup_rate * 100).toFixed(0)}%)</span>
+                      <span className="font-mono text-gray-900 dark:text-white">
+                        {new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(projectTotals.labor_markup_amount)}
+                      </span>
+                    </div>
+                    <div className="flex justify-between text-sm font-semibold pt-1 border-t border-amber-200 dark:border-amber-800">
+                      <span className="text-amber-700 dark:text-amber-400">Labor Total</span>
+                      <span className="font-mono text-amber-700 dark:text-amber-400">
+                        {new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(projectTotals.labor_total)}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Totals Section */}
+                  <div className="bg-gray-50 dark:bg-gray-800/50 rounded-lg divide-y divide-gray-200 dark:divide-gray-700">
+                    <div className="flex justify-between px-4 py-3">
+                      <span className="text-gray-600 dark:text-gray-400">Subtotal (Materials + Labor)</span>
+                      <span className="font-mono font-medium text-gray-900 dark:text-white">
+                        {new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(projectTotals.subtotal)}
+                      </span>
+                    </div>
+                    {projectTotals.project_insurance > 0 && (
+                      <div className="flex justify-between px-4 py-3">
+                        <span className="text-gray-600 dark:text-gray-400">Project Insurance ($24.38/$1,000)</span>
+                        <span className="font-mono font-medium text-gray-900 dark:text-white">
+                          {new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(projectTotals.project_insurance)}
+                        </span>
+                      </div>
+                    )}
+                    <div className="flex justify-between px-4 py-3 bg-green-50 dark:bg-green-900/20">
+                      <span className="font-semibold text-gray-900 dark:text-white">Grand Total</span>
+                      <span className="font-mono font-bold text-lg text-green-600 dark:text-green-400">
+                        {new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(projectTotals.grand_total)}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              ) : approvalResult?.totals && (
+                /* Legacy Cost Breakdown */
                 <div className="space-y-3">
                   <h3 className="text-sm font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide flex items-center gap-2">
                     <DollarSign className="w-4 h-4" />
@@ -2666,15 +3124,27 @@ export default function DetectionEditor({
                       </span>
                     </div>
                     <div className="flex justify-between px-4 py-3">
-                      <span className="text-gray-600 dark:text-gray-400">Overhead & Profit ({approvalResult.totals.markup_percent ?? 15}%)</span>
+                      <span className="text-gray-600 dark:text-gray-400">Overhead</span>
                       <span className="font-mono font-medium text-gray-900 dark:text-white">
                         {new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(approvalResult.totals.overhead_cost ?? 0)}
                       </span>
                     </div>
-                    <div className="flex justify-between px-4 py-3 bg-green-50 dark:bg-green-900/20">
-                      <span className="font-semibold text-gray-900 dark:text-white">Subtotal</span>
-                      <span className="font-mono font-bold text-lg text-green-600 dark:text-green-400">
+                    <div className="flex justify-between px-4 py-3 bg-gray-100 dark:bg-gray-700/50">
+                      <span className="font-medium text-gray-700 dark:text-gray-300">Subtotal</span>
+                      <span className="font-mono font-medium text-gray-900 dark:text-white">
                         {new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(approvalResult.totals.subtotal ?? 0)}
+                      </span>
+                    </div>
+                    <div className="flex justify-between px-4 py-3">
+                      <span className="text-gray-600 dark:text-gray-400">Markup ({approvalResult.totals.markup_percent ?? 15}%)</span>
+                      <span className="font-mono font-medium text-gray-900 dark:text-white">
+                        {new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(approvalResult.totals.markup_amount ?? (approvalResult.totals.subtotal * (approvalResult.totals.markup_percent ?? 15) / 100))}
+                      </span>
+                    </div>
+                    <div className="flex justify-between px-4 py-3 bg-green-50 dark:bg-green-900/20">
+                      <span className="font-semibold text-gray-900 dark:text-white">Final Price</span>
+                      <span className="font-mono font-bold text-lg text-green-600 dark:text-green-400">
+                        {new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(approvalResult.totals.final_price ?? (approvalResult.totals.subtotal * (1 + (approvalResult.totals.markup_percent ?? 15) / 100)))}
                       </span>
                     </div>
                   </div>
