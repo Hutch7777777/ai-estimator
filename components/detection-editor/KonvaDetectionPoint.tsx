@@ -4,7 +4,7 @@ import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { Circle, Group, Text, Label, Tag } from 'react-konva';
 import type Konva from 'konva';
 import type { ExtractionDetection, DetectionClass } from '@/lib/types/extraction';
-import { DETECTION_CLASS_COLORS, CONFIDENCE_THRESHOLDS } from '@/lib/types/extraction';
+import { CONFIDENCE_THRESHOLDS, getDetectionColor, getClassDisplayLabel } from '@/lib/types/extraction';
 
 // =============================================================================
 // Types
@@ -40,20 +40,16 @@ const SELECTION_RING_WIDTH = 1.5;
 // Helper Functions
 // =============================================================================
 
-function getClassColor(detectionClass: DetectionClass): string {
-  return DETECTION_CLASS_COLORS[detectionClass] || DETECTION_CLASS_COLORS[''];
-}
+// Use centralized getDetectionColor which handles class normalization
 
 function isLowConfidence(confidence: number): boolean {
   return confidence < CONFIDENCE_THRESHOLDS.medium;
 }
 
-function formatClassName(detectionClass: DetectionClass): string {
-  if (!detectionClass) return 'Marker';
-  return detectionClass
-    .split('_')
-    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
-    .join(' ');
+function formatClassName(detectionClass: DetectionClass | string): string {
+  // Use centralized display label function which handles normalization
+  const label = getClassDisplayLabel(detectionClass);
+  return label === 'Unclassified' ? 'Marker' : label;
 }
 
 // =============================================================================
@@ -106,7 +102,7 @@ export default function KonvaDetectionPoint({
     }
   }, [detection.id, detection.pixel_x, detection.pixel_y, isDragging]);
 
-  const color = getClassColor(detection.class);
+  const color = getDetectionColor(detection.class);
   const lowConfidence = isLowConfidence(detection.confidence);
   const isDeleted = detection.status === 'deleted';
 

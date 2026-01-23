@@ -4,7 +4,7 @@ import React, { useRef, useEffect } from 'react';
 import { Rect, Group, Text, Label, Tag } from 'react-konva';
 import type Konva from 'konva';
 import type { ExtractionDetection, DetectionClass } from '@/lib/types/extraction';
-import { DETECTION_CLASS_COLORS, CONFIDENCE_THRESHOLDS } from '@/lib/types/extraction';
+import { CONFIDENCE_THRESHOLDS, getDetectionColor, getClassDisplayLabel } from '@/lib/types/extraction';
 import { centerToCanvas, formatFeetInches, formatArea } from '@/lib/utils/coordinates';
 
 // =============================================================================
@@ -35,23 +35,31 @@ export interface KonvaDetectionRectProps {
 // Helper Functions
 // =============================================================================
 
-function getClassColor(detectionClass: DetectionClass): string {
-  return DETECTION_CLASS_COLORS[detectionClass] || DETECTION_CLASS_COLORS[''];
+// Use centralized getDetectionColor which handles class normalization
+
+/**
+ * Darken a hex color by a given percentage for stroke visibility.
+ */
+function darkenColor(hex: string, percent: number = 20): string {
+  const cleanHex = hex.replace('#', '');
+  const r = parseInt(cleanHex.substring(0, 2), 16);
+  const g = parseInt(cleanHex.substring(2, 4), 16);
+  const b = parseInt(cleanHex.substring(4, 6), 16);
+  const factor = 1 - percent / 100;
+  const toHex = (n: number) => Math.round(n * factor).toString(16).padStart(2, '0');
+  return `#${toHex(r)}${toHex(g)}${toHex(b)}`;
 }
 
-// Solid black stroke for all detections - provides clear boundary visibility
-const STROKE_COLOR = '#000000';
+// Standard grey stroke for unselected detections
+const STROKE_COLOR_UNSELECTED = '#9ca3af';
 
 function isLowConfidence(confidence: number): boolean {
   return confidence < CONFIDENCE_THRESHOLDS.medium;
 }
 
-function formatClassName(detectionClass: DetectionClass): string {
-  if (!detectionClass) return 'Unknown';
-  return detectionClass
-    .split('_')
-    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
-    .join(' ');
+function formatClassName(detectionClass: DetectionClass | string): string {
+  // Use centralized display label function which handles normalization
+  return getClassDisplayLabel(detectionClass);
 }
 
 // =============================================================================
@@ -83,7 +91,10 @@ export default function KonvaDetectionRect({
     pixel_height: detection.pixel_height,
   });
 
-  const color = getClassColor(detection.class);
+  const color = getDetectionColor(detection.class);
+  // Unselected: light grey to match standard detection style
+  // Selected: use class color for prominence
+  const strokeColor = isSelected ? darkenColor(color, 20) : STROKE_COLOR_UNSELECTED;
   const lowConfidence = isLowConfidence(detection.confidence);
   const isDeleted = detection.status === 'deleted';
 
@@ -103,7 +114,7 @@ export default function KonvaDetectionRect({
         height={canvasCoords.height}
         fill={color}
         opacity={0.1}
-        stroke={STROKE_COLOR}
+        stroke={STROKE_COLOR_UNSELECTED}
         strokeWidth={1}
         strokeScaleEnabled={false}
         dash={[4 / scale, 2 / scale]}
@@ -195,12 +206,12 @@ export default function KonvaDetectionRect({
         height={canvasCoords.height}
         fill={color}
         opacity={isSelected ? 0.3 : isHovered ? 0.25 : 0.2}
-        stroke={STROKE_COLOR}
+        stroke={strokeColor}
         strokeWidth={1}
         strokeScaleEnabled={false}
         dash={lowConfidence ? [4 / scale, 2 / scale] : undefined}
         cornerRadius={2 / scale}
-        shadowColor={isSelected ? STROKE_COLOR : undefined}
+        shadowColor={isSelected ? strokeColor : undefined}
         shadowBlur={isSelected ? 4 : 0}
         shadowOpacity={isSelected ? 0.3 : 0}
       />

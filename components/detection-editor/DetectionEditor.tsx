@@ -54,6 +54,14 @@ import DetectionSidebar from './DetectionSidebar';
 import CalibrationModal from './CalibrationModal';
 import { exportTakeoffToExcel, type TakeoffData } from '@/lib/utils/exportTakeoffExcel';
 import { useOrganization } from '@/lib/hooks/useOrganization';
+import { createClient } from '@supabase/supabase-js';
+
+// Create untyped Supabase client for extraction_detections_draft operations
+// (This table is not in the generated types)
+const getSupabaseClient = () => createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+);
 
 // =============================================================================
 // Types
@@ -202,6 +210,7 @@ export default function DetectionEditor({
     currentPageId,
     setCurrentPageId,
     currentPageDetections,
+    detections, // Raw detections Map for all-pages calculation
     elevationCalcs,
     jobTotals,
     loading,
@@ -1198,21 +1207,56 @@ export default function DetectionEditor({
   );
 
   // Handle material assignment from Properties panel
-  // Local-first: Only updates local state, no sync to server
+  // Saves directly to Supabase and updates local state
   const handleMaterialAssign = useCallback(
-    (detectionIds: string[], materialId: string | null) => {
-      if (detectionIds.length === 0) return;
+    async (detectionIds: string[], materialId: string | null) => {
+      console.log('[DetectionEditor] handleMaterialAssign called:', { detectionIds, materialId });
 
+      if (detectionIds.length === 0) {
+        console.log('[DetectionEditor] No detection IDs provided, returning');
+        return;
+      }
+
+      // Update local state immediately for optimistic UI
       detectionIds.forEach((id) => {
         const detection = currentPageDetections.find((d) => d.id === id);
+        console.log('[DetectionEditor] Found detection:', detection?.id, 'current assigned_material_id:', detection?.assigned_material_id);
+
         if (detection) {
-          updateDetectionLocally({
+          const updatedDetection = {
             ...detection,
             assigned_material_id: materialId,
+            // Clear price override when material is cleared
+            material_cost_override: materialId === null ? null : detection.material_cost_override,
             edited_at: new Date().toISOString(),
-          });
+          };
+          console.log('[DetectionEditor] Updating detection with:', { id: updatedDetection.id, assigned_material_id: updatedDetection.assigned_material_id });
+          updateDetectionLocally(updatedDetection);
         }
       });
+
+      // Save to database directly
+      const supabase = getSupabaseClient();
+      const updateData: Record<string, unknown> = {
+        assigned_material_id: materialId,
+        updated_at: new Date().toISOString()
+      };
+      // Clear price override when material is cleared
+      if (materialId === null) {
+        updateData.material_cost_override = null;
+      }
+
+      const { error } = await supabase
+        .from('extraction_detections_draft')
+        .update(updateData)
+        .in('id', detectionIds);
+
+      if (error) {
+        console.error('[DetectionEditor] Failed to save material assignment to database:', error);
+        toast.error('Failed to save material assignment');
+      } else {
+        console.log('[DetectionEditor] Material assignment saved to database successfully');
+      }
 
       console.log(
         `[DetectionEditor] Assigned material '${materialId}' to ${detectionIds.length} detection(s)`
@@ -1240,6 +1284,103 @@ export default function DetectionEditor({
 
       console.log(
         `[DetectionEditor] Updated notes for ${detectionIds.length} detection(s)`
+      );
+    },
+    [currentPageDetections, updateDetectionLocally]
+  );
+
+  // Handle price override from Properties panel
+  // Saves directly to Supabase and updates local state
+  // Note: Price editing is only enabled for single detection selection in the UI
+  const handlePriceOverride = useCallback(
+    async (detectionIds: string[], price: number | null) => {
+      console.log('[DetectionEditor] handlePriceOverride called:', { detectionIds, price });
+
+      if (detectionIds.length === 0) {
+        console.log('[DetectionEditor] No detection IDs, returning');
+        return;
+      }
+
+      // Update local state immediately for optimistic UI
+      detectionIds.forEach((id) => {
+        const detection = currentPageDetections.find((d) => d.id === id);
+        console.log('[DetectionEditor] Found detection for price override:', detection?.id);
+
+        if (detection) {
+          const updatedDetection = {
+            ...detection,
+            material_cost_override: price,
+            edited_at: new Date().toISOString(),
+          };
+          console.log('[DetectionEditor] Updating detection with price override:', { id: updatedDetection.id, material_cost_override: updatedDetection.material_cost_override });
+          updateDetectionLocally(updatedDetection);
+        }
+      });
+
+      // Save to database directly
+      const supabase = getSupabaseClient();
+      const { error } = await supabase
+        .from('extraction_detections_draft')
+        .update({
+          material_cost_override: price,
+          updated_at: new Date().toISOString()
+        })
+        .in('id', detectionIds);
+
+      if (error) {
+        console.error('[DetectionEditor] Failed to save price override to database:', error);
+        toast.error('Failed to save price override');
+      } else {
+        console.log('[DetectionEditor] Price override saved to database successfully');
+      }
+
+      console.log(
+        `[DetectionEditor] Price override ${price !== null ? `set to $${price}` : 'cleared'} for ${detectionIds.length} detection(s)`
+      );
+    },
+    [currentPageDetections, updateDetectionLocally]
+  );
+
+  // Handle assigning material AND setting price override in one action
+  // This is used when editing a price in the product list (assigns + sets custom price)
+  // Saves directly to Supabase and updates local state
+  const handleMaterialAssignWithPrice = useCallback(
+    async (detectionIds: string[], materialId: string, priceOverride: number) => {
+      if (detectionIds.length === 0) return;
+
+      // Update local state immediately for optimistic UI
+      detectionIds.forEach((id) => {
+        const detection = currentPageDetections.find((d) => d.id === id);
+        if (detection) {
+          updateDetectionLocally({
+            ...detection,
+            assigned_material_id: materialId,
+            material_cost_override: priceOverride,
+            edited_at: new Date().toISOString(),
+          });
+        }
+      });
+
+      // Save to database directly
+      const supabase = getSupabaseClient();
+      const { error } = await supabase
+        .from('extraction_detections_draft')
+        .update({
+          assigned_material_id: materialId,
+          material_cost_override: priceOverride,
+          updated_at: new Date().toISOString()
+        })
+        .in('id', detectionIds);
+
+      if (error) {
+        console.error('[DetectionEditor] Failed to save material assignment with price to database:', error);
+        toast.error('Failed to save material assignment');
+      } else {
+        console.log('[DetectionEditor] Material assignment with price saved to database successfully');
+      }
+
+      console.log(
+        `[DetectionEditor] Assigned material ${materialId} with price override $${priceOverride} for ${detectionIds.length} detection(s)`
       );
     },
     [currentPageDetections, updateDetectionLocally]
@@ -1883,18 +2024,36 @@ export default function DetectionEditor({
   }, [currentPage, currentPageDetections]);
 
   // Calculate all pages totals (aggregate across all elevation pages)
+  // IMPORTANT: Uses the same filtering as currentPageDetections to ensure consistency
   const allPagesTotals = useMemo((): LiveDerivedTotals | null => {
-    // Only include elevation pages that have a valid scale
+    // Only include elevation pages that have been calibrated (scale_ratio !== 48)
+    // The default uncalibrated scale_ratio is 48, which causes incorrect calculations
+    // when mixed with properly calibrated pages
+    const DEFAULT_UNCALIBRATED_SCALE = 48;
     const elevationPages = pages.filter(
-      (p) => p.page_type === 'elevation' && p.scale_ratio && p.scale_ratio > 0
+      (p) => p.page_type === 'elevation' &&
+             p.scale_ratio &&
+             p.scale_ratio > 0 &&
+             p.scale_ratio !== DEFAULT_UNCALIBRATED_SCALE
     );
 
     if (elevationPages.length === 0) {
+      // No calibrated pages - return null to disable "All" tab
       return null;
     }
 
-    // Get all detections
-    const allDetections = getAllDetections();
+    // Helper function to filter detections the same way as currentPageDetections
+    // This excludes building/exterior_wall/roof classes which are hidden from UI
+    const filterDetectionsForPage = (pageId: string): ExtractionDetection[] => {
+      const pageDetections = detections.get(pageId) || [];
+      return pageDetections.filter((d) => {
+        const cls = d.class as string;
+        // Same filter as currentPageDetections in useExtractionData
+        if (cls === 'exterior_wall' || cls === 'building' || cls === 'roof') return false;
+        if (d.status === 'deleted') return false;
+        return true;
+      });
+    };
 
     // Initialize aggregate totals
     const aggregateTotals: LiveDerivedTotals = {
@@ -1948,9 +2107,8 @@ export default function DetectionEditor({
     // Process each elevation page
     for (const page of elevationPages) {
       const scaleRatio = page.scale_ratio!;
-      const pageDetections = allDetections.filter(
-        (d) => d.page_id === page.id && d.status !== 'deleted' && d.class !== 'roof'
-      );
+      // Use the same filtering as currentPageDetections for consistency
+      const pageDetections = filterDetectionsForPage(page.id);
 
       let pageOpeningsSf = 0;
       let pageBuildingAreaSf = 0;
@@ -2065,7 +2223,7 @@ export default function DetectionEditor({
     }
 
     return aggregateTotals;
-  }, [pages, getAllDetections]);
+  }, [pages, detections]);
 
   // ============================================================================
   // Material Assignment Helpers (for ID-based pricing) - V2 FIXED
@@ -2192,7 +2350,11 @@ export default function DetectionEditor({
       const scale = detectionPage?.scale_ratio || currentPage?.scale_ratio || 48;
       const quantity = calculateQuantityForDetection(d, unit, scale);
 
-      console.log(`[MaterialAssignments] ✅ ${d.class}: ${quantity.toFixed(2)} ${unit} → pricing_item_id: ${d.assigned_material_id}`);
+      // Log with price override info if present
+      const priceInfo = d.material_cost_override !== null && d.material_cost_override !== undefined
+        ? ` (price override: $${d.material_cost_override})`
+        : '';
+      console.log(`[MaterialAssignments] ✅ ${d.class}: ${quantity.toFixed(2)} ${unit} → pricing_item_id: ${d.assigned_material_id}${priceInfo}`);
 
       return {
         detection_id: d.id,
@@ -2202,6 +2364,9 @@ export default function DetectionEditor({
         unit,
         area_sf: d.area_sf,
         perimeter_lf: d.perimeter_lf,
+        // Include price overrides for user-edited prices
+        material_cost_override: d.material_cost_override ?? null,
+        labor_cost_override: d.labor_cost_override ?? null,
       };
     });
 
@@ -2386,6 +2551,16 @@ export default function DetectionEditor({
       console.log('[Approve] Material assignments:', payload.material_assignments?.length || 0);
       if (payload.material_assignments?.length) {
         console.log('[Approve] Sample assignment:', payload.material_assignments[0]);
+        // Log assignments with price overrides
+        const withOverrides = payload.material_assignments.filter(
+          a => a.material_cost_override !== null || a.labor_cost_override !== null
+        );
+        if (withOverrides.length > 0) {
+          console.log(`[Approve] Assignments with price overrides: ${withOverrides.length}`);
+          withOverrides.forEach(a => {
+            console.log(`  - ${a.detection_class}: material=$${a.material_cost_override}, labor=$${a.labor_cost_override}`);
+          });
+        }
       }
 
       const webhookUrl =
@@ -2885,6 +3060,8 @@ export default function DetectionEditor({
               onStatusChange={handleStatusChange}
               onMaterialAssign={handleMaterialAssign}
               onNotesChange={handleNotesChange}
+              onPriceOverride={handlePriceOverride}
+              onMaterialAssignWithPrice={handleMaterialAssignWithPrice}
               pixelsPerFoot={currentPage?.scale_ratio || 64}
               multiSelectMode={multiSelectMode}
               onMultiSelectModeChange={setMultiSelectMode}
@@ -2943,281 +3120,91 @@ export default function DetectionEditor({
         onApplyScale={handleApplyScale}
       />
 
-      {/* Approval Results Panel */}
+      {/* Approval Results Panel - Clean Summary View */}
       {showApprovalResults && approvalResult && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
-          <div className="bg-white dark:bg-gray-900 rounded-lg shadow-xl max-w-4xl w-full mx-4 overflow-hidden max-h-[90vh] flex flex-col">
+          <div className="bg-white dark:bg-gray-900 rounded-2xl shadow-2xl max-w-md w-full mx-4 overflow-hidden">
             {/* Header */}
-            <div className="flex items-center justify-between px-6 py-4 bg-green-50 dark:bg-green-900/30 border-b border-green-100 dark:border-green-800">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-full bg-green-100 dark:bg-green-800 flex items-center justify-center">
-                  <CheckCircle className="w-6 h-6 text-green-600 dark:text-green-400" />
-                </div>
-                <div>
-                  <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
-                    Takeoff Created
-                  </h2>
-                  <p className="text-sm text-gray-500 dark:text-gray-400">
-                    {approvalResult?.trades_processed?.map(t => t.charAt(0).toUpperCase() + t.slice(1)).join(', ') || 'Siding'}
-                  </p>
-                </div>
-              </div>
+            <div className="relative px-6 pt-6 pb-4">
               <button
                 type="button"
                 onClick={() => setShowApprovalResults(false)}
-                className="p-1 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
+                className="absolute top-4 right-4 p-1.5 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-full transition-colors"
               >
                 <X className="w-5 h-5" />
               </button>
+              <div className="flex flex-col items-center text-center">
+                <div className="w-14 h-14 rounded-full bg-green-100 dark:bg-green-900/50 flex items-center justify-center mb-3 ring-4 ring-green-50 dark:ring-green-900/30">
+                  <CheckCircle className="w-8 h-8 text-green-600 dark:text-green-400" />
+                </div>
+                <h2 className="text-xl font-semibold text-gray-900 dark:text-white">
+                  Takeoff Created
+                </h2>
+                <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+                  {approvalResult?.trades_processed?.map(t => t.charAt(0).toUpperCase() + t.slice(1)).join(', ') || 'Siding'}
+                </p>
+              </div>
             </div>
 
-            {/* Content - Scrollable */}
-            <div className="p-6 space-y-5 overflow-y-auto flex-1">
-              {/* Line Items Summary */}
-              <div className="flex items-center gap-4 p-4 bg-gray-50 dark:bg-gray-800/50 rounded-lg">
-                <FileText className="w-8 h-8 text-blue-500" />
-                <div>
-                  <p className="text-2xl font-bold text-gray-900 dark:text-white">
-                    {approvalResult?.line_items_created ?? 0}
-                  </p>
-                  <p className="text-sm text-gray-500 dark:text-gray-400">
-                    Line items created
-                    {(approvalResult?.line_items_failed ?? 0) > 0 && (
-                      <span className="text-amber-500 ml-1">
-                        ({approvalResult.line_items_failed} failed)
-                      </span>
+            {/* Content */}
+            <div className="px-6 pb-6 space-y-5">
+              {/* Line Items Count */}
+              <div className="text-center py-3">
+                <p className="text-4xl font-bold text-gray-900 dark:text-white">
+                  {approvalResult?.line_items_created ?? 0}
+                </p>
+                <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+                  line items created
+                  {(approvalResult?.line_items_failed ?? 0) > 0 && (
+                    <span className="text-amber-500 ml-1">
+                      ({approvalResult.line_items_failed} failed)
+                    </span>
+                  )}
+                </p>
+              </div>
+
+              {/* Cost Summary Card */}
+              <div className="bg-gray-50 dark:bg-gray-800/50 rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden">
+                {/* Materials Row */}
+                <div className="flex justify-between items-center px-4 py-3 border-b border-gray-200 dark:border-gray-700">
+                  <span className="text-sm text-gray-600 dark:text-gray-400">Materials</span>
+                  <span className="font-mono font-medium text-gray-900 dark:text-white">
+                    {new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(
+                      projectTotals?.material_total ?? approvalResult?.totals?.material_cost ?? 0
                     )}
-                  </p>
+                  </span>
+                </div>
+                {/* Labor Row */}
+                <div className="flex justify-between items-center px-4 py-3 border-b border-gray-200 dark:border-gray-700">
+                  <span className="text-sm text-gray-600 dark:text-gray-400">Labor</span>
+                  <span className="font-mono font-medium text-gray-900 dark:text-white">
+                    {new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(
+                      projectTotals?.labor_total ?? approvalResult?.totals?.labor_cost ?? 0
+                    )}
+                  </span>
+                </div>
+                {/* Overhead Row */}
+                <div className="flex justify-between items-center px-4 py-3 border-b border-gray-200 dark:border-gray-700">
+                  <span className="text-sm text-gray-600 dark:text-gray-400">Overhead</span>
+                  <span className="font-mono font-medium text-gray-900 dark:text-white">
+                    {new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(
+                      projectTotals?.overhead_subtotal ?? overheadSection?.subtotal ?? approvalResult?.totals?.overhead_cost ?? 0
+                    )}
+                  </span>
+                </div>
+                {/* Grand Total Row */}
+                <div className="flex justify-between items-center px-4 py-4 bg-green-50 dark:bg-green-900/20">
+                  <span className="font-semibold text-gray-900 dark:text-white">Grand Total</span>
+                  <span className="font-mono font-bold text-xl text-green-600 dark:text-green-400">
+                    {new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(
+                      projectTotals?.grand_total ?? approvalResult?.totals?.final_price ?? approvalResult?.totals?.subtotal ?? 0
+                    )}
+                  </span>
                 </div>
               </div>
 
-              {/* Cost Breakdown - V2 format when projectTotals available */}
-              {projectTotals ? (
-                <div className="space-y-4">
-                  <h3 className="text-sm font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide flex items-center gap-2">
-                    <DollarSign className="w-4 h-4" />
-                    Cost Breakdown (Mike Skjei Methodology)
-                  </h3>
-
-                  {/* Materials Section */}
-                  <div className="bg-green-50 dark:bg-green-900/20 rounded-lg p-4 space-y-2">
-                    <h4 className="text-sm font-semibold text-green-700 dark:text-green-400 uppercase">Materials</h4>
-                    <div className="flex justify-between text-sm">
-                      <span className="text-gray-600 dark:text-gray-400">Material Cost</span>
-                      <span className="font-mono text-gray-900 dark:text-white">
-                        {new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(projectTotals.material_cost)}
-                      </span>
-                    </div>
-                    <div className="flex justify-between text-sm">
-                      <span className="text-gray-600 dark:text-gray-400">Markup ({(projectTotals.material_markup_rate * 100).toFixed(0)}%)</span>
-                      <span className="font-mono text-gray-900 dark:text-white">
-                        {new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(projectTotals.material_markup_amount)}
-                      </span>
-                    </div>
-                    <div className="flex justify-between text-sm font-semibold pt-1 border-t border-green-200 dark:border-green-800">
-                      <span className="text-green-700 dark:text-green-400">Material Total</span>
-                      <span className="font-mono text-green-700 dark:text-green-400">
-                        {new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(projectTotals.material_total)}
-                      </span>
-                    </div>
-                  </div>
-
-                  {/* Labor Section */}
-                  <div className="bg-amber-50 dark:bg-amber-900/20 rounded-lg p-4 space-y-2">
-                    <h4 className="text-sm font-semibold text-amber-700 dark:text-amber-400 uppercase">Labor</h4>
-                    <div className="flex justify-between text-sm">
-                      <span className="text-gray-600 dark:text-gray-400">Installation Labor</span>
-                      <span className="font-mono text-gray-900 dark:text-white">
-                        {new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(projectTotals.installation_labor_subtotal)}
-                      </span>
-                    </div>
-                    {/* Labor Details - Expandable */}
-                    {laborSection?.installation_items && laborSection.installation_items.length > 0 && (
-                      <div className="pl-3 border-l-2 border-amber-200 dark:border-amber-700 space-y-1">
-                        {laborSection.installation_items.map((item, idx) => (
-                          <div key={item.rate_id || idx} className="flex justify-between text-xs text-gray-500 dark:text-gray-400">
-                            <span>{item.rate_name} ({item.quantity.toFixed(2)} {item.unit})</span>
-                            <span className="font-mono">{new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(item.total_cost)}</span>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                    <div className="flex justify-between text-sm">
-                      <span className="text-gray-600 dark:text-gray-400">Overhead</span>
-                      <span className="font-mono text-gray-900 dark:text-white">
-                        {new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(projectTotals.overhead_subtotal)}
-                      </span>
-                    </div>
-                    {/* Overhead Details - Expandable */}
-                    {overheadSection?.items && overheadSection.items.length > 0 && (
-                      <div className="pl-3 border-l-2 border-purple-200 dark:border-purple-700 space-y-1">
-                        {overheadSection.items.map((item, idx) => (
-                          <div key={item.cost_id || idx} className="flex justify-between text-xs text-gray-500 dark:text-gray-400">
-                            <span>{item.cost_name}</span>
-                            <span className="font-mono">{new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(item.amount)}</span>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                    <div className="flex justify-between text-sm pt-1">
-                      <span className="text-gray-600 dark:text-gray-400">Labor Subtotal</span>
-                      <span className="font-mono text-gray-900 dark:text-white">
-                        {new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(projectTotals.labor_cost_before_markup)}
-                      </span>
-                    </div>
-                    <div className="flex justify-between text-sm">
-                      <span className="text-gray-600 dark:text-gray-400">Markup ({(projectTotals.labor_markup_rate * 100).toFixed(0)}%)</span>
-                      <span className="font-mono text-gray-900 dark:text-white">
-                        {new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(projectTotals.labor_markup_amount)}
-                      </span>
-                    </div>
-                    <div className="flex justify-between text-sm font-semibold pt-1 border-t border-amber-200 dark:border-amber-800">
-                      <span className="text-amber-700 dark:text-amber-400">Labor Total</span>
-                      <span className="font-mono text-amber-700 dark:text-amber-400">
-                        {new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(projectTotals.labor_total)}
-                      </span>
-                    </div>
-                  </div>
-
-                  {/* Totals Section */}
-                  <div className="bg-gray-50 dark:bg-gray-800/50 rounded-lg divide-y divide-gray-200 dark:divide-gray-700">
-                    <div className="flex justify-between px-4 py-3">
-                      <span className="text-gray-600 dark:text-gray-400">Subtotal (Materials + Labor)</span>
-                      <span className="font-mono font-medium text-gray-900 dark:text-white">
-                        {new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(projectTotals.subtotal)}
-                      </span>
-                    </div>
-                    {projectTotals.project_insurance > 0 && (
-                      <div className="flex justify-between px-4 py-3">
-                        <span className="text-gray-600 dark:text-gray-400">Project Insurance ($24.38/$1,000)</span>
-                        <span className="font-mono font-medium text-gray-900 dark:text-white">
-                          {new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(projectTotals.project_insurance)}
-                        </span>
-                      </div>
-                    )}
-                    <div className="flex justify-between px-4 py-3 bg-green-50 dark:bg-green-900/20">
-                      <span className="font-semibold text-gray-900 dark:text-white">Grand Total</span>
-                      <span className="font-mono font-bold text-lg text-green-600 dark:text-green-400">
-                        {new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(projectTotals.grand_total)}
-                      </span>
-                    </div>
-                  </div>
-                </div>
-              ) : approvalResult?.totals && (
-                /* Legacy Cost Breakdown */
-                <div className="space-y-3">
-                  <h3 className="text-sm font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide flex items-center gap-2">
-                    <DollarSign className="w-4 h-4" />
-                    Cost Breakdown
-                  </h3>
-                  <div className="bg-gray-50 dark:bg-gray-800/50 rounded-lg divide-y divide-gray-200 dark:divide-gray-700">
-                    <div className="flex justify-between px-4 py-3">
-                      <span className="text-gray-600 dark:text-gray-400">Material Cost</span>
-                      <span className="font-mono font-medium text-gray-900 dark:text-white">
-                        {new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(approvalResult.totals.material_cost ?? 0)}
-                      </span>
-                    </div>
-                    <div className="flex justify-between px-4 py-3">
-                      <span className="text-gray-600 dark:text-gray-400">Labor Cost</span>
-                      <span className="font-mono font-medium text-gray-900 dark:text-white">
-                        {new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(approvalResult.totals.labor_cost ?? 0)}
-                      </span>
-                    </div>
-                    <div className="flex justify-between px-4 py-3">
-                      <span className="text-gray-600 dark:text-gray-400">Overhead</span>
-                      <span className="font-mono font-medium text-gray-900 dark:text-white">
-                        {new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(approvalResult.totals.overhead_cost ?? 0)}
-                      </span>
-                    </div>
-                    <div className="flex justify-between px-4 py-3 bg-gray-100 dark:bg-gray-700/50">
-                      <span className="font-medium text-gray-700 dark:text-gray-300">Subtotal</span>
-                      <span className="font-mono font-medium text-gray-900 dark:text-white">
-                        {new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(approvalResult.totals.subtotal ?? 0)}
-                      </span>
-                    </div>
-                    <div className="flex justify-between px-4 py-3">
-                      <span className="text-gray-600 dark:text-gray-400">Markup ({approvalResult.totals.markup_percent ?? 15}%)</span>
-                      <span className="font-mono font-medium text-gray-900 dark:text-white">
-                        {new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(approvalResult.totals.markup_amount ?? (approvalResult.totals.subtotal * (approvalResult.totals.markup_percent ?? 15) / 100))}
-                      </span>
-                    </div>
-                    <div className="flex justify-between px-4 py-3 bg-green-50 dark:bg-green-900/20">
-                      <span className="font-semibold text-gray-900 dark:text-white">Final Price</span>
-                      <span className="font-mono font-bold text-lg text-green-600 dark:text-green-400">
-                        {new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(approvalResult.totals.final_price ?? (approvalResult.totals.subtotal * (1 + (approvalResult.totals.markup_percent ?? 15) / 100)))}
-                      </span>
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {/* Line Items Table */}
-              {isLoadingDetails && (
-                <div className="flex items-center justify-center py-8">
-                  <Loader2 className="w-6 h-6 text-blue-500 animate-spin" />
-                  <span className="ml-2 text-gray-500 dark:text-gray-400">Loading line items...</span>
-                </div>
-              )}
-              {!isLoadingDetails && takeoffDetails?.takeoff && Array.isArray(takeoffDetails?.line_items) && takeoffDetails.line_items.length > 0 && (
-                <div className="space-y-3">
-                  <h3 className="text-sm font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide flex items-center gap-2">
-                    <FileText className="w-4 h-4" />
-                    Line Items
-                  </h3>
-                  <div className="bg-gray-50 dark:bg-gray-800/50 rounded-lg overflow-hidden">
-                    <div className="overflow-x-auto">
-                      <table className="w-full text-sm">
-                        <thead className="bg-gray-100 dark:bg-gray-700">
-                          <tr>
-                            <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Description</th>
-                            <th className="px-3 py-2 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Qty</th>
-                            <th className="px-3 py-2 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Unit</th>
-                            <th className="px-3 py-2 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Material</th>
-                            <th className="px-3 py-2 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Labor</th>
-                            <th className="px-3 py-2 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Total</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
-                          {takeoffDetails.line_items.map((item, idx) => (
-                            <tr key={item.id || idx} className={idx % 2 === 0 ? 'bg-white dark:bg-gray-800' : 'bg-gray-50 dark:bg-gray-800/50'}>
-                              <td className="px-3 py-2 text-gray-900 dark:text-white">
-                                <div className="max-w-xs truncate" title={item.description}>
-                                  {item.description}
-                                </div>
-                              </td>
-                              <td className="px-3 py-2 text-right font-mono text-gray-900 dark:text-white">
-                                {typeof item.quantity === 'number' ? item.quantity.toFixed(1) : item.quantity}
-                              </td>
-                              <td className="px-3 py-2 text-center text-gray-500 dark:text-gray-400">
-                                {item.unit}
-                              </td>
-                              <td className="px-3 py-2 text-right font-mono text-gray-900 dark:text-white">
-                                {new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(Number(item.material_extended) || 0)}
-                              </td>
-                              <td className="px-3 py-2 text-right font-mono text-gray-900 dark:text-white">
-                                {new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(Number(item.labor_extended) || 0)}
-                              </td>
-                              <td className="px-3 py-2 text-right font-mono font-medium text-gray-900 dark:text-white">
-                                {new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(Number(item.line_total) || 0)}
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  </div>
-                </div>
-              )}
-              {!isLoadingDetails && (!takeoffDetails?.takeoff || !Array.isArray(takeoffDetails?.line_items) || takeoffDetails.line_items.length === 0) && (
-                <div className="text-xs text-gray-500 dark:text-gray-400 text-center py-4">
-                  Line item details not available
-                </div>
-              )}
-            </div>
-
-            {/* Footer */}
-            <div className="flex items-center justify-end px-6 py-4 bg-gray-50 dark:bg-gray-800/50 border-t border-gray-200 dark:border-gray-700">
-              <div className="flex items-center gap-3">
+              {/* Action Buttons */}
+              <div className="flex gap-3 pt-2">
                 {takeoffDetails?.takeoff && Array.isArray(takeoffDetails?.line_items) && takeoffDetails.line_items.length > 0 && (
                   <button
                     type="button"
@@ -3235,7 +3222,7 @@ export default function DetectionEditor({
                         toast.error('Failed to download Excel');
                       }
                     }}
-                    className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-green-600 hover:bg-green-700 rounded-md transition-colors"
+                    className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-medium text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-700 rounded-lg transition-colors"
                   >
                     <Download className="w-4 h-4" />
                     Download Excel
@@ -3245,15 +3232,13 @@ export default function DetectionEditor({
                   type="button"
                   onClick={() => {
                     setShowApprovalResults(false);
-                    // Navigate to the takeoff details page if we have a takeoff_id
                     if (approvalResult?.takeoff_id) {
                       router.push(`/takeoffs/${approvalResult.takeoff_id}`);
                     } else {
-                      // Fallback to onComplete callback
                       onComplete?.();
                     }
                   }}
-                  className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-md transition-colors"
+                  className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors"
                 >
                   <ExternalLink className="w-4 h-4" />
                   View Takeoff

@@ -272,6 +272,11 @@ export interface ExtractionDetection {
   // Product assignment (for Properties Panel)
   assigned_material_id?: string | null;
 
+  // Price overrides (user-edited prices that override pricing_items defaults)
+  // Hierarchy: detection override > organization override > pricing_items base price
+  material_cost_override?: number | null;
+  labor_cost_override?: number | null;
+
   // User notes/comments
   notes?: string | null;
 }
@@ -1085,6 +1090,9 @@ export interface MaterialAssignment {
   unit: 'SF' | 'LF' | 'EA';
   area_sf?: number | null;
   perimeter_lf?: number | null;
+  // Price overrides (user-edited prices that override pricing_items defaults)
+  material_cost_override?: number | null;
+  labor_cost_override?: number | null;
 }
 
 // =============================================================================

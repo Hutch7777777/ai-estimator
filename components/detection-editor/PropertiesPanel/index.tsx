@@ -23,6 +23,10 @@ export interface PropertiesPanelProps {
   currentPage: ExtractionPage | null;
   onClassChange: (detectionIds: string[], newClass: DetectionClass) => void;
   onMaterialChange?: (detectionIds: string[], materialId: string | null) => void;
+  /** Callback when user edits the material price */
+  onPriceOverride?: (detectionIds: string[], price: number | null) => void;
+  /** Callback to assign material AND set price override in one action */
+  onMaterialAssignWithPrice?: (detectionIds: string[], materialId: string, priceOverride: number) => void;
   disabled?: boolean;
 }
 
@@ -36,6 +40,8 @@ const PropertiesPanel = memo(function PropertiesPanel({
   currentPage,
   onClassChange,
   onMaterialChange,
+  onPriceOverride,
+  onMaterialAssignWithPrice,
   disabled = false,
 }: PropertiesPanelProps) {
   const selectionCount = selectedDetections.length;
@@ -108,6 +114,20 @@ const PropertiesPanel = memo(function PropertiesPanel({
           <MaterialAssignment
             selectedDetections={selectedDetections}
             onMaterialAssign={handleMaterialAssign}
+            onPriceOverride={onPriceOverride ? (price) => {
+              // Pass the price override to parent with detection IDs
+              const ids = selectedDetections.map(d => d.id);
+              onPriceOverride(ids, price);
+            } : undefined}
+            onMaterialAssignWithPrice={onMaterialAssignWithPrice ? (detectionIds, materialId, priceOverride) => {
+              onMaterialAssignWithPrice(detectionIds, materialId, priceOverride);
+            } : undefined}
+            currentPriceOverride={
+              // Only show override for single selection
+              selectedDetections.length === 1
+                ? selectedDetections[0].material_cost_override
+                : undefined
+            }
           />
         </div>
       )}

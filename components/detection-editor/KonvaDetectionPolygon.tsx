@@ -4,7 +4,7 @@ import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { Line, Circle, Group, Text, Label, Tag, Rect, Shape } from 'react-konva';
 import type Konva from 'konva';
 import type { ExtractionDetection, DetectionClass, PolygonPoint } from '@/lib/types/extraction';
-import { DETECTION_CLASS_COLORS, CONFIDENCE_THRESHOLDS, isPolygonWithHoles, type PolygonWithHoles } from '@/lib/types/extraction';
+import { CONFIDENCE_THRESHOLDS, isPolygonWithHoles, type PolygonWithHoles, getDetectionColor, getClassDisplayLabel } from '@/lib/types/extraction';
 import { formatArea } from '@/lib/utils/coordinates';
 import {
   rectToPolygonPoints,
@@ -22,7 +22,7 @@ import {
 // =============================================================================
 
 export interface PolygonUpdatePayload {
-  polygon_points: PolygonPoint[];
+  polygon_points: PolygonPoint[] | PolygonWithHoles;
   pixel_x: number;
   pixel_y: number;
   pixel_width: number;
@@ -51,10 +51,10 @@ export interface KonvaDetectionPolygonProps {
 // Constants
 // =============================================================================
 
-// Solid black stroke for all detections - provides clear boundary visibility
-const STROKE_COLOR = '#000000';
+// Standard grey stroke for unselected detections
+const STROKE_COLOR_UNSELECTED = '#9ca3af';
 
-// Corner handle styling
+// Corner handle styling (blue for all handles)
 const HANDLE_FILL = '#3b82f6'; // Blue
 const HANDLE_STROKE = '#1e40af'; // Darker blue
 const HANDLE_RADIUS = 6; // Base radius in pixels
@@ -67,20 +67,41 @@ const EDGE_CLICK_WIDTH = 12;
 // Helper Functions
 // =============================================================================
 
-function getClassColor(detectionClass: DetectionClass): string {
-  return DETECTION_CLASS_COLORS[detectionClass] || DETECTION_CLASS_COLORS[''];
+// Use centralized getDetectionColor which handles class normalization
+
+/**
+ * Darken a hex color by a given percentage for stroke visibility.
+ * @param hex - The hex color string (e.g., '#ff6b6b')
+ * @param percent - The percentage to darken (0-100), default 30%
+ * @returns The darkened hex color
+ */
+function darkenColor(hex: string, percent: number = 30): string {
+  // Remove # if present
+  const cleanHex = hex.replace('#', '');
+
+  // Parse RGB components
+  const r = parseInt(cleanHex.substring(0, 2), 16);
+  const g = parseInt(cleanHex.substring(2, 4), 16);
+  const b = parseInt(cleanHex.substring(4, 6), 16);
+
+  // Darken each component
+  const factor = 1 - percent / 100;
+  const newR = Math.round(r * factor);
+  const newG = Math.round(g * factor);
+  const newB = Math.round(b * factor);
+
+  // Convert back to hex
+  const toHex = (n: number) => n.toString(16).padStart(2, '0');
+  return `#${toHex(newR)}${toHex(newG)}${toHex(newB)}`;
 }
 
 function isLowConfidence(confidence: number): boolean {
   return confidence < CONFIDENCE_THRESHOLDS.medium;
 }
 
-function formatClassName(detectionClass: DetectionClass): string {
-  if (!detectionClass) return 'Unknown';
-  return detectionClass
-    .split('_')
-    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
-    .join(' ');
+function formatClassName(detectionClass: DetectionClass | string): string {
+  // Use centralized display label function which handles normalization
+  return getClassDisplayLabel(detectionClass);
 }
 
 // =============================================================================
@@ -130,8 +151,20 @@ export default function KonvaDetectionPolygon({
   const [isDraggingEdge, setIsDraggingEdge] = useState<number | null>(null);
   const [hoveredEdgeIndex, setHoveredEdgeIndex] = useState<number | null>(null);
 
+  // Local state for hole points (for polygons with holes)
+  const [localHoles, setLocalHoles] = useState<PolygonPoint[][] | null>(() => {
+    if (isPolygonWithHoles(detection.polygon_points) && detection.polygon_points.holes) {
+      return detection.polygon_points.holes as PolygonPoint[][];
+    }
+    return null;
+  });
+  const [isDraggingHoleCorner, setIsDraggingHoleCorner] = useState(false);
+
   // Ref to track local edits - prevents useEffect from resetting points before parent updates
   const lastLocalEditRef = useRef<PolygonPoint[] | null>(null);
+
+  // Ref to track local hole edits
+  const lastLocalHoleEditRef = useRef<PolygonPoint[][] | null>(null);
 
   // Ref to track edge drag start position and original points
   const edgeDragStartRef = useRef<{ startX: number; startY: number; startPoints: PolygonPoint[] } | null>(null);
@@ -161,7 +194,34 @@ export default function KonvaDetectionPolygon({
     }
   }, [detection.id, detection.polygon_points, isDraggingCorner, isDraggingShape, isDraggingEdge]);
 
-  const color = getClassColor(detection.class);
+  // Sync localHoles with detection prop changes (when not dragging)
+  useEffect(() => {
+    if (!isPolygonWithHoles(detection.polygon_points)) {
+      setLocalHoles(null);
+      return;
+    }
+
+    const propsHoles = detection.polygon_points.holes as PolygonPoint[][] | undefined;
+
+    // If we just made a local hole edit and props now match it, clear the ref
+    if (lastLocalHoleEditRef.current) {
+      const propsMatch = JSON.stringify(propsHoles) === JSON.stringify(lastLocalHoleEditRef.current);
+      if (propsMatch) {
+        lastLocalHoleEditRef.current = null;
+        return; // Props caught up with our edit, no need to sync
+      }
+    }
+
+    // Only sync from props if not currently dragging hole corners AND we didn't just make a local edit
+    if (!isDraggingHoleCorner && !lastLocalHoleEditRef.current) {
+      setLocalHoles(propsHoles || null);
+    }
+  }, [detection.id, detection.polygon_points, isDraggingHoleCorner]);
+
+  const color = getDetectionColor(detection.class);
+  // Unselected: light grey to match standard detection style
+  // Selected: use class color for prominence
+  const strokeColor = isSelected ? darkenColor(color, 20) : STROKE_COLOR_UNSELECTED;
   const lowConfidence = isLowConfidence(detection.confidence);
   const isDeleted = detection.status === 'deleted';
 
@@ -304,6 +364,77 @@ export default function KonvaDetectionPolygon({
     });
   }, [localPoints, detection, onPolygonUpdate, getEffectiveScaleRatio]);
 
+  // ==========================================================================
+  // Hole Vertex Drag Handlers
+  // ==========================================================================
+
+  // Handle hole corner drag start
+  const handleHoleCornerDragStart = useCallback((holeIndex: number, cornerIndex: number) => {
+    console.log('[handleHoleCornerDragStart] Starting drag for hole', holeIndex, 'corner', cornerIndex);
+    setIsDraggingHoleCorner(true);
+  }, []);
+
+  // Handle hole corner drag - update local state for smooth visual feedback
+  const handleHoleCornerDrag = useCallback((holeIndex: number, cornerIndex: number, e: Konva.KonvaEventObject<DragEvent>) => {
+    const newX = e.target.x();
+    const newY = e.target.y();
+
+    setLocalHoles((prevHoles) => {
+      if (!prevHoles) return null;
+      const newHoles = prevHoles.map((hole, hIdx) => {
+        if (hIdx !== holeIndex) return hole;
+        return hole.map((point, pIdx) => {
+          if (pIdx !== cornerIndex) return point;
+          return { x: newX, y: newY };
+        });
+      });
+      return newHoles;
+    });
+  }, []);
+
+  // Handle hole corner drag end - calculate measurements and call update with PolygonWithHoles
+  const handleHoleCornerDragEnd = useCallback((holeIndex: number, cornerIndex: number, e: Konva.KonvaEventObject<DragEvent>) => {
+    const newX = e.target.x();
+    const newY = e.target.y();
+
+    console.log('=== HOLE CORNER DRAG END ===');
+    console.log('Hole', holeIndex, 'Corner', cornerIndex, 'final position:', { newX, newY });
+
+    // Update the hole points
+    const newHoles = localHoles?.map((hole, hIdx) => {
+      if (hIdx !== holeIndex) return hole;
+      return hole.map((point, pIdx) => {
+        if (pIdx !== cornerIndex) return point;
+        return { x: newX, y: newY };
+      });
+    }) || null;
+
+    // Track this local hole edit so useEffect doesn't reset it
+    lastLocalHoleEditRef.current = newHoles;
+    setLocalHoles(newHoles);
+    setIsDraggingHoleCorner(false);
+
+    // Create the PolygonWithHoles structure for the update
+    // Note: onPolygonUpdate currently expects simple polygon_points,
+    // but we need to pass the full structure for holes to work
+    const polygonWithHolesUpdate: PolygonWithHoles = {
+      outer: localPoints,
+      holes: newHoles || undefined,
+    };
+
+    // Calculate new measurements using effective scale ratio
+    // For polygons with holes, we use the outer boundary for bounding box calculations
+    const effectiveScaleRatio = getEffectiveScaleRatio();
+    const measurements = calculatePolygonMeasurements(localPoints, effectiveScaleRatio);
+
+    console.log('Hole update - polygonWithHoles:', JSON.stringify(polygonWithHolesUpdate));
+
+    onPolygonUpdate(detection, {
+      polygon_points: polygonWithHolesUpdate,
+      ...measurements,
+    });
+  }, [localHoles, localPoints, detection, onPolygonUpdate, getEffectiveScaleRatio]);
+
   // Handle entire shape drag start
   const handleShapeDragStart = useCallback(() => {
     setIsDraggingShape(true);
@@ -445,33 +576,30 @@ export default function KonvaDetectionPolygon({
 
   if (isDeleted) {
     // Handle polygon with holes for deleted state
-    if (hasHoles && polygonWithHoles) {
+    if (hasHoles && localHoles) {
       return (
         <Shape
           sceneFunc={(context) => {
             const ctx = context._context;
             ctx.beginPath();
 
-            // Draw outer boundary
-            const outer = polygonWithHoles.outer;
-            if (outer.length > 0) {
-              ctx.moveTo(outer[0].x, outer[0].y);
-              for (let i = 1; i < outer.length; i++) {
-                ctx.lineTo(outer[i].x, outer[i].y);
+            // Draw outer boundary - use localPoints
+            if (localPoints.length > 0) {
+              ctx.moveTo(localPoints[0].x, localPoints[0].y);
+              for (let i = 1; i < localPoints.length; i++) {
+                ctx.lineTo(localPoints[i].x, localPoints[i].y);
               }
               ctx.closePath();
             }
 
-            // Draw holes
-            if (polygonWithHoles.holes) {
-              for (const hole of polygonWithHoles.holes) {
-                if (hole.length > 0) {
-                  ctx.moveTo(hole[0].x, hole[0].y);
-                  for (let i = 1; i < hole.length; i++) {
-                    ctx.lineTo(hole[i].x, hole[i].y);
-                  }
-                  ctx.closePath();
+            // Draw holes - use localHoles
+            for (const hole of localHoles) {
+              if (hole.length > 0) {
+                ctx.moveTo(hole[0].x, hole[0].y);
+                for (let i = 1; i < hole.length; i++) {
+                  ctx.lineTo(hole[i].x, hole[i].y);
                 }
+                ctx.closePath();
               }
             }
 
@@ -479,7 +607,7 @@ export default function KonvaDetectionPolygon({
             ctx.globalAlpha = 0.1;
             ctx.fill('evenodd');
             ctx.globalAlpha = 1;
-            ctx.strokeStyle = STROKE_COLOR;
+            ctx.strokeStyle = strokeColor;
             ctx.lineWidth = 1;
             ctx.setLineDash([4 / scale, 2 / scale]);
             ctx.stroke();
@@ -497,7 +625,7 @@ export default function KonvaDetectionPolygon({
         closed={true}
         fill={color}
         opacity={0.1}
-        stroke={STROKE_COLOR}
+        stroke={strokeColor}
         strokeWidth={1}
         strokeScaleEnabled={false}
         dash={[4 / scale, 2 / scale]}
@@ -519,53 +647,81 @@ export default function KonvaDetectionPolygon({
       onDragEnd={handleShapeDragEnd}
     >
       {/* Main Polygon Shape - with hole support */}
-      {hasHoles && polygonWithHoles ? (
+      {hasHoles && localHoles ? (
         // Render polygon with hole using custom Shape for evenodd fill rule
+        // Uses localPoints and localHoles for live updates during dragging
         <Shape
           sceneFunc={(context, shape) => {
             const ctx = context._context;
             ctx.beginPath();
 
-            // Draw outer boundary (clockwise)
-            const outer = polygonWithHoles.outer;
-            if (outer.length > 0) {
-              ctx.moveTo(outer[0].x, outer[0].y);
-              for (let i = 1; i < outer.length; i++) {
-                ctx.lineTo(outer[i].x, outer[i].y);
+            // Draw outer boundary (clockwise) - use localPoints for live updates
+            if (localPoints.length > 0) {
+              ctx.moveTo(localPoints[0].x, localPoints[0].y);
+              for (let i = 1; i < localPoints.length; i++) {
+                ctx.lineTo(localPoints[i].x, localPoints[i].y);
               }
               ctx.closePath();
             }
 
-            // Draw holes (counter-clockwise for proper fill-rule)
-            if (polygonWithHoles.holes) {
-              for (const hole of polygonWithHoles.holes) {
-                if (hole.length > 0) {
-                  ctx.moveTo(hole[0].x, hole[0].y);
-                  for (let i = 1; i < hole.length; i++) {
-                    ctx.lineTo(hole[i].x, hole[i].y);
-                  }
-                  ctx.closePath();
+            // Draw holes (counter-clockwise for proper fill-rule) - use localHoles for live updates
+            for (const hole of localHoles) {
+              if (hole.length > 0) {
+                ctx.moveTo(hole[0].x, hole[0].y);
+                for (let i = 1; i < hole.length; i++) {
+                  ctx.lineTo(hole[i].x, hole[i].y);
                 }
+                ctx.closePath();
               }
             }
 
-            // Use evenodd fill rule to properly render holes
+            // Use evenodd fill rule to properly render holes (hole area is transparent)
             ctx.fillStyle = color;
             ctx.globalAlpha = isSelected ? 0.3 : isHovered ? 0.25 : 0.2;
             ctx.fill('evenodd');
 
             // Stroke outer boundary
             ctx.globalAlpha = 1;
-            ctx.strokeStyle = STROKE_COLOR;
+            ctx.strokeStyle = strokeColor;
             ctx.lineWidth = 1;
             if (lowConfidence) {
               ctx.setLineDash([4 / scale, 2 / scale]);
             }
             ctx.stroke();
-
-            // Reset line dash
             ctx.setLineDash([]);
+            // Note: Holes are rendered as transparent cutouts via evenodd fill rule
+            // No additional stroke needed - the hole is visually cut out from the polygon
           }}
+          hitFunc={(context, shape) => {
+            // Define hit area - same path as sceneFunc for accurate click detection
+            // Uses evenodd fill rule so clicks inside holes don't register
+            context.beginPath();
+
+            // Draw outer boundary - use localPoints for live updates
+            if (localPoints.length > 0) {
+              context.moveTo(localPoints[0].x, localPoints[0].y);
+              for (let i = 1; i < localPoints.length; i++) {
+                context.lineTo(localPoints[i].x, localPoints[i].y);
+              }
+              context.closePath();
+            }
+
+            // Draw holes (so clicks inside holes don't register) - use localHoles for live updates
+            for (const hole of localHoles) {
+              if (hole.length > 0) {
+                context.moveTo(hole[0].x, hole[0].y);
+                for (let i = 1; i < hole.length; i++) {
+                  context.lineTo(hole[i].x, hole[i].y);
+                }
+                context.closePath();
+              }
+            }
+
+            // Fill the shape for hit detection (evenodd excludes holes)
+            context.fillStrokeShape(shape);
+          }}
+          fill={color}
+          stroke={strokeColor}
           onClick={handleClick}
           onTap={handleClick}
           onMouseEnter={() => onHoverStart(detection.id)}
@@ -578,11 +734,11 @@ export default function KonvaDetectionPolygon({
           closed={true}
           fill={color}
           opacity={isSelected ? 0.3 : isHovered ? 0.25 : 0.2}
-          stroke={STROKE_COLOR}
+          stroke={strokeColor}
           strokeWidth={1}
           strokeScaleEnabled={false}
           dash={lowConfidence ? [4 / scale, 2 / scale] : undefined}
-          shadowColor={isSelected ? STROKE_COLOR : undefined}
+          shadowColor={isSelected ? strokeColor : undefined}
           shadowBlur={isSelected ? 4 : 0}
           shadowOpacity={isSelected ? 0.3 : 0}
           onClick={handleClick}
@@ -736,7 +892,7 @@ export default function KonvaDetectionPolygon({
         );
       })}
 
-      {/* Corner Handles (only when selected) */}
+      {/* Corner Handles for outer boundary (all polygons, including those with holes) */}
       {isSelected && localPoints.map((point, index) => (
         <Circle
           key={`corner-${index}`}
@@ -775,6 +931,49 @@ export default function KonvaDetectionPolygon({
             if (container) container.style.cursor = '';
           }}
         />
+      ))}
+
+      {/* Corner Handles for hole vertices (when selected and has holes) */}
+      {/* Both outer boundary and hole vertices are editable */}
+      {isSelected && hasHoles && localHoles && localHoles.map((hole, holeIndex) => (
+        hole.map((point, cornerIndex) => (
+          <Circle
+            key={`hole-${holeIndex}-corner-${cornerIndex}`}
+            x={point.x}
+            y={point.y}
+            radius={handleRadius}
+            fill={HANDLE_FILL}
+            stroke={HANDLE_STROKE}
+            strokeWidth={handleStrokeWidth}
+            strokeScaleEnabled={false}
+            draggable
+            onMouseDown={(e) => {
+              // Stop event from reaching Group to prevent shape drag when corner is dragged
+              e.cancelBubble = true;
+              if (e.evt) e.evt.stopPropagation();
+            }}
+            onDragStart={(e) => {
+              e.cancelBubble = true;
+              handleHoleCornerDragStart(holeIndex, cornerIndex);
+            }}
+            onDragMove={(e) => {
+              e.cancelBubble = true;
+              handleHoleCornerDrag(holeIndex, cornerIndex, e);
+            }}
+            onDragEnd={(e) => {
+              e.cancelBubble = true;
+              handleHoleCornerDragEnd(holeIndex, cornerIndex, e);
+            }}
+            onMouseEnter={(e) => {
+              const container = e.target.getStage()?.container();
+              if (container) container.style.cursor = 'move';
+            }}
+            onMouseLeave={(e) => {
+              const container = e.target.getStage()?.container();
+              if (container) container.style.cursor = '';
+            }}
+          />
+        ))
       ))}
 
       {/* Area Label (centered in polygon) - calculated dynamically from pixels + scale */}

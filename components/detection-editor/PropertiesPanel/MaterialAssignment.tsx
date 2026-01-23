@@ -1,9 +1,10 @@
 'use client';
 
-import React, { memo, useState, useEffect, useMemo } from 'react';
+import React, { memo, useState, useEffect, useMemo, useCallback } from 'react';
 import { Search, X, Package, Loader2 } from 'lucide-react';
 import { useMaterialSearch, getMaterialById, type MaterialItem } from '@/lib/hooks/useMaterialSearch';
 import type { ExtractionDetection, DetectionClass } from '@/lib/types/extraction';
+import EditablePrice from './EditablePrice';
 
 // =============================================================================
 // Types
@@ -12,6 +13,12 @@ import type { ExtractionDetection, DetectionClass } from '@/lib/types/extraction
 interface MaterialAssignmentProps {
   selectedDetections: ExtractionDetection[];
   onMaterialAssign: (detectionIds: string[], materialId: string | null) => void;
+  /** Callback when user edits the price - receives null to clear override */
+  onPriceOverride?: (price: number | null) => void;
+  /** Current price override from the selected detection (only used for single selection) */
+  currentPriceOverride?: number | null;
+  /** Callback to assign material AND set price override in one action */
+  onMaterialAssignWithPrice?: (detectionIds: string[], materialId: string, priceOverride: number) => void;
 }
 
 // =============================================================================
@@ -60,13 +67,28 @@ interface ProductItemProps {
   item: MaterialItem;
   isSelected: boolean;
   onClick: () => void;
+  /** Enable price editing in the list */
+  onPriceEdit?: (newPrice: number) => void;
+  /** Whether price editing is enabled */
+  priceEditable?: boolean;
 }
 
-const ProductItem = memo(function ProductItem({ item, isSelected, onClick }: ProductItemProps) {
+const ProductItem = memo(function ProductItem({
+  item,
+  isSelected,
+  onClick,
+  onPriceEdit,
+  priceEditable = false
+}: ProductItemProps) {
+  // Handle price change from EditablePrice - assigns material with custom price
+  const handlePriceChange = useCallback((newPrice: number | null) => {
+    if (newPrice !== null && onPriceEdit) {
+      onPriceEdit(newPrice);
+    }
+  }, [onPriceEdit]);
+
   return (
-    <button
-      type="button"
-      onClick={onClick}
+    <div
       className={`
         w-full text-left px-2 py-1.5 rounded-md transition-colors
         ${isSelected
@@ -75,14 +97,33 @@ const ProductItem = memo(function ProductItem({ item, isSelected, onClick }: Pro
         }
       `}
     >
-      <div className="text-xs font-medium text-gray-900 dark:text-gray-100 truncate">
-        {item.product_name}
-      </div>
+      {/* Product name - clickable to assign */}
+      <button
+        type="button"
+        onClick={onClick}
+        className="w-full text-left"
+      >
+        <div className="text-xs font-medium text-gray-900 dark:text-gray-100 truncate">
+          {item.product_name}
+        </div>
+      </button>
       <div className="flex items-center justify-between text-[10px] text-gray-500 dark:text-gray-400">
         <span className="truncate">{item.category || item.sku}</span>
-        <span className="flex-shrink-0 ml-2 font-medium text-green-600 dark:text-green-400">{formatCost(item.material_cost, item.unit)}</span>
+        {/* Price - either editable or static */}
+        <span className="flex-shrink-0 ml-2 font-medium text-green-600 dark:text-green-400">
+          {priceEditable && onPriceEdit ? (
+            <EditablePrice
+              basePrice={item.material_cost}
+              unit={item.unit}
+              onPriceChange={handlePriceChange}
+              size="sm"
+            />
+          ) : (
+            formatCost(item.material_cost, item.unit)
+          )}
+        </span>
       </div>
-    </button>
+    </div>
   );
 });
 
@@ -93,6 +134,9 @@ const ProductItem = memo(function ProductItem({ item, isSelected, onClick }: Pro
 const MaterialAssignment = memo(function MaterialAssignment({
   selectedDetections,
   onMaterialAssign,
+  onPriceOverride,
+  currentPriceOverride,
+  onMaterialAssignWithPrice,
 }: MaterialAssignmentProps) {
   // Local state
   const [searchQuery, setSearchQuery] = useState('');
@@ -134,15 +178,25 @@ const MaterialAssignment = memo(function MaterialAssignment({
 
   // Load assigned material details when selection changes
   useEffect(() => {
+    console.log('[MaterialAssignment] currentAssignedId changed:', currentAssignedId);
+
     if (!currentAssignedId) {
+      console.log('[MaterialAssignment] No assigned ID, clearing material');
       setAssignedMaterial(null);
       return;
     }
 
     setLoadingAssigned(true);
+    console.log('[MaterialAssignment] Fetching material for ID:', currentAssignedId);
+
     getMaterialById(currentAssignedId)
       .then((material) => {
+        console.log('[MaterialAssignment] Got material:', material);
         setAssignedMaterial(material);
+      })
+      .catch((err) => {
+        console.error('[MaterialAssignment] Error fetching material:', err);
+        setAssignedMaterial(null);
       })
       .finally(() => {
         setLoadingAssigned(false);
@@ -152,6 +206,7 @@ const MaterialAssignment = memo(function MaterialAssignment({
   // Handle material selection
   const handleSelectMaterial = (item: MaterialItem) => {
     const ids = selectedDetections.map((d) => d.id);
+    console.log('[MaterialAssignment] handleSelectMaterial:', { ids, materialId: item.id, productName: item.product_name });
     onMaterialAssign(ids, item.id);
   };
 
@@ -160,6 +215,27 @@ const MaterialAssignment = memo(function MaterialAssignment({
     const ids = selectedDetections.map((d) => d.id);
     onMaterialAssign(ids, null);
   };
+
+  // Handle assigning a material with a custom price (from product list price edit)
+  const handleAssignWithPrice = useCallback((item: MaterialItem, customPrice: number) => {
+    const ids = selectedDetections.map((d) => d.id);
+    if (onMaterialAssignWithPrice) {
+      onMaterialAssignWithPrice(ids, item.id, customPrice);
+    } else {
+      // Fallback: assign material then set price override
+      onMaterialAssign(ids, item.id);
+      if (onPriceOverride) {
+        onPriceOverride(customPrice);
+      }
+    }
+  }, [selectedDetections, onMaterialAssign, onMaterialAssignWithPrice, onPriceOverride]);
+
+  // Handle price override for assigned material
+  const handleAssignedPriceChange = useCallback((newPrice: number | null) => {
+    if (onPriceOverride) {
+      onPriceOverride(newPrice);
+    }
+  }, [onPriceOverride]);
 
   if (selectedDetections.length === 0) {
     return null;
@@ -202,9 +278,15 @@ const MaterialAssignment = memo(function MaterialAssignment({
               <div className="text-xs font-medium text-gray-900 dark:text-gray-100 truncate">
                 {assignedMaterial.product_name}
               </div>
-              <div className="text-[10px] text-gray-500 dark:text-gray-400">
-                {formatCost(assignedMaterial.material_cost, assignedMaterial.unit)}
-              </div>
+              {/* Editable Price Display using EditablePrice component */}
+              <EditablePrice
+                basePrice={assignedMaterial.material_cost}
+                unit={assignedMaterial.unit}
+                currentOverride={currentPriceOverride}
+                onPriceChange={handleAssignedPriceChange}
+                disabled={selectedDetections.length !== 1 || !onPriceOverride}
+                size="sm"
+              />
             </div>
           ) : null}
         </div>
@@ -259,6 +341,8 @@ const MaterialAssignment = memo(function MaterialAssignment({
               item={item}
               isSelected={item.id === currentAssignedId}
               onClick={() => handleSelectMaterial(item)}
+              priceEditable={selectedDetections.length === 1 && !!onPriceOverride}
+              onPriceEdit={(customPrice) => handleAssignWithPrice(item, customPrice)}
             />
           ))
         )}

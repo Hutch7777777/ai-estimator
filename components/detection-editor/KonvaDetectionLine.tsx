@@ -4,7 +4,7 @@ import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { Line, Circle, Group, Text, Label, Tag } from 'react-konva';
 import type Konva from 'konva';
 import type { ExtractionDetection, DetectionClass, PolygonPoint, PolygonPoints } from '@/lib/types/extraction';
-import { DETECTION_CLASS_COLORS, CONFIDENCE_THRESHOLDS, isPolygonWithHoles } from '@/lib/types/extraction';
+import { CONFIDENCE_THRESHOLDS, isPolygonWithHoles, getDetectionColor, getClassDisplayLabel } from '@/lib/types/extraction';
 
 /**
  * Extract simple polygon points array from PolygonPoints union type.
@@ -67,20 +67,16 @@ const HANDLE_STROKE_WIDTH = 2;
 // Helper Functions
 // =============================================================================
 
-function getClassColor(detectionClass: DetectionClass): string {
-  return DETECTION_CLASS_COLORS[detectionClass] || DETECTION_CLASS_COLORS[''];
-}
+// Use centralized getDetectionColor which handles class normalization
 
 function isLowConfidence(confidence: number): boolean {
   return confidence < CONFIDENCE_THRESHOLDS.medium;
 }
 
-function formatClassName(detectionClass: DetectionClass): string {
-  if (!detectionClass) return 'Line';
-  return detectionClass
-    .split('_')
-    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
-    .join(' ');
+function formatClassName(detectionClass: DetectionClass | string): string {
+  // Use centralized display label function which handles normalization
+  const label = getClassDisplayLabel(detectionClass);
+  return label === 'Unclassified' ? 'Line' : label;
 }
 
 function calculateLineLength(p1: PolygonPoint, p2: PolygonPoint): number {
@@ -173,7 +169,7 @@ export default function KonvaDetectionLine({
     }
   }, [detection.id, detection.polygon_points, isDraggingEndpoint, isDraggingLine, initialPoints]);
 
-  const color = getClassColor(detection.class);
+  const color = getDetectionColor(detection.class);
   const lowConfidence = isLowConfidence(detection.confidence);
   const isDeleted = detection.status === 'deleted';
 

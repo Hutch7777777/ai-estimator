@@ -12,6 +12,8 @@ import type { ExtractionDetection, DetectionClass } from '@/lib/types/extraction
 import {
   USER_SELECTABLE_CLASSES,
   DETECTION_CLASS_COLORS,
+  normalizeClass,
+  getClassDisplayLabel,
 } from '@/lib/types/extraction';
 
 // =============================================================================
@@ -28,12 +30,9 @@ interface ClassSelectorProps {
 // Helper Functions
 // =============================================================================
 
-function formatClassName(cls: DetectionClass): string {
-  if (!cls) return 'Unknown';
-  return cls
-    .split('_')
-    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
-    .join(' ');
+function formatClassName(cls: DetectionClass | string): string {
+  // Use the centralized display label function which handles normalization
+  return getClassDisplayLabel(cls) || 'Unknown';
 }
 
 // =============================================================================
@@ -63,16 +62,18 @@ const ClassSelector = memo(function ClassSelector({
   onClassChange,
   disabled = false,
 }: ClassSelectorProps) {
-  // Determine current class state
+  // Determine current class state (normalizing classes for comparison)
   const classState = useMemo(() => {
     if (selectedDetections.length === 0) {
       return { isMixed: false, currentClass: '' as DetectionClass };
     }
 
-    const classes = new Set(selectedDetections.map((d) => d.class));
+    // Normalize all classes before comparing
+    const classes = new Set(selectedDetections.map((d) => normalizeClass(d.class)));
 
     if (classes.size === 1) {
-      const currentClass = selectedDetections[0].class;
+      // Return the normalized class
+      const currentClass = normalizeClass(selectedDetections[0].class);
       return { isMixed: false, currentClass };
     }
 

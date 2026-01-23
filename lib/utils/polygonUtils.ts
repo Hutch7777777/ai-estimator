@@ -1,6 +1,8 @@
 // Polygon Utility Functions for Detection Editor
 // Handles polygon math, coordinate conversion, and measurements
 
+import { isPolygonWithHoles, type PolygonWithHoles, type PolygonPoints } from '@/lib/types/extraction';
+
 // =============================================================================
 // Types
 // =============================================================================
@@ -19,6 +21,27 @@ export interface BoundingBox {
   minY: number;
   maxX: number;
   maxY: number;
+}
+
+// =============================================================================
+// Internal Helpers
+// =============================================================================
+
+/**
+ * Extract simple polygon points from any polygon format.
+ * For PolygonWithHoles, returns the outer boundary.
+ * For simple arrays, returns as-is.
+ */
+function extractSimplePoints(points: PolygonPoint[] | PolygonWithHoles | PolygonPoints | null | undefined): PolygonPoint[] {
+  if (!points) return [];
+  if (isPolygonWithHoles(points)) {
+    return points.outer as PolygonPoint[];
+  }
+  if (Array.isArray(points)) {
+    return points as PolygonPoint[];
+  }
+  console.warn('[polygonUtils] extractSimplePoints: Unexpected points format', points);
+  return [];
 }
 
 // =============================================================================
@@ -56,17 +79,21 @@ export function rectToPolygonPoints(detection: {
  * Calculate polygon area in pixels using the Shoelace formula.
  * Works for any simple polygon (non-self-intersecting) with 3+ points.
  * Returns absolute area (always positive).
+ *
+ * DEFENSIVE: Accepts both simple polygon arrays and PolygonWithHoles.
+ * For PolygonWithHoles, uses the outer boundary only.
  */
-export function calculatePolygonArea(points: PolygonPoint[]): number {
-  if (points.length < 3) return 0;
+export function calculatePolygonArea(points: PolygonPoint[] | PolygonWithHoles | PolygonPoints | null | undefined): number {
+  const simplePoints = extractSimplePoints(points);
+  if (simplePoints.length < 3) return 0;
 
   let area = 0;
-  const n = points.length;
+  const n = simplePoints.length;
 
   for (let i = 0; i < n; i++) {
     const j = (i + 1) % n;
-    area += points[i].x * points[j].y;
-    area -= points[j].x * points[i].y;
+    area += simplePoints[i].x * simplePoints[j].y;
+    area -= simplePoints[j].x * simplePoints[i].y;
   }
 
   return Math.abs(area / 2);
@@ -102,16 +129,20 @@ function distance(p1: PolygonPoint, p2: PolygonPoint): number {
 /**
  * Calculate polygon perimeter in pixels.
  * Sum of all edge lengths.
+ *
+ * DEFENSIVE: Accepts both simple polygon arrays and PolygonWithHoles.
+ * For PolygonWithHoles, uses the outer boundary only.
  */
-export function calculatePolygonPerimeter(points: PolygonPoint[]): number {
-  if (points.length < 2) return 0;
+export function calculatePolygonPerimeter(points: PolygonPoint[] | PolygonWithHoles | PolygonPoints | null | undefined): number {
+  const simplePoints = extractSimplePoints(points);
+  if (simplePoints.length < 2) return 0;
 
   let perimeter = 0;
-  const n = points.length;
+  const n = simplePoints.length;
 
   for (let i = 0; i < n; i++) {
     const j = (i + 1) % n;
-    perimeter += distance(points[i], points[j]);
+    perimeter += distance(simplePoints[i], simplePoints[j]);
   }
 
   return perimeter;
@@ -137,9 +168,15 @@ export function calculatePolygonPerimeterLf(
 /**
  * Calculate the axis-aligned bounding box of a polygon.
  * Used for label positioning and backwards compatibility with rectangle fields.
+ *
+ * DEFENSIVE: Accepts both simple polygon arrays and PolygonWithHoles.
+ * For PolygonWithHoles, uses the outer boundary for bounding box calculation.
  */
-export function getPolygonBoundingBox(points: PolygonPoint[]): BoundingBox {
-  if (points.length === 0) {
+export function getPolygonBoundingBox(points: PolygonPoint[] | PolygonWithHoles | PolygonPoints | null | undefined): BoundingBox {
+  // Extract simple points from any format (handles PolygonWithHoles)
+  const simplePoints = extractSimplePoints(points);
+
+  if (simplePoints.length === 0) {
     return {
       centerX: 0,
       centerY: 0,
@@ -152,8 +189,8 @@ export function getPolygonBoundingBox(points: PolygonPoint[]): BoundingBox {
     };
   }
 
-  const xs = points.map((p) => p.x);
-  const ys = points.map((p) => p.y);
+  const xs = simplePoints.map((p) => p.x);
+  const ys = simplePoints.map((p) => p.y);
 
   const minX = Math.min(...xs);
   const maxX = Math.max(...xs);
@@ -179,20 +216,25 @@ export function getPolygonBoundingBox(points: PolygonPoint[]): BoundingBox {
 /**
  * Calculate the centroid (geometric center) of a polygon.
  * Better for label positioning than bounding box center for irregular shapes.
+ *
+ * DEFENSIVE: Accepts both simple polygon arrays and PolygonWithHoles.
+ * For PolygonWithHoles, uses the outer boundary only.
  */
-export function getPolygonCentroid(points: PolygonPoint[]): PolygonPoint {
-  if (points.length === 0) {
+export function getPolygonCentroid(points: PolygonPoint[] | PolygonWithHoles | PolygonPoints | null | undefined): PolygonPoint {
+  const simplePoints = extractSimplePoints(points);
+
+  if (simplePoints.length === 0) {
     return { x: 0, y: 0 };
   }
 
-  if (points.length === 1) {
-    return { x: points[0].x, y: points[0].y };
+  if (simplePoints.length === 1) {
+    return { x: simplePoints[0].x, y: simplePoints[0].y };
   }
 
-  if (points.length === 2) {
+  if (simplePoints.length === 2) {
     return {
-      x: (points[0].x + points[1].x) / 2,
-      y: (points[0].y + points[1].y) / 2,
+      x: (simplePoints[0].x + simplePoints[1].x) / 2,
+      y: (simplePoints[0].y + simplePoints[1].y) / 2,
     };
   }
 
@@ -200,14 +242,14 @@ export function getPolygonCentroid(points: PolygonPoint[]): PolygonPoint {
   let cx = 0;
   let cy = 0;
   let signedArea = 0;
-  const n = points.length;
+  const n = simplePoints.length;
 
   for (let i = 0; i < n; i++) {
     const j = (i + 1) % n;
-    const x0 = points[i].x;
-    const y0 = points[i].y;
-    const x1 = points[j].x;
-    const y1 = points[j].y;
+    const x0 = simplePoints[i].x;
+    const y0 = simplePoints[i].y;
+    const x1 = simplePoints[j].x;
+    const y1 = simplePoints[j].y;
 
     const a = x0 * y1 - x1 * y0;
     signedArea += a;
@@ -220,8 +262,8 @@ export function getPolygonCentroid(points: PolygonPoint[]): PolygonPoint {
   // Handle degenerate case where area is 0
   if (Math.abs(signedArea) < 0.0001) {
     // Fall back to simple average
-    const avgX = points.reduce((sum, p) => sum + p.x, 0) / n;
-    const avgY = points.reduce((sum, p) => sum + p.y, 0) / n;
+    const avgX = simplePoints.reduce((sum, p) => sum + p.x, 0) / n;
+    const avgY = simplePoints.reduce((sum, p) => sum + p.y, 0) / n;
     return { x: avgX, y: avgY };
   }
 
@@ -238,9 +280,13 @@ export function getPolygonCentroid(points: PolygonPoint[]): PolygonPoint {
 /**
  * Flatten polygon points array for Konva Line component.
  * Converts [{x, y}, {x, y}, ...] to [x, y, x, y, ...]
+ *
+ * DEFENSIVE: Accepts both simple polygon arrays and PolygonWithHoles.
+ * For PolygonWithHoles, uses the outer boundary only.
  */
-export function flattenPoints(points: PolygonPoint[]): number[] {
-  return points.flatMap((p) => [p.x, p.y]);
+export function flattenPoints(points: PolygonPoint[] | PolygonWithHoles | PolygonPoints | null | undefined): number[] {
+  const simplePoints = extractSimplePoints(points);
+  return simplePoints.flatMap((p) => [p.x, p.y]);
 }
 
 // =============================================================================

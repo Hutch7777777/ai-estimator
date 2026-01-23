@@ -5,6 +5,7 @@ import type { DetectionClass, ToolMode } from '@/lib/types/extraction';
 import {
   DETECTION_CLASS_COLORS,
   getClassesByMeasurementType,
+  getClassDisplayLabel,
 } from '@/lib/types/extraction';
 
 // =============================================================================
@@ -31,11 +32,8 @@ interface ToolClassSelectorProps {
 // =============================================================================
 
 function formatClassName(cls: DetectionClass): string {
-  if (!cls) return 'Unclassified';
-  return cls
-    .split('_')
-    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
-    .join(' ');
+  // Use centralized display label function
+  return getClassDisplayLabel(cls);
 }
 
 function getMeasurementTypeForTool(toolMode: 'create' | 'line' | 'point'): 'area' | 'linear' | 'count' {

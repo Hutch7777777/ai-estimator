@@ -3,7 +3,7 @@
 import React, { memo, useState, useRef, useCallback } from 'react';
 import { MousePointer2, Pentagon, Hand, Ruler, Minus, MapPin, ChevronRight, Download, Loader2, Scissors } from 'lucide-react';
 import type { ToolMode, DetectionClass } from '@/lib/types/extraction';
-import { DETECTION_CLASS_COLORS } from '@/lib/types/extraction';
+import { DETECTION_CLASS_COLORS, getClassDisplayLabel } from '@/lib/types/extraction';
 import ToolClassSelector from './ToolClassSelector';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 
@@ -64,11 +64,9 @@ const TOOLS: ToolDefinition[] = [
 // =============================================================================
 
 function formatClassName(cls: DetectionClass): string {
-  if (!cls) return '';
-  return cls
-    .split('_')
-    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
-    .join(' ');
+  // Use centralized display label function (returns 'Unclassified' for empty)
+  const label = getClassDisplayLabel(cls);
+  return label === 'Unclassified' ? '' : label;
 }
 
 // =============================================================================
@@ -282,6 +280,13 @@ const MarkupToolbar = memo(function MarkupToolbar({
             </span>
           </div>
 
+          {/* Mode-specific help text */}
+          {activeMode === 'create' && (
+            <div className="text-[10px] text-blue-600 dark:text-blue-400 text-center mt-1">
+              Click to draw polygon, or drag to draw rectangle
+            </div>
+          )}
+
           {/* Exit hint */}
           <div className="text-[10px] text-gray-500 dark:text-gray-400 text-center mt-1">
             Esc to exit
@@ -296,7 +301,7 @@ const MarkupToolbar = memo(function MarkupToolbar({
             Split Mode
           </div>
           <div className="text-[10px] text-red-600 dark:text-red-400 text-center mt-1">
-            Draw rectangle to carve out area
+            Click to draw polygon, or drag to draw rectangle
           </div>
           <div className="text-[10px] text-gray-500 dark:text-gray-400 text-center mt-1">
             Esc to cancel

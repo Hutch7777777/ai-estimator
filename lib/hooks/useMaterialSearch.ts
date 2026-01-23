@@ -352,54 +352,67 @@ export function useMaterialSearch(options: UseMaterialSearchOptions = {}): UseMa
 // =============================================================================
 
 export async function getMaterialById(materialId: string): Promise<MaterialItem | null> {
-  try {
-    const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-    const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  console.log('[getMaterialById] Called with materialId:', materialId);
 
-    if (!url || !key) {
-      console.error('[getMaterialById] Missing Supabase environment variables');
+  if (!materialId) {
+    console.log('[getMaterialById] No materialId provided');
+    return null;
+  }
+
+  try {
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+    const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+
+    if (!supabaseUrl || !supabaseKey) {
+      console.error('[getMaterialById] Missing Supabase env vars');
       return null;
     }
 
-    const params = new URLSearchParams();
-    params.set('select', 'id,sku,product_name,material_cost,unit,is_colorplus,category');
-    params.set('id', `eq.${materialId}`);
+    const url = `${supabaseUrl}/rest/v1/v_pricing_current?id=eq.${materialId}&select=id,sku,product_name,material_cost,unit,category,manufacturer,is_colorplus,base_labor_cost`;
 
-    const fetchUrl = `${url}/rest/v1/pricing_items?${params.toString()}`;
+    console.log('[getMaterialById] Fetching from:', url);
 
-    const response = await fetch(fetchUrl, {
+    const response = await fetch(url, {
+      method: 'GET',
       headers: {
-        'apikey': key,
-        'Authorization': `Bearer ${key}`,
+        'apikey': supabaseKey,
+        'Authorization': `Bearer ${supabaseKey}`,
         'Content-Type': 'application/json',
-        'Accept': 'application/vnd.pgrst.object+json', // Return single object instead of array
       },
     });
 
+    console.log('[getMaterialById] Response status:', response.status);
+
     if (!response.ok) {
-      const errorText = await response.text();
-      console.error('[getMaterialById] Error:', errorText);
+      console.error('[getMaterialById] HTTP error:', response.status, response.statusText);
       return null;
     }
 
-    const row: PricingRow = await response.json();
+    const data = await response.json();
+    console.log('[getMaterialById] Response data:', data);
 
-    if (!row || !row.id) {
-      console.error('[getMaterialById] No data found');
+    if (!data || data.length === 0) {
+      console.log('[getMaterialById] No data returned for ID:', materialId);
       return null;
     }
 
-    return {
-      id: row.id,
-      product_name: row.product_name,
-      material_cost: row.material_cost,
-      labor_cost: null,
-      unit: row.unit || 'ea',
-      category: row.category || '',
-      manufacturer: '',
-      sku: row.sku || '',
-      is_colorplus: row.is_colorplus,
+    const item = data[0];
+
+    const result: MaterialItem = {
+      id: item.id,
+      sku: item.sku || '',
+      product_name: item.product_name || '',
+      material_cost: item.material_cost,
+      labor_cost: item.base_labor_cost,
+      unit: item.unit || 'ea',
+      category: item.category || '',
+      manufacturer: item.manufacturer || '',
+      is_colorplus: item.is_colorplus || false,
     };
+
+    console.log('[getMaterialById] Returning material:', result);
+    return result;
+
   } catch (err) {
     console.error('[getMaterialById] Unexpected error:', err);
     return null;

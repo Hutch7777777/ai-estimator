@@ -38,6 +38,10 @@ export interface DetectionSidebarProps {
   onStatusChange: (detectionIds: string[], newStatus: DetectionStatus) => void;
   onMaterialAssign: (detectionIds: string[], materialId: string | null) => void;
   onNotesChange: (detectionIds: string[], notes: string) => void;
+  /** Callback when user edits the material price */
+  onPriceOverride?: (detectionIds: string[], price: number | null) => void;
+  /** Callback to assign material AND set price override in one action */
+  onMaterialAssignWithPrice?: (detectionIds: string[], materialId: string, priceOverride: number) => void;
   pixelsPerFoot: number;
   // Multi-select mode toggle
   multiSelectMode: boolean;
@@ -197,6 +201,8 @@ const DetectionSidebar = memo(function DetectionSidebar({
   onStatusChange,
   onMaterialAssign,
   onNotesChange,
+  onPriceOverride,
+  onMaterialAssignWithPrice,
   pixelsPerFoot,
   multiSelectMode,
   onMultiSelectModeChange,
@@ -388,6 +394,18 @@ const DetectionSidebar = memo(function DetectionSidebar({
                 <MaterialAssignment
                   selectedDetections={selectedDetections}
                   onMaterialAssign={onMaterialAssign}
+                  onPriceOverride={onPriceOverride ? (price) => {
+                    // Pass the price override to parent with detection IDs
+                    const ids = selectedDetections.map(d => d.id);
+                    onPriceOverride(ids, price);
+                  } : undefined}
+                  onMaterialAssignWithPrice={onMaterialAssignWithPrice}
+                  currentPriceOverride={
+                    // Only show override for single selection
+                    selectedDetections.length === 1
+                      ? selectedDetections[0].material_cost_override
+                      : undefined
+                  }
                 />
 
                 {/* Notes Field */}
@@ -455,6 +473,12 @@ const DetectionSidebar = memo(function DetectionSidebar({
                   All
                 </button>
               </div>
+              {/* Show hint when All is disabled */}
+              {!allPagesTotals && (
+                <div className="text-[10px] text-amber-600 dark:text-amber-500">
+                  Calibrate all pages to enable
+                </div>
+              )}
             </div>
 
             {/* Live Derived Measurements */}
@@ -466,7 +490,7 @@ const DetectionSidebar = memo(function DetectionSidebar({
               <div className="space-y-3">
                 {/* Scope indicator */}
                 <div className="text-xs text-gray-400 dark:text-gray-500">
-                  {totalsScope === 'current' ? 'Current Page' : 'All Elevation Pages'}
+                  {totalsScope === 'current' ? 'Current Page' : 'All Calibrated Pages'}
                 </div>
 
                 {/* Facade Summary (HOVER-style) */}

@@ -123,6 +123,9 @@ export interface ValidationDetection {
   markup_type?: 'polygon' | 'line' | 'point';
   // Material assignment from Properties Panel
   assigned_material_id?: string | null;
+  // Price overrides (user-edited prices that override pricing_items defaults)
+  material_cost_override?: number | null;
+  labor_cost_override?: number | null;
   // User notes/comments
   notes?: string | null;
 }
@@ -533,6 +536,9 @@ export async function validateDetections(
         markup_type: d.markup_type,
         // Include material assignment and notes
         assigned_material_id: d.assigned_material_id ?? null,
+        // Include price overrides
+        material_cost_override: d.material_cost_override ?? null,
+        labor_cost_override: d.labor_cost_override ?? null,
         notes: d.notes ?? null,
       })),
     };
@@ -555,6 +561,19 @@ export async function validateDetections(
     pageBreakdown.forEach((counts, pageId) => {
       console.log(`[validateDetections] Page ${pageId}: ${counts.total} total, ${counts.deleted} deleted`);
     });
+
+    // Log any detections with material assignments or price overrides
+    const detectionsWithMaterials = validationRequest.detections.filter(
+      (d) => d.assigned_material_id || d.material_cost_override !== null
+    );
+    if (detectionsWithMaterials.length > 0) {
+      console.log('[validateDetections] Detections with materials/overrides:', detectionsWithMaterials.map((d) => ({
+        source_detection_id: d.source_detection_id,
+        assigned_material_id: d.assigned_material_id,
+        material_cost_override: d.material_cost_override,
+        labor_cost_override: d.labor_cost_override,
+      })));
+    }
 
     const response = await fetch(VALIDATE_ENDPOINT, {
       method: 'POST',

@@ -101,10 +101,10 @@ export interface KonvaDetectionCanvasProps {
   multiSelectMode?: boolean;
   containerWidth: number;
   containerHeight: number;
-  /** Called when user completes a split operation */
+  /** Called when user completes a split operation with a polygon */
   onSplitDetection?: (
     originalDetection: ExtractionDetection,
-    splitRect: { x: number; y: number; width: number; height: number }
+    splitPolygon: PolygonPoint[]
   ) => void;
 }
 
@@ -157,11 +157,15 @@ export default function KonvaDetectionCanvas({
   const [scale, setScale] = useState(1);
   const [position, setPosition] = useState({ x: 0, y: 0 });
 
-  // Point-by-point polygon drawing state
+  // Point-by-point polygon drawing state (create mode)
   const [drawingPoints, setDrawingPoints] = useState<PolygonPoint[]>([]);
   const [isDrawingPolygon, setIsDrawingPolygon] = useState(false);
   const [mousePosition, setMousePosition] = useState<PolygonPoint | null>(null);
   const [isNearStart, setIsNearStart] = useState(false);
+  // Rectangle mode for create tool: click and drag to draw rectangle
+  const [createRectStart, setCreateRectStart] = useState<PolygonPoint | null>(null);
+  const [createRectEnd, setCreateRectEnd] = useState<PolygonPoint | null>(null);
+  const [isDraggingCreateRect, setIsDraggingCreateRect] = useState(false);
 
   // Hover state
   const [hoveredId, setHoveredId] = useState<string | null>(null);
@@ -178,9 +182,16 @@ export default function KonvaDetectionCanvas({
   // Line drawing state (2-point line for LF measurements)
   const [lineStartPoint, setLineStartPoint] = useState<PolygonPoint | null>(null);
 
-  // Split tool state
-  const [splitRect, setSplitRect] = useState<{ x: number; y: number; width: number; height: number } | null>(null);
-  const [isSplitting, setIsSplitting] = useState(false);
+  // Split tool state - supports both polygon click and rectangle drag modes
+  // Polygon mode: click sequential points to draw custom shape
+  const [splitPolygonPoints, setSplitPolygonPoints] = useState<PolygonPoint[]>([]);
+  const [isSplitDrawing, setIsSplitDrawing] = useState(false);
+  const [splitMousePos, setSplitMousePos] = useState<PolygonPoint | null>(null);
+  const [isSplitNearStart, setIsSplitNearStart] = useState(false);
+  // Rectangle mode: click and drag to draw rectangle
+  const [splitRectStart, setSplitRectStart] = useState<PolygonPoint | null>(null);
+  const [splitRectEnd, setSplitRectEnd] = useState<PolygonPoint | null>(null);
+  const [isDraggingRect, setIsDraggingRect] = useState(false);
 
   // Get image dimensions
   const imageWidth = page.original_width || 1920;
@@ -353,13 +364,135 @@ export default function KonvaDetectionCanvas({
     setIsNearStart(false);
   }, [drawingPoints, activeClass, onDetectionCreate, scaleRatio]);
 
-  // Cancel drawing
+  // Cancel drawing (both polygon and rectangle modes for create tool)
   const cancelDrawing = useCallback(() => {
     setDrawingPoints([]);
     setIsDrawingPolygon(false);
     setMousePosition(null);
     setIsNearStart(false);
+    // Also reset rectangle state
+    setCreateRectStart(null);
+    setCreateRectEnd(null);
+    setIsDraggingCreateRect(false);
   }, []);
+
+  // Complete a rectangle drawing and create detection (create tool)
+  const completeRectangleCreate = useCallback(() => {
+    if (!createRectStart || !createRectEnd) return;
+
+    const minX = Math.min(createRectStart.x, createRectEnd.x);
+    const maxX = Math.max(createRectStart.x, createRectEnd.x);
+    const minY = Math.min(createRectStart.y, createRectEnd.y);
+    const maxY = Math.max(createRectStart.y, createRectEnd.y);
+
+    // Convert rectangle to 4 polygon points (clockwise from top-left)
+    const rectPolygon: PolygonPoint[] = [
+      { x: minX, y: minY },
+      { x: maxX, y: minY },
+      { x: maxX, y: maxY },
+      { x: minX, y: maxY },
+    ];
+
+    console.log('[completeRectangleCreate] Rectangle as polygon:', rectPolygon);
+
+    // Calculate measurements
+    const measurements = calculatePolygonMeasurements(rectPolygon, scaleRatio);
+
+    onDetectionCreate({
+      pixel_x: measurements.pixel_x,
+      pixel_y: measurements.pixel_y,
+      pixel_width: measurements.pixel_width,
+      pixel_height: measurements.pixel_height,
+      class: activeClass,
+      polygon_points: rectPolygon,
+      area_sf: measurements.area_sf,
+      perimeter_lf: measurements.perimeter_lf,
+      real_width_ft: measurements.real_width_ft,
+      real_height_ft: measurements.real_height_ft,
+    });
+
+    // Reset rectangle state
+    setCreateRectStart(null);
+    setCreateRectEnd(null);
+    setIsDraggingCreateRect(false);
+  }, [createRectStart, createRectEnd, activeClass, onDetectionCreate, scaleRatio]);
+
+  // Complete split polygon and execute split
+  const completeSplitPolygon = useCallback(() => {
+    console.log('[completeSplitPolygon] Called with points:', splitPolygonPoints.length);
+
+    if (splitPolygonPoints.length < MIN_POLYGON_POINTS) {
+      console.log('[completeSplitPolygon] Not enough points, need at least', MIN_POLYGON_POINTS);
+      return;
+    }
+
+    // Get the selected detection
+    const selectedId = Array.from(selectedIds)[0];
+    const selectedDetection = detections.find(d => d.id === selectedId);
+
+    console.log('[completeSplitPolygon] Selected detection:', selectedDetection?.id);
+
+    if (selectedDetection && onSplitDetection) {
+      console.log('[completeSplitPolygon] Calling onSplitDetection with', splitPolygonPoints.length, 'points');
+      onSplitDetection(selectedDetection, splitPolygonPoints);
+    } else {
+      console.log('[completeSplitPolygon] Missing selectedDetection or onSplitDetection');
+    }
+
+    // Reset split state
+    setSplitPolygonPoints([]);
+    setIsSplitDrawing(false);
+    setSplitMousePos(null);
+    setIsSplitNearStart(false);
+  }, [splitPolygonPoints, selectedIds, detections, onSplitDetection]);
+
+  // Cancel split drawing (both polygon and rectangle modes)
+  const cancelSplitDrawing = useCallback(() => {
+    setSplitPolygonPoints([]);
+    setIsSplitDrawing(false);
+    setSplitMousePos(null);
+    setIsSplitNearStart(false);
+    // Also reset rectangle state
+    setSplitRectStart(null);
+    setSplitRectEnd(null);
+    setIsDraggingRect(false);
+  }, []);
+
+  // Execute split with a rectangle (converted to polygon points)
+  const executeSplitWithRect = useCallback(() => {
+    if (!splitRectStart || !splitRectEnd) return;
+
+    const minX = Math.min(splitRectStart.x, splitRectEnd.x);
+    const maxX = Math.max(splitRectStart.x, splitRectEnd.x);
+    const minY = Math.min(splitRectStart.y, splitRectEnd.y);
+    const maxY = Math.max(splitRectStart.y, splitRectEnd.y);
+
+    // Convert rectangle to polygon points (clockwise from top-left)
+    const rectPolygon: PolygonPoint[] = [
+      { x: minX, y: minY },
+      { x: maxX, y: minY },
+      { x: maxX, y: maxY },
+      { x: minX, y: maxY },
+    ];
+
+    console.log('[executeSplitWithRect] Rectangle as polygon:', rectPolygon);
+
+    // Get the selected detection
+    const selectedId = Array.from(selectedIds)[0];
+    const selectedDetection = detections.find(d => d.id === selectedId);
+
+    if (selectedDetection && onSplitDetection) {
+      console.log('[executeSplitWithRect] Calling onSplitDetection');
+      onSplitDetection(selectedDetection, rectPolygon);
+    }
+
+    // Reset all split state
+    setSplitRectStart(null);
+    setSplitRectEnd(null);
+    setIsDraggingRect(false);
+    setSplitPolygonPoints([]);
+    setIsSplitDrawing(false);
+  }, [splitRectStart, splitRectEnd, selectedIds, detections, onSplitDetection]);
 
   // Reset calibration state
   const resetCalibration = useCallback(() => {
@@ -401,7 +534,9 @@ export default function KonvaDetectionCanvas({
         return;
       }
 
-      // Split mode - draw a rectangle to carve out from selected detection
+      // Split mode - supports both polygon click and rectangle drag
+      // Click and release = add polygon vertex
+      // Click and drag = draw rectangle
       if (toolMode === 'split' && selectedIds.size === 1) {
         const stage = stageRef.current;
         if (!stage) return;
@@ -412,9 +547,34 @@ export default function KonvaDetectionCanvas({
         // Transform to image coordinates
         const imageX = (pointer.x - position.x) / scale;
         const imageY = (pointer.y - position.y) / scale;
+        const newPoint = { x: imageX, y: imageY };
 
-        setSplitRect({ x: imageX, y: imageY, width: 0, height: 0 });
-        setIsSplitting(true);
+        console.log('[Split MouseDown] Point:', newPoint);
+        console.log('[Split MouseDown] Polygon points:', splitPolygonPoints.length);
+        console.log('[Split MouseDown] isSplitDrawing:', isSplitDrawing);
+
+        // If we're already drawing a polygon, check for close
+        if (isSplitDrawing && splitPolygonPoints.length >= MIN_POLYGON_POINTS) {
+          const firstPoint = splitPolygonPoints[0];
+          const dx = newPoint.x - firstPoint.x;
+          const dy = newPoint.y - firstPoint.y;
+          const distance = Math.sqrt(dx * dx + dy * dy);
+          const threshold = CLOSE_THRESHOLD;
+
+          console.log('[Split MouseDown] Distance to first:', distance.toFixed(1), 'Threshold:', threshold);
+
+          if (distance < threshold) {
+            console.log('[Split MouseDown] CLOSING POLYGON');
+            completeSplitPolygon();
+            return;
+          }
+        }
+
+        // Record start position for potential rectangle drag
+        // We'll decide between polygon and rectangle mode on mouse up
+        setSplitRectStart(newPoint);
+        setSplitRectEnd(newPoint);
+        setIsDraggingRect(false); // Not dragging yet, will become true on move
         return;
       }
 
@@ -463,7 +623,9 @@ export default function KonvaDetectionCanvas({
         return;
       }
 
-      // Create (polygon) mode - works over existing detections
+      // Create (polygon) mode - supports both polygon click and rectangle drag
+      // Click and release = add polygon vertex
+      // Click and drag = draw rectangle
       if (toolMode === 'create') {
         const stage = stageRef.current;
         if (!stage) return;
@@ -476,19 +638,32 @@ export default function KonvaDetectionCanvas({
         // Pointer is now directly in image-pixel coordinates
         const clickPoint = { x: pointer.x, y: pointer.y };
 
-        if (!isDrawingPolygon) {
-          // Start new polygon
-          setIsDrawingPolygon(true);
-          setDrawingPoints([clickPoint]);
-        } else {
-          // Check if clicking near start point to close
-          if (drawingPoints.length >= MIN_POLYGON_POINTS && isNearStart) {
+        console.log('[Create MouseDown] Point:', clickPoint);
+        console.log('[Create MouseDown] Polygon points:', drawingPoints.length);
+        console.log('[Create MouseDown] isDrawingPolygon:', isDrawingPolygon);
+
+        // If we're already drawing a polygon, check for close
+        if (isDrawingPolygon && drawingPoints.length >= MIN_POLYGON_POINTS) {
+          const firstPoint = drawingPoints[0];
+          const dx = clickPoint.x - firstPoint.x;
+          const dy = clickPoint.y - firstPoint.y;
+          const distance = Math.sqrt(dx * dx + dy * dy);
+          const threshold = CLOSE_THRESHOLD;
+
+          console.log('[Create MouseDown] Distance to first:', distance.toFixed(1), 'Threshold:', threshold);
+
+          if (distance < threshold) {
+            console.log('[Create MouseDown] CLOSING POLYGON');
             completePolygon();
-          } else {
-            // Add point to polygon
-            setDrawingPoints((prev) => [...prev, clickPoint]);
+            return;
           }
         }
+
+        // Record start position for potential rectangle drag
+        // We'll decide between polygon and rectangle mode on mouse up
+        setCreateRectStart(clickPoint);
+        setCreateRectEnd(clickPoint);
+        setIsDraggingCreateRect(false); // Not dragging yet, will become true on move
         return;
       }
 
@@ -578,7 +753,7 @@ export default function KonvaDetectionCanvas({
       // Pan mode handled by Konva's draggable property
       // Verify mode handled by detection click handlers
     },
-    [toolMode, onSelectionChange, isDrawingPolygon, drawingPoints.length, isNearStart, completePolygon, calibrationState.pointA, onCalibrationComplete, resetCalibration, position, scale, lineStartPoint, scaleRatio, activeClass, onDetectionCreate, selectedIds]
+    [toolMode, onSelectionChange, isDrawingPolygon, drawingPoints.length, isNearStart, completePolygon, calibrationState.pointA, onCalibrationComplete, resetCalibration, position, scale, lineStartPoint, scaleRatio, activeClass, onDetectionCreate, selectedIds, splitPolygonPoints, isSplitDrawing, completeSplitPolygon]
   );
 
   const handleStageMouseMove = useCallback(
@@ -611,16 +786,70 @@ export default function KonvaDetectionCanvas({
       }
 
       // Handle split mode mouse move
-      if (isSplitting && splitRect) {
+      if (toolMode === 'split') {
         const pointer = stage.getPointerPosition();
         if (pointer) {
           const imageX = (pointer.x - position.x) / scale;
           const imageY = (pointer.y - position.y) / scale;
-          setSplitRect(prev => ({
-            ...prev!,
-            width: imageX - prev!.x,
-            height: imageY - prev!.y,
-          }));
+          const currentPoint = { x: imageX, y: imageY };
+
+          // Check if we're dragging a rectangle (mouse button down and moved > 5 pixels)
+          // Use 'buttons' for MouseEvent, assume button down for TouchEvent
+          const isMouseDown = 'buttons' in e.evt ? e.evt.buttons === 1 : true;
+          if (splitRectStart && isMouseDown) {
+            const dx = Math.abs(currentPoint.x - splitRectStart.x);
+            const dy = Math.abs(currentPoint.y - splitRectStart.y);
+            // Only consider it a drag if moved more than 5 pixels in image coords
+            if (dx > 5 || dy > 5) {
+              setIsDraggingRect(true);
+              setSplitRectEnd(currentPoint);
+            }
+          }
+
+          // Track cursor for polygon preview when actively drawing polygon
+          if (isSplitDrawing) {
+            setSplitMousePos(currentPoint);
+
+            // Check if near starting point for polygon completion
+            if (splitPolygonPoints.length >= MIN_POLYGON_POINTS) {
+              setIsSplitNearStart(isPointNearStart(currentPoint, splitPolygonPoints[0]));
+            } else {
+              setIsSplitNearStart(false);
+            }
+          }
+        }
+        return;
+      }
+
+      // Handle create mode mouse move
+      if (toolMode === 'create') {
+        const pointer = stage.getRelativePointerPosition();
+        if (pointer) {
+          const currentPoint = { x: pointer.x, y: pointer.y };
+
+          // Check if we're dragging a rectangle (mouse button down and moved > 5 pixels)
+          const isMouseDown = 'buttons' in e.evt ? e.evt.buttons === 1 : true;
+          if (createRectStart && isMouseDown) {
+            const dx = Math.abs(currentPoint.x - createRectStart.x);
+            const dy = Math.abs(currentPoint.y - createRectStart.y);
+            // Only consider it a drag if moved more than 5 pixels
+            if (dx > 5 || dy > 5) {
+              setIsDraggingCreateRect(true);
+              setCreateRectEnd(currentPoint);
+            }
+          }
+
+          // Track cursor for polygon preview when actively drawing polygon
+          if (isDrawingPolygon) {
+            setMousePosition(currentPoint);
+
+            // Check if near starting point for polygon completion
+            if (drawingPoints.length >= MIN_POLYGON_POINTS) {
+              setIsNearStart(isPointNearStart(currentPoint, drawingPoints[0]));
+            } else {
+              setIsNearStart(false);
+            }
+          }
         }
         return;
       }
@@ -630,58 +859,80 @@ export default function KonvaDetectionCanvas({
       if (!pointer) return;
 
       const currentPoint = { x: pointer.x, y: pointer.y };
-
-      // Handle create mode mouse move
-      if (toolMode !== 'create') return;
-
       setMousePosition(currentPoint);
-
-      // Check if near starting point
-      if (isDrawingPolygon && drawingPoints.length >= MIN_POLYGON_POINTS) {
-        setIsNearStart(isPointNearStart(currentPoint, drawingPoints[0]));
-      } else {
-        setIsNearStart(false);
-      }
     },
-    [toolMode, isDrawingPolygon, drawingPoints, isPointNearStart, calibrationState.pointA, position, scale, lineStartPoint, isSplitting, splitRect]
+    [toolMode, isDrawingPolygon, drawingPoints, isPointNearStart, calibrationState.pointA, position, scale, lineStartPoint, isSplitDrawing, splitPolygonPoints, splitRectStart, createRectStart]
   );
 
   const handleStageMouseUp = useCallback(
-    (e: Konva.KonvaEventObject<MouseEvent | TouchEvent>) => {
-      // Handle split tool completion
-      if (isSplitting && splitRect) {
-        const minSize = 10; // Minimum rectangle size in pixels
-        const absWidth = Math.abs(splitRect.width);
-        const absHeight = Math.abs(splitRect.height);
+    (_e: Konva.KonvaEventObject<MouseEvent | TouchEvent>) => {
+      // Handle create mode - distinguish between rectangle drag and polygon click
+      if (toolMode === 'create' && createRectStart) {
+        if (isDraggingCreateRect && createRectEnd) {
+          // User was dragging - create detection with rectangle
+          console.log('[Create MouseUp] Executing rectangle create');
+          completeRectangleCreate();
+        } else {
+          // User clicked (no drag) - add polygon vertex
+          console.log('[Create MouseUp] Adding polygon point at', createRectStart);
 
-        if (absWidth > minSize && absHeight > minSize) {
-          // Get the selected detection
-          const selectedId = Array.from(selectedIds)[0];
-          const selectedDetection = detections.find(d => d.id === selectedId);
-
-          if (selectedDetection && onSplitDetection) {
-            // Normalize the rectangle (handle negative width/height from drawing direction)
-            const normalizedRect = {
-              x: splitRect.width < 0 ? splitRect.x + splitRect.width : splitRect.x,
-              y: splitRect.height < 0 ? splitRect.y + splitRect.height : splitRect.y,
-              width: absWidth,
-              height: absHeight,
-            };
-
-            onSplitDetection(selectedDetection, normalizedRect);
+          if (!isDrawingPolygon) {
+            // Start new polygon
+            setIsDrawingPolygon(true);
+            setDrawingPoints([createRectStart]);
+            setMousePosition(createRectStart);
+          } else {
+            // Add point to existing polygon
+            setDrawingPoints(prev => [...prev, createRectStart]);
           }
-        }
 
-        // Reset split state
-        setSplitRect(null);
-        setIsSplitting(false);
+          // Reset rectangle state but keep polygon drawing active
+          setCreateRectStart(null);
+          setCreateRectEnd(null);
+          setIsDraggingCreateRect(false);
+        }
+      }
+
+      // Handle split mode - distinguish between rectangle drag and polygon click
+      if (toolMode === 'split' && splitRectStart) {
+        if (isDraggingRect && splitRectEnd) {
+          // User was dragging - execute split with rectangle
+          console.log('[Split MouseUp] Executing rectangle split');
+          executeSplitWithRect();
+        } else {
+          // User clicked (no drag) - add polygon vertex
+          console.log('[Split MouseUp] Adding polygon point at', splitRectStart);
+
+          if (!isSplitDrawing) {
+            // Start new polygon
+            setIsSplitDrawing(true);
+            setSplitPolygonPoints([splitRectStart]);
+            setSplitMousePos(splitRectStart);
+          } else {
+            // Add point to existing polygon
+            setSplitPolygonPoints(prev => [...prev, splitRectStart]);
+          }
+
+          // Reset rectangle state but keep polygon drawing active
+          setSplitRectStart(null);
+          setSplitRectEnd(null);
+          setIsDraggingRect(false);
+        }
       }
     },
-    [isSplitting, splitRect, selectedIds, detections, onSplitDetection]
+    [toolMode, createRectStart, createRectEnd, isDraggingCreateRect, isDrawingPolygon, completeRectangleCreate, splitRectStart, splitRectEnd, isDraggingRect, isSplitDrawing, executeSplitWithRect]
   );
 
   const handleStageDoubleClick = useCallback(
     (e: Konva.KonvaEventObject<MouseEvent>) => {
+      // Handle double-click to complete split polygon
+      if (toolMode === 'split' && isSplitDrawing && splitPolygonPoints.length >= MIN_POLYGON_POINTS) {
+        e.evt.preventDefault();
+        completeSplitPolygon();
+        return;
+      }
+
+      // Handle double-click to complete create polygon
       if (toolMode !== 'create' || !isDrawingPolygon) return;
 
       e.evt.preventDefault();
@@ -690,7 +941,7 @@ export default function KonvaDetectionCanvas({
         completePolygon();
       }
     },
-    [toolMode, isDrawingPolygon, drawingPoints.length, completePolygon]
+    [toolMode, isDrawingPolygon, drawingPoints.length, completePolygon, isSplitDrawing, splitPolygonPoints.length, completeSplitPolygon]
   );
 
   // Right-click to exit point/line mode or cancel polygon drawing
@@ -711,10 +962,9 @@ export default function KonvaDetectionCanvas({
         return;
       }
 
-      // Cancel split drawing
-      if (isSplitting) {
-        setSplitRect(null);
-        setIsSplitting(false);
+      // Cancel split polygon drawing
+      if (isSplitDrawing) {
+        cancelSplitDrawing();
         return;
       }
 
@@ -724,14 +974,14 @@ export default function KonvaDetectionCanvas({
         return;
       }
     },
-    [isDrawingPolygon, cancelDrawing, lineStartPoint, toolMode, onExitDrawingMode, isSplitting]
+    [isDrawingPolygon, cancelDrawing, lineStartPoint, toolMode, onExitDrawingMode, isSplitDrawing, cancelSplitDrawing]
   );
 
   // Escape key to cancel drawing, calibration, line drawing, or split
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
-        if (isDrawingPolygon) {
+        if (isDrawingPolygon || isDraggingCreateRect || createRectStart) {
           e.preventDefault();
           cancelDrawing();
         }
@@ -744,10 +994,9 @@ export default function KonvaDetectionCanvas({
           setLineStartPoint(null);
           setCalibrationMousePos(null);
         }
-        if (isSplitting) {
+        if (isSplitDrawing || isDraggingRect || splitRectStart) {
           e.preventDefault();
-          setSplitRect(null);
-          setIsSplitting(false);
+          cancelSplitDrawing();
         }
         // Exit split mode on escape
         if (toolMode === 'split') {
@@ -759,7 +1008,7 @@ export default function KonvaDetectionCanvas({
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isDrawingPolygon, cancelDrawing, calibrationState.isCalibrating, calibrationState.pointA, resetCalibration, lineStartPoint, isSplitting, toolMode, onExitDrawingMode]);
+  }, [isDrawingPolygon, isDraggingCreateRect, createRectStart, cancelDrawing, calibrationState.isCalibrating, calibrationState.pointA, resetCalibration, lineStartPoint, isSplitDrawing, isDraggingRect, splitRectStart, cancelSplitDrawing, toolMode, onExitDrawingMode]);
 
   // ==========================================================================
   // Detection Handlers
@@ -810,7 +1059,7 @@ export default function KonvaDetectionCanvas({
   const getCursor = () => {
     if (isDrawingPolygon) return 'crosshair';
     if (lineStartPoint) return 'crosshair';
-    if (isSplitting) return 'crosshair';
+    if (isSplitDrawing) return 'crosshair';
     switch (toolMode) {
       case 'pan':
         return 'grab';
@@ -1023,6 +1272,21 @@ export default function KonvaDetectionCanvas({
             </>
           )}
 
+          {/* Create Rectangle Preview (when dragging in create mode) */}
+          {isDraggingCreateRect && createRectStart && createRectEnd && (
+            <Rect
+              x={Math.min(createRectStart.x, createRectEnd.x)}
+              y={Math.min(createRectStart.y, createRectEnd.y)}
+              width={Math.abs(createRectEnd.x - createRectStart.x)}
+              height={Math.abs(createRectEnd.y - createRectStart.y)}
+              stroke={drawingColor}
+              strokeWidth={2 / scale}
+              dash={[8 / scale, 4 / scale]}
+              fill={`${drawingColor}26`}
+              listening={false}
+            />
+          )}
+
           {/* Calibration Line Overlay */}
           {toolMode === 'calibrate' && calibrationState.pointA && (
             <>
@@ -1127,16 +1391,93 @@ export default function KonvaDetectionCanvas({
             </>
           )}
 
-          {/* Split Rectangle Preview */}
-          {splitRect && isSplitting && (
+          {/* Split Polygon Preview */}
+          {isSplitDrawing && splitPolygonPoints.length > 0 && (
+            <>
+              {/* Completed edges (solid red) */}
+              {splitPolygonPoints.length >= 2 && (
+                <Line
+                  points={splitPolygonPoints.flatMap(p => [p.x, p.y])}
+                  stroke="#ef4444"
+                  strokeWidth={2 / scale}
+                  lineCap="round"
+                  lineJoin="round"
+                  listening={false}
+                />
+              )}
+
+              {/* Preview line to cursor (dashed red) */}
+              {splitMousePos && splitPolygonPoints.length >= 1 && (
+                <Line
+                  points={[
+                    splitPolygonPoints[splitPolygonPoints.length - 1].x,
+                    splitPolygonPoints[splitPolygonPoints.length - 1].y,
+                    splitMousePos.x,
+                    splitMousePos.y,
+                  ]}
+                  stroke="#ef4444"
+                  strokeWidth={2 / scale}
+                  dash={[5 / scale, 5 / scale]}
+                  lineCap="round"
+                  listening={false}
+                />
+              )}
+
+              {/* Closing line preview (when near start) */}
+              {splitMousePos && isSplitNearStart && (
+                <Line
+                  points={[
+                    splitMousePos.x,
+                    splitMousePos.y,
+                    splitPolygonPoints[0].x,
+                    splitPolygonPoints[0].y,
+                  ]}
+                  stroke="#22c55e"
+                  strokeWidth={2 / scale}
+                  dash={[5 / scale, 5 / scale]}
+                  lineCap="round"
+                  listening={false}
+                />
+              )}
+
+              {/* Vertex points */}
+              {splitPolygonPoints.map((point, idx) => (
+                <Circle
+                  key={`split-point-${idx}`}
+                  x={point.x}
+                  y={point.y}
+                  radius={idx === 0 ? 8 / scale : 5 / scale}
+                  fill={idx === 0 ? (isSplitNearStart ? '#22c55e' : '#ef4444') : '#ef4444'}
+                  stroke="#FFFFFF"
+                  strokeWidth={2 / scale}
+                  listening={false}
+                />
+              ))}
+
+              {/* Cursor position indicator */}
+              {splitMousePos && !isSplitNearStart && (
+                <Circle
+                  x={splitMousePos.x}
+                  y={splitMousePos.y}
+                  radius={4 / scale}
+                  fill="#ef4444"
+                  opacity={0.5}
+                  listening={false}
+                />
+              )}
+            </>
+          )}
+
+          {/* Split Rectangle Preview (when dragging) */}
+          {isDraggingRect && splitRectStart && splitRectEnd && (
             <Rect
-              x={Math.min(splitRect.x, splitRect.x + splitRect.width)}
-              y={Math.min(splitRect.y, splitRect.y + splitRect.height)}
-              width={Math.abs(splitRect.width)}
-              height={Math.abs(splitRect.height)}
+              x={Math.min(splitRectStart.x, splitRectEnd.x)}
+              y={Math.min(splitRectStart.y, splitRectEnd.y)}
+              width={Math.abs(splitRectEnd.x - splitRectStart.x)}
+              height={Math.abs(splitRectEnd.y - splitRectStart.y)}
               stroke="#ef4444"
               strokeWidth={2 / scale}
-              dash={[5 / scale, 5 / scale]}
+              dash={[8 / scale, 4 / scale]}
               fill="rgba(239, 68, 68, 0.15)"
               listening={false}
             />
