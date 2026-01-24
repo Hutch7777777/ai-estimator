@@ -86,14 +86,33 @@ const COLORS = {
 };
 
 const PRESENTATION_GROUPS: Record<string, { title: string; color: string; order: number }> = {
+  // Section order: SIDING → TRIM & CORNERS → FLASHING & WEATHERPROOFING → OTHER MATERIALS → GUTTERS
+
+  // 1. Siding & Underlayment
   'siding': { title: 'SIDING & UNDERLAYMENT', color: 'E8F5E9', order: 1 },
+
+  // 2. Trim & Corners (combined)
   'trim': { title: 'TRIM & CORNERS', color: 'E3F2FD', order: 2 },
-  'corners': { title: 'OUTSIDE & INSIDE CORNERS', color: 'FCE4EC', order: 3 },
-  'flashing': { title: 'FLASHING & WEATHERPROOFING', color: 'FFF3E0', order: 4 },
-  'accessories': { title: 'FASTENERS & ACCESSORIES', color: 'F3E5F5', order: 5 },
-  'openings': { title: 'WINDOW & DOOR TRIM', color: 'E0F7FA', order: 6 },
+  'corners': { title: 'TRIM & CORNERS', color: 'E3F2FD', order: 2 },
+
+  // 3. Flashing & Weatherproofing (includes Tyvek, house wrap, flashing tape)
+  'flashing & weatherproofing': { title: 'FLASHING & WEATHERPROOFING', color: 'FFF3E0', order: 3 },
+  'flashing': { title: 'FLASHING & WEATHERPROOFING', color: 'FFF3E0', order: 3 },
+
+  // 4. Other Materials (fasteners, accessories, caulk, paint, etc.)
+  'fasteners': { title: 'FASTENERS & ACCESSORIES', color: 'F3E5F5', order: 4 },
+  'accessories': { title: 'FASTENERS & ACCESSORIES', color: 'F3E5F5', order: 4 },
+  'caulk & sealants': { title: 'CAULK & SEALANTS', color: 'FFF8E1', order: 5 },
+  'paint & primer': { title: 'PAINT & PRIMER', color: 'F3E5F5', order: 6 },
+  'openings': { title: 'WINDOW & DOOR TRIM', color: 'E0F7FA', order: 7 },
+  'other': { title: 'OTHER MATERIALS', color: 'FAFAFA', order: 8 },
+  'other materials': { title: 'OTHER MATERIALS', color: 'FAFAFA', order: 8 },
+
+  // 5. Gutters (last before overhead)
+  'gutters': { title: 'GUTTERS', color: 'E8EAF6', order: 9 },
+
+  // 99. Overhead (always last)
   'overhead': { title: 'OVERHEAD', color: 'F5F5F5', order: 99 },
-  'other': { title: 'OTHER MATERIALS', color: 'FAFAFA', order: 100 },
 };
 
 // =============================================================================
