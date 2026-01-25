@@ -1,8 +1,8 @@
 'use client';
 
 import React, { memo, useState, useEffect, useMemo, useCallback } from 'react';
-import { Search, X, Package, Loader2 } from 'lucide-react';
-import { useMaterialSearch, getMaterialById, type MaterialItem } from '@/lib/hooks/useMaterialSearch';
+import { Search, X, Package, Loader2, Zap } from 'lucide-react';
+import { useMaterialSearch, getMaterialById, isAutoScopeOnlyClass, type MaterialItem } from '@/lib/hooks/useMaterialSearch';
 import type { ExtractionDetection, DetectionClass } from '@/lib/types/extraction';
 import EditablePrice from './EditablePrice';
 
@@ -87,30 +87,47 @@ const ProductItem = memo(function ProductItem({
     }
   }, [onPriceEdit]);
 
+  // Handle click on the row - but not when clicking on editable price
+  const handleRowClick = useCallback((e: React.MouseEvent) => {
+    // Don't trigger if clicking on an input or button inside EditablePrice
+    const target = e.target as HTMLElement;
+    if (target.tagName === 'INPUT' || target.closest('[data-price-editor]')) {
+      return;
+    }
+    console.log('[ProductItem] Row clicked, calling onClick for:', item.product_name);
+    onClick();
+  }, [onClick, item.product_name]);
+
   return (
     <div
+      role="button"
+      tabIndex={0}
+      onClick={handleRowClick}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          onClick();
+        }
+      }}
       className={`
-        w-full text-left px-2 py-1.5 rounded-md transition-colors
+        w-full text-left px-2 py-1.5 rounded-md transition-colors cursor-pointer
         ${isSelected
           ? 'bg-blue-100 dark:bg-blue-900/30 border border-blue-300 dark:border-blue-700'
           : 'hover:bg-gray-100 dark:hover:bg-gray-800 border border-transparent'
         }
       `}
     >
-      {/* Product name - clickable to assign */}
-      <button
-        type="button"
-        onClick={onClick}
-        className="w-full text-left"
-      >
-        <div className="text-xs font-medium text-gray-900 dark:text-gray-100 truncate">
-          {item.product_name}
-        </div>
-      </button>
+      {/* Product name */}
+      <div className="text-xs font-medium text-gray-900 dark:text-gray-100 truncate">
+        {item.product_name}
+      </div>
       <div className="flex items-center justify-between text-[10px] text-gray-500 dark:text-gray-400">
         <span className="truncate">{item.category || item.sku}</span>
         {/* Price - either editable or static */}
-        <span className="flex-shrink-0 ml-2 font-medium text-green-600 dark:text-green-400">
+        <span
+          className="flex-shrink-0 ml-2 font-medium text-green-600 dark:text-green-400"
+          data-price-editor={priceEditable ? 'true' : undefined}
+        >
           {priceEditable && onPriceEdit ? (
             <EditablePrice
               basePrice={item.material_cost}
@@ -145,12 +162,16 @@ const MaterialAssignment = memo(function MaterialAssignment({
   const [loadingAssigned, setLoadingAssigned] = useState(false);
 
   // Determine the trade and class from selected detections
-  const { trade, detectionClass } = useMemo(() => {
+  const { trade, detectionClass, isAutoScopeOnly } = useMemo(() => {
     if (selectedDetections.length === 0) {
-      return { trade: 'siding', detectionClass: '' };
+      return { trade: 'siding', detectionClass: '', isAutoScopeOnly: false };
     }
     const cls = selectedDetections[0].class || '';
-    return { trade: getTradeFromClass(cls as DetectionClass), detectionClass: cls };
+    return {
+      trade: getTradeFromClass(cls as DetectionClass),
+      detectionClass: cls,
+      isAutoScopeOnly: isAutoScopeOnlyClass(cls),
+    };
   }, [selectedDetections]);
 
   // Get current assigned material ID (use first detection if multi-select)
@@ -204,11 +225,25 @@ const MaterialAssignment = memo(function MaterialAssignment({
   }, [currentAssignedId]);
 
   // Handle material selection
-  const handleSelectMaterial = (item: MaterialItem) => {
+  const handleSelectMaterial = useCallback((item: MaterialItem) => {
     const ids = selectedDetections.map((d) => d.id);
-    console.log('[MaterialAssignment] handleSelectMaterial:', { ids, materialId: item.id, productName: item.product_name });
+    console.log('[MaterialAssignment] handleSelectMaterial called:', {
+      detectionIds: ids,
+      materialId: item.id,
+      productName: item.product_name,
+      currentAssignedId,
+      selectedDetectionsCount: selectedDetections.length,
+    });
+
+    if (ids.length === 0) {
+      console.warn('[MaterialAssignment] No detection IDs to assign material to!');
+      return;
+    }
+
+    // Call the parent handler
     onMaterialAssign(ids, item.id);
-  };
+    console.log('[MaterialAssignment] onMaterialAssign callback executed');
+  }, [selectedDetections, currentAssignedId, onMaterialAssign]);
 
   // Handle clear assignment
   const handleClearAssignment = () => {
@@ -239,6 +274,31 @@ const MaterialAssignment = memo(function MaterialAssignment({
 
   if (selectedDetections.length === 0) {
     return null;
+  }
+
+  // For auto-scope-only classes (vents, outlets, corners, etc.), show informative message
+  if (isAutoScopeOnly) {
+    const classLabel = detectionClass.replace(/_/g, ' ');
+    return (
+      <div className="space-y-2">
+        <span className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+          Material
+        </span>
+        <div className="bg-blue-50 dark:bg-blue-900/20 rounded-md p-3">
+          <div className="flex items-start gap-2">
+            <Zap className="w-4 h-4 text-blue-500 dark:text-blue-400 flex-shrink-0 mt-0.5" />
+            <div>
+              <div className="text-xs font-medium text-blue-700 dark:text-blue-300">
+                Auto-Generated
+              </div>
+              <div className="text-[11px] text-blue-600 dark:text-blue-400 mt-1">
+                Materials for <span className="capitalize font-medium">{classLabel}</span> are automatically calculated based on count. No manual assignment needed.
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
   }
 
   return (
@@ -292,19 +352,21 @@ const MaterialAssignment = memo(function MaterialAssignment({
         </div>
       )}
 
-      {/* Category Filter */}
-      <select
-        value={selectedCategory}
-        onChange={(e) => setSelectedCategory(e.target.value)}
-        className="w-full h-8 px-2 text-xs rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-1 focus:ring-blue-500"
-      >
-        <option value="">All Categories</option>
-        {categories.map((cat) => (
-          <option key={cat} value={cat}>
-            {cat}
-          </option>
-        ))}
-      </select>
+      {/* Category Filter - only show if there are categories to choose from */}
+      {categories.length > 0 && (
+        <select
+          value={selectedCategory}
+          onChange={(e) => setSelectedCategory(e.target.value)}
+          className="w-full h-8 px-2 text-xs rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-1 focus:ring-blue-500"
+        >
+          <option value="">All Categories</option>
+          {categories.map((cat) => (
+            <option key={cat} value={cat}>
+              {cat}
+            </option>
+          ))}
+        </select>
+      )}
 
       {/* Search Input */}
       <div className="relative">

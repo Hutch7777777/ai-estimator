@@ -119,7 +119,8 @@ const CLOSE_THRESHOLD = 15; // Pixels to detect "near starting point"
 const MIN_POLYGON_POINTS = 3;
 
 // Classes appropriate for linear measurements (lines) - measured in LF, not SF
-const LINEAR_CLASSES: DetectionClass[] = ['trim', 'fascia', 'gutter', 'eave', 'rake', 'ridge', 'soffit', 'valley'];
+// Note: soffit is NOT included here - it uses area (SF) measurement via rectangle/polygon tool
+const LINEAR_CLASSES: DetectionClass[] = ['trim', 'fascia', 'gutter', 'eave', 'rake', 'ridge', 'valley', 'belly_band', 'corner_inside', 'corner_outside'];
 
 // =============================================================================
 // Component

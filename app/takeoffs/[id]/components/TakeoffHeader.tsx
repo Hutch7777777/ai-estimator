@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { ArrowLeft, Download, Loader2, Home, FileSpreadsheet, FileImage } from 'lucide-react';
+import { ArrowLeft, Download, Loader2, Home, FileSpreadsheet, FileImage, Mail } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 
 // =============================================================================
@@ -17,6 +17,7 @@ export interface TakeoffHeaderProps {
   onDownloadExcel: () => void;
   onDownloadVendor: () => void;
   onDownloadMarkup: () => void;
+  onGenerateRFI?: () => void;
   isDownloading: boolean;
   isDownloadingVendor: boolean;
   isDownloadingMarkup: boolean;
@@ -35,6 +36,7 @@ export function TakeoffHeader({
   onDownloadExcel,
   onDownloadVendor,
   onDownloadMarkup,
+  onGenerateRFI,
   isDownloading,
   isDownloadingVendor,
   isDownloadingMarkup,
@@ -118,6 +120,16 @@ export function TakeoffHeader({
             )}
             Vendor Takeoff
           </button>
+          {onGenerateRFI && (
+            <button
+              onClick={onGenerateRFI}
+              title="Generate RFI email for missing specifications"
+              className="flex items-center gap-2 px-3 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+            >
+              <Mail className="w-4 h-4" />
+              RFI
+            </button>
+          )}
           <button
             onClick={onDownloadExcel}
             disabled={isDownloading}

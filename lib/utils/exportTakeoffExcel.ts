@@ -86,33 +86,79 @@ const COLORS = {
 };
 
 const PRESENTATION_GROUPS: Record<string, { title: string; color: string; order: number }> = {
-  // Section order: SIDING → TRIM & CORNERS → FLASHING & WEATHERPROOFING → OTHER MATERIALS → GUTTERS
+  // Section order: SIDING → TRIM & CORNERS → BELLY BAND → SOFFIT & FASCIA → FLASHING →
+  // FASTENERS → CAULK → ARCHITECTURAL → GUTTERS → ROOFING → OPENINGS → OTHER → OVERHEAD
 
   // 1. Siding & Underlayment
   'siding': { title: 'SIDING & UNDERLAYMENT', color: 'E8F5E9', order: 1 },
+  'siding & underlayment': { title: 'SIDING & UNDERLAYMENT', color: 'E8F5E9', order: 1 },
 
   // 2. Trim & Corners (combined)
   'trim': { title: 'TRIM & CORNERS', color: 'E3F2FD', order: 2 },
+  'trim & corners': { title: 'TRIM & CORNERS', color: 'E3F2FD', order: 2 },
   'corners': { title: 'TRIM & CORNERS', color: 'E3F2FD', order: 2 },
 
-  // 3. Flashing & Weatherproofing (includes Tyvek, house wrap, flashing tape)
-  'flashing & weatherproofing': { title: 'FLASHING & WEATHERPROOFING', color: 'FFF3E0', order: 3 },
-  'flashing': { title: 'FLASHING & WEATHERPROOFING', color: 'FFF3E0', order: 3 },
+  // 2.5. Belly Band (dedicated section for horizontal accent trim)
+  'belly band': { title: 'BELLY BAND', color: 'FFF9C4', order: 2.5 },
+  'belly_band': { title: 'BELLY BAND', color: 'FFF9C4', order: 2.5 },
 
-  // 4. Other Materials (fasteners, accessories, caulk, paint, etc.)
-  'fasteners': { title: 'FASTENERS & ACCESSORIES', color: 'F3E5F5', order: 4 },
-  'accessories': { title: 'FASTENERS & ACCESSORIES', color: 'F3E5F5', order: 4 },
-  'caulk & sealants': { title: 'CAULK & SEALANTS', color: 'FFF8E1', order: 5 },
-  'paint & primer': { title: 'PAINT & PRIMER', color: 'F3E5F5', order: 6 },
-  'openings': { title: 'WINDOW & DOOR TRIM', color: 'E0F7FA', order: 7 },
-  'other': { title: 'OTHER MATERIALS', color: 'FAFAFA', order: 8 },
-  'other materials': { title: 'OTHER MATERIALS', color: 'FAFAFA', order: 8 },
+  // 3. Soffit & Fascia
+  'soffit': { title: 'SOFFIT & FASCIA', color: 'B2EBF2', order: 3 },
+  'fascia': { title: 'SOFFIT & FASCIA', color: 'B2EBF2', order: 3 },
+  'soffit & fascia': { title: 'SOFFIT & FASCIA', color: 'B2EBF2', order: 3 },
 
-  // 5. Gutters (last before overhead)
-  'gutters': { title: 'GUTTERS', color: 'E8EAF6', order: 9 },
+  // 4. Flashing & Weatherproofing (includes Tyvek, house wrap, flashing tape, penetrations)
+  'flashing': { title: 'FLASHING & WEATHERPROOFING', color: 'FFECB3', order: 4 },
+  'flashing & weatherproofing': { title: 'FLASHING & WEATHERPROOFING', color: 'FFECB3', order: 4 },
+  'weatherproofing': { title: 'FLASHING & WEATHERPROOFING', color: 'FFECB3', order: 4 },
+  'penetrations': { title: 'FLASHING & WEATHERPROOFING', color: 'FFECB3', order: 4 },
+
+  // 5. Fasteners & Accessories
+  'fasteners': { title: 'FASTENERS & ACCESSORIES', color: 'F5F5F5', order: 5 },
+  'fasteners & accessories': { title: 'FASTENERS & ACCESSORIES', color: 'F5F5F5', order: 5 },
+  'accessories': { title: 'FASTENERS & ACCESSORIES', color: 'F5F5F5', order: 5 },
+
+  // 6. Caulk & Sealants
+  'caulk': { title: 'CAULK & SEALANTS', color: 'FCE4EC', order: 6 },
+  'caulk & sealants': { title: 'CAULK & SEALANTS', color: 'FCE4EC', order: 6 },
+  'sealants': { title: 'CAULK & SEALANTS', color: 'FCE4EC', order: 6 },
+
+  // 7. Architectural Details (corbels, brackets, shutters, posts, columns)
+  'architectural': { title: 'ARCHITECTURAL DETAILS', color: 'D7CCC8', order: 7 },
+  'architectural details': { title: 'ARCHITECTURAL DETAILS', color: 'D7CCC8', order: 7 },
+  'corbel': { title: 'ARCHITECTURAL DETAILS', color: 'D7CCC8', order: 7 },
+  'bracket': { title: 'ARCHITECTURAL DETAILS', color: 'D7CCC8', order: 7 },
+  'shutter': { title: 'ARCHITECTURAL DETAILS', color: 'D7CCC8', order: 7 },
+  'post': { title: 'ARCHITECTURAL DETAILS', color: 'D7CCC8', order: 7 },
+  'column': { title: 'ARCHITECTURAL DETAILS', color: 'D7CCC8', order: 7 },
+
+  // 8. Gutters & Downspouts
+  'gutter': { title: 'GUTTERS & DOWNSPOUTS', color: 'C8E6C9', order: 8 },
+  'gutters': { title: 'GUTTERS & DOWNSPOUTS', color: 'C8E6C9', order: 8 },
+  'gutters & downspouts': { title: 'GUTTERS & DOWNSPOUTS', color: 'C8E6C9', order: 8 },
+  'downspout': { title: 'GUTTERS & DOWNSPOUTS', color: 'C8E6C9', order: 8 },
+
+  // 9. Roofing Components (for roofing trade)
+  'eave': { title: 'ROOFING COMPONENTS', color: 'FFCCBC', order: 9 },
+  'rake': { title: 'ROOFING COMPONENTS', color: 'FFCCBC', order: 9 },
+  'ridge': { title: 'ROOFING COMPONENTS', color: 'FFCCBC', order: 9 },
+  'valley': { title: 'ROOFING COMPONENTS', color: 'FFCCBC', order: 9 },
+  'roofing': { title: 'ROOFING COMPONENTS', color: 'FFCCBC', order: 9 },
+  'roofing components': { title: 'ROOFING COMPONENTS', color: 'FFCCBC', order: 9 },
+
+  // 10. Window & Door Trim
+  'openings': { title: 'WINDOW & DOOR TRIM', color: 'E1BEE7', order: 10 },
+  'window & door trim': { title: 'WINDOW & DOOR TRIM', color: 'E1BEE7', order: 10 },
+
+  // 11. Paint & Primer
+  'paint & primer': { title: 'PAINT & PRIMER', color: 'F3E5F5', order: 11 },
+
+  // 98. Other Materials
+  'other': { title: 'OTHER MATERIALS', color: 'EEEEEE', order: 98 },
+  'other materials': { title: 'OTHER MATERIALS', color: 'EEEEEE', order: 98 },
 
   // 99. Overhead (always last)
-  'overhead': { title: 'OVERHEAD', color: 'F5F5F5', order: 99 },
+  'overhead': { title: 'OVERHEAD', color: 'E0E0E0', order: 99 },
 };
 
 // =============================================================================

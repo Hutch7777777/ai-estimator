@@ -572,6 +572,7 @@ export const CLASS_MEASUREMENT_TYPES: Record<DetectionClass, 'area' | 'linear' |
   garage: 'area',
   roof: 'area',
   gable: 'area',
+  soffit: 'area',  // Soffit is measured in SF (area), not LF
   // Linear classes (LF) - measured in linear feet
   trim: 'linear',
   fascia: 'linear',
@@ -579,7 +580,6 @@ export const CLASS_MEASUREMENT_TYPES: Record<DetectionClass, 'area' | 'linear' |
   eave: 'linear',
   rake: 'linear',
   ridge: 'linear',
-  soffit: 'linear',
   valley: 'linear',
   // Point/Count classes (EA) - measured by count
   vent: 'count',
@@ -590,7 +590,7 @@ export const CLASS_MEASUREMENT_TYPES: Record<DetectionClass, 'area' | 'linear' |
   light_fixture: 'count',
   corbel: 'count',
   gable_vent: 'count',
-  belly_band: 'count',
+  belly_band: 'linear',
   corner_inside: 'count',
   corner_outside: 'count',
   shutter: 'count',
@@ -1067,6 +1067,9 @@ export interface LiveDerivedTotals {
   // FASCIA (line)
   fasciaCount: number;
   fasciaLf: number;
+  // BELLY BAND (line)
+  bellyBandCount: number;
+  bellyBandLf: number;
   // GUTTERS
   gutterCount: number;
   gutterLf: number;
@@ -1172,6 +1175,18 @@ export interface ApprovePayload {
 
   // NEW: Organization context for multi-tenant pricing
   organization_id?: string;
+
+  // Detection counts by class (corbels, brackets, belly_bands, etc.)
+  detection_counts?: Record<string, {
+    count: number;
+    total_lf?: number;  // For linear measurement types (e.g., belly_band)
+    display_name: string;
+    measurement_type: 'count' | 'area' | 'linear';
+    unit: string;
+  }>;
+
+  // Total point markers count
+  total_point_count?: number;
 }
 
 // =============================================================================
@@ -1200,4 +1215,773 @@ export interface ApprovalResult {
   labor?: LaborSection;
   overhead?: OverheadSection;
   project_totals?: ProjectTotals;
+}
+
+// =============================================================================
+// OCR Data Types (for Plan Intelligence)
+// =============================================================================
+
+/** Window schedule entry extracted from OCR */
+export interface ScheduleWindow {
+  mark: string;           // e.g., "W1", "A", "101"
+  size: string;           // e.g., "3'-0\" x 4'-0\""
+  quantity: number;
+  type: string;           // e.g., "double hung", "casement", "fixed"
+  notes?: string;         // e.g., "tempered glass", "egress"
+}
+
+/** Door schedule entry extracted from OCR */
+export interface ScheduleDoor {
+  mark: string;           // e.g., "D1", "1", "A"
+  size: string;           // e.g., "3'-0\" x 6'-8\""
+  quantity: number;
+  type: string;           // e.g., "entry", "interior", "garage"
+  notes?: string;         // e.g., "fiberglass", "fire rated"
+}
+
+/** Skylight schedule entry extracted from OCR */
+export interface ScheduleSkylight {
+  mark: string;           // e.g., "SK1", "SKY-1"
+  size: string;           // e.g., "2'-0\" x 4'-0\""
+  quantity: number;
+  type: string;           // e.g., "fixed", "venting"
+  notes?: string;         // e.g., "tempered", "Low-E"
+}
+
+/** Garage door schedule entry extracted from OCR */
+export interface ScheduleGarage {
+  mark: string;           // e.g., "G1", "111B"
+  size: string;           // e.g., "16'-0\" x 7'-0\""
+  quantity: number;
+  type: string;           // e.g., "sectional", "roll-up"
+  notes?: string;         // e.g., "insulated", "with windows"
+}
+
+/** Material callout extracted from OCR */
+export interface MaterialCallout {
+  id: string;
+  rawText: string;        // Original text as found
+  normalizedText?: string; // Cleaned/standardized version
+  trade: string;          // e.g., "siding", "trim", "roofing"
+  materialType?: string;  // e.g., "lap_siding", "fascia"
+  manufacturer?: string;  // e.g., "James Hardie"
+  productMatch?: string;  // Matched product_catalog.id if found
+  confidence: number;     // 0-1 confidence score
+  pageRef?: string;       // Page reference (e.g., "Page 3")
+  bbox?: {               // Bounding box in image coordinates
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+  };
+}
+
+/** Dimension value extracted from OCR */
+export interface ExtractedDimension {
+  id: string;
+  category: string;       // e.g., "wall_height", "exposure", "opening"
+  label: string;          // e.g., "First Floor Height", "Siding Exposure"
+  value: string;          // e.g., "9'-0\"", "7\""
+  numericValue?: number;  // Parsed numeric value in inches
+  unit?: string;          // e.g., "ft", "in"
+  source: string;         // e.g., "ocr", "estimated"
+  confidence: number;
+  pageRef?: string;
+}
+
+/** Note/specification extracted from OCR */
+export interface ExtractedNote {
+  id: string;
+  category: string;       // e.g., "general", "installation", "material"
+  text: string;
+  pageRef?: string;
+}
+
+/** Schedule OCR extraction result */
+export interface ScheduleOCRData {
+  windows: ScheduleWindow[];
+  doors: ScheduleDoor[];
+  skylights?: ScheduleSkylight[];
+  garages?: ScheduleGarage[];
+  totals: {
+    windows: number;
+    doors: number;
+    skylights?: number;
+    garages?: number;
+  };
+  confidence: number;
+  extraction_notes?: string;
+  is_schedule_page?: boolean;  // false if page is not a schedule (e.g., energy code)
+  extracted_at: string;
+  model_used?: string;
+  tokens_used?: number;
+}
+
+/** Complete OCR data for a page */
+export interface PageOCRData {
+  schedule?: ScheduleOCRData;
+  materialCallouts?: MaterialCallout[];
+  dimensions?: ExtractedDimension[];
+  notes?: ExtractedNote[];
+  extraction_status: 'pending' | 'processing' | 'complete' | 'failed';
+  extraction_error?: string;
+  last_extracted_at?: string;
+}
+
+/** OCR status for tracking extraction state */
+export type OCRStatus = 'pending' | 'processing' | 'complete' | 'failed';
+
+// =============================================================================
+// Enhanced Two-Pass Material Extraction Types (V2)
+// =============================================================================
+
+/** Text annotation from survey pass */
+export interface TextAnnotation {
+  id: number;
+  exactText: string;
+  location: string;
+  hasLeaderLine: boolean;
+  pointsTo: string;
+  textType: 'material_spec' | 'dimension' | 'note' | 'label' | 'title' | 'other';
+}
+
+/** Survey pass result from V2 extraction */
+export interface SurveyResult {
+  annotations: TextAnnotation[];
+  totalFound: number;
+  materialSpecs: number;
+  dimensions: number;
+  other: number;
+  imageQuality: 'good' | 'fair' | 'poor';
+  notes: string;
+}
+
+/** Parsed material dimensions */
+export interface MaterialDimensions {
+  exposure_inches: number | null;
+  thickness_inches: number | null;
+  width_inches: number | null;
+  length_feet: number | null;
+}
+
+/** Enhanced material callout with full classification details */
+export interface EnhancedMaterialCallout {
+  id: string;
+  rawText: string;
+  normalizedText: string;
+  trade: string;
+  materialType: string;
+  manufacturer: string | null;
+  productLine: string | null;
+  profile: 'smooth' | 'cedar_mill' | 'stucco' | 'beaded' | 'select_cedarmill' | string | null;
+  finish: 'primed' | 'colorplus' | 'prefinished' | 'painted' | 'stained' | string | null;
+  color: string | null;
+  dimensions: MaterialDimensions;
+  orientation: 'horizontal' | 'vertical' | null;
+  installationNotes: string | null;
+  confidence: number;
+  confidenceNotes: string;
+  alternatives: string[];
+  // Metadata
+  pageId: string;
+  pageNumber: number;
+  surveyData: TextAnnotation;
+  // Product matching (populated later)
+  productMatch?: string;
+}
+
+/** V2 extraction result stored in database */
+export interface MaterialExtractionV2Result {
+  version: 'v2';
+  surveyResult: SurveyResult;
+  classifiedMaterials: EnhancedMaterialCallout[];
+  finalCallouts: EnhancedMaterialCallout[];
+  extractedAt: string;
+  modelUsed: string;
+  totalTokensUsed: number;
+  processingTimeMs: number;
+  stats: {
+    totalAnnotationsFound: number;
+    materialSpecsFound: number;
+    classificationCalls: number;
+    finalCalloutsAfterDedup: number;
+  };
+}
+
+/** Classification request for a single annotation */
+export interface ClassificationRequest {
+  annotation: TextAnnotation;
+  imageUrl: string;
+  pageId: string;
+  pageNumber: number;
+}
+
+/** Trade types for material classification */
+export type MaterialTrade =
+  | 'siding'
+  | 'trim'
+  | 'roofing'
+  | 'fascia'
+  | 'soffit'
+  | 'gutter'
+  | 'insulation'
+  | 'sheathing'
+  | 'weather_barrier'
+  | 'flashing'
+  | 'miscellaneous';
+
+/** Material types by trade */
+export const MATERIAL_TYPES_BY_TRADE: Record<MaterialTrade, string[]> = {
+  siding: [
+    'lap_siding', 'panel_siding', 'board_and_batten', 'shake', 'shingle',
+    'stucco', 'stone_veneer', 'brick_veneer', 'vertical_siding'
+  ],
+  trim: [
+    'flat_trim', 'crown_molding', 'base_trim', 'window_trim', 'door_trim',
+    'corner_board', 'band_board', 'frieze_board', 'rake_trim'
+  ],
+  roofing: [
+    'asphalt_shingle', 'metal_panel', 'standing_seam', 'slate', 'tile',
+    'flat_membrane', 'rolled_roofing'
+  ],
+  fascia: ['fascia_board', 'composite_fascia', 'aluminum_fascia'],
+  soffit: ['vented_soffit', 'solid_soffit', 'aluminum_soffit', 'vinyl_soffit'],
+  gutter: ['k_style', 'half_round', 'box_gutter', 'seamless'],
+  insulation: ['batt_insulation', 'blown_insulation', 'rigid_foam', 'spray_foam'],
+  sheathing: ['osb', 'plywood', 'zip_system', 'densglass'],
+  weather_barrier: ['house_wrap', 'felt_paper', 'self_adhered', 'rain_screen'],
+  flashing: ['step_flashing', 'counter_flashing', 'drip_edge', 'valley_flashing'],
+  miscellaneous: ['other']
+};
+
+/** Known manufacturer keywords for recognition */
+export const MANUFACTURER_KEYWORDS: Record<string, string[]> = {
+  'James Hardie': ['hardie', 'hardieplank', 'hardipanel', 'hardietrim', 'artisan', 'colorplus'],
+  'LP Building Products': ['lp', 'smartside', 'smarttrim', 'smart side', 'smart trim'],
+  'CertainTeed': ['certainteed', 'landmark', 'presidential', 'northgate'],
+  'GAF': ['gaf', 'timberline', 'hdz', 'camelot', 'grand sequoia'],
+  'Owens Corning': ['owens corning', 'oc', 'duration', 'trudefinition', 'oakridge'],
+  'DuPont': ['tyvek', 'homewrap', 'commercialwrap', 'dupont'],
+  'Huber': ['zip', 'zip system', 'advantech', 'huber'],
+  'Boral': ['boral', 'truexterior'],
+  'Royal': ['royal', 'celect'],
+  'Azek': ['azek', 'timbertech'],
+  'Ply Gem': ['plygem', 'ply gem', 'mastic'],
+  'Georgia-Pacific': ['densglass', 'gp', 'georgia pacific'],
+};
+
+// =============================================================================
+// Wall Assembly Extraction Types (Phase 2 - Section Page Analysis)
+// =============================================================================
+
+/** Individual layer within a wall assembly (exterior to interior order) */
+export interface WallLayer {
+  /** Position in assembly (1 = outermost, higher = further interior) */
+  position: number;
+  /** Descriptive name for the layer (e.g., "Exterior Cladding", "Air Gap") */
+  layerName: string;
+  /** Material specification (e.g., "Fiber Cement Siding", "OSB Sheathing") */
+  material: string;
+  /** Manufacturer if identified (e.g., "James Hardie") */
+  manufacturer: string | null;
+  /** Product line if identified (e.g., "HardiePlank") */
+  productLine: string | null;
+  /** Thickness of layer (e.g., "5/16\"", "1/2\"", "3-1/2\"") */
+  thickness: string | null;
+  /** R-value for insulation layers */
+  rValue: number | null;
+  /** Additional notes about the layer */
+  notes: string | null;
+  /** Confidence score for this layer extraction (0-1) */
+  confidence: number;
+}
+
+/** Complete wall assembly extracted from section drawing */
+export interface WallAssembly {
+  /** Unique identifier */
+  id: string;
+  /** Assembly name/type (e.g., "Typical Exterior Wall", "Garage Wall") */
+  assemblyName: string;
+  /** Ordered layers from exterior to interior */
+  layers: WallLayer[];
+  /** Total assembly thickness (e.g., "6-1/4\"") */
+  totalThickness: string | null;
+  /** Framing type (e.g., "2x4", "2x6", "Steel Stud") */
+  framingType: string | null;
+  /** Framing spacing (e.g., "16\" O.C.", "24\" O.C.") */
+  framingSpacing: string | null;
+  /** Primary insulation type (e.g., "Fiberglass Batt", "Spray Foam") */
+  insulationType: string | null;
+  /** Total R-value of insulation */
+  insulationRValue: number | null;
+  /** Vapor barrier specification */
+  vaporBarrier: string | null;
+  /** Fire rating if specified (e.g., "1-hour", "2-hour") */
+  fireRating: string | null;
+  /** Acoustic rating if specified (e.g., "STC 45") */
+  acousticRating: string | null;
+  /** General notes about the assembly */
+  notes: string | null;
+  /** Overall confidence for the extraction */
+  confidence: number;
+  /** Notes explaining confidence score */
+  confidenceNotes: string;
+  /** Page reference (e.g., "Page 12") */
+  pageRef: string;
+}
+
+/** Result from wall assembly extraction API */
+export interface WallAssemblyExtractionResult {
+  /** Whether wall assembly sections were found */
+  hasWallSections: boolean;
+  /** Extracted wall assemblies */
+  assemblies: WallAssembly[];
+  /** Raw section detail data */
+  sectionDetails: {
+    sectionTitle: string;
+    sectionNumber: string | null;
+    scale: string | null;
+  }[];
+  /** Extraction metadata */
+  extractedAt: string;
+  /** Model used for extraction */
+  modelUsed: string;
+  /** Total tokens consumed */
+  tokensUsed: number;
+  /** Processing time in milliseconds */
+  processingTimeMs: number;
+  /** Notes about the extraction */
+  extractionNotes: string | null;
+}
+
+// =============================================================================
+// Roof Plan Extraction Types (Phase 3 - Roof Plan Analysis)
+// =============================================================================
+
+/** Individual roof slope/section */
+export interface RoofSlope {
+  /** Unique identifier */
+  id: string;
+  /** Name of the slope (e.g., "Main Roof", "Garage Roof", "Porch") */
+  name: string;
+  /** Pitch notation (e.g., "6:12", "8:12", "4:12") */
+  pitch: string;
+  /** Pitch in degrees (e.g., 26.57 for 6:12) */
+  pitchDegrees: number | null;
+  /** Area in square feet */
+  areaSF: number | null;
+  /** Additional notes */
+  notes: string | null;
+  /** Confidence score (0-1) */
+  confidence: number;
+}
+
+/** Linear roof element (ridge, hip, valley, etc.) */
+export interface RoofLinearElement {
+  /** Type of linear element */
+  type: 'ridge' | 'hip' | 'valley' | 'eave' | 'rake' | 'gutter_line' | 'drip_edge';
+  /** Length in linear feet */
+  lengthLF: number;
+  /** Location description (e.g., "main ridge", "north eave") */
+  location: string | null;
+  /** Additional notes */
+  notes: string | null;
+  /** Confidence score (0-1) */
+  confidence: number;
+}
+
+/** Roof feature (skylight, chimney, vent, etc.) */
+export interface RoofFeature {
+  /** Type of feature */
+  type: 'skylight' | 'chimney' | 'vent' | 'dormer' | 'cricket' | 'solar_panel' | 'other';
+  /** Quantity of this feature */
+  quantity: number;
+  /** Size description (e.g., "2'-6\" x 4'-0\"") */
+  size: string | null;
+  /** Location on roof */
+  location: string | null;
+  /** Additional notes */
+  notes: string | null;
+}
+
+/** Roofing material callout from roof plan */
+export interface RoofMaterialCallout {
+  /** Raw text as found on drawing */
+  rawText: string;
+  /** Material type classification */
+  materialType: 'asphalt_shingle' | 'metal' | 'tile' | 'flat' | 'slate' | 'wood_shake' | string | null;
+  /** Manufacturer if identified */
+  manufacturer: string | null;
+  /** Product line if identified */
+  productLine: string | null;
+  /** Color if specified */
+  color: string | null;
+  /** Confidence score (0-1) */
+  confidence: number;
+}
+
+/** Summary of linear elements for quick reference */
+export interface RoofLinearSummary {
+  /** Total ridge length in LF */
+  ridgeLF: number;
+  /** Total hip length in LF */
+  hipLF: number;
+  /** Total valley length in LF */
+  valleyLF: number;
+  /** Total eave length in LF */
+  eaveLF: number;
+  /** Total rake length in LF */
+  rakeLF: number;
+  /** Total perimeter (eave + rake) in LF */
+  totalPerimeterLF: number;
+}
+
+/** Complete roof plan data extracted from a page */
+export interface RoofPlanData {
+  /** Unique identifier */
+  id: string;
+  /** Page reference (e.g., "Page 9") */
+  pageRef: string;
+  /** Primary/most common pitch */
+  primaryPitch: string | null;
+  /** Total roof area in SF */
+  totalRoofAreaSF: number | null;
+  /** Individual roof slopes/sections */
+  slopes: RoofSlope[];
+  /** Linear elements (ridge, hip, valley, etc.) */
+  linearElements: RoofLinearElement[];
+  /** Summary totals for linear elements */
+  linearSummary: RoofLinearSummary;
+  /** Roof features (skylights, chimneys, etc.) */
+  features: RoofFeature[];
+  /** Material callouts found on roof plan */
+  materialCallouts: RoofMaterialCallout[];
+  /** Overall confidence score (0-1) */
+  confidence: number;
+  /** Notes explaining confidence */
+  confidenceNotes: string;
+  /** General extraction notes */
+  extractionNotes: string;
+  /** Extraction timestamp */
+  extractedAt?: string;
+  /** Model version */
+  version?: string;
+  /** Model used */
+  model_used?: string;
+  /** Tokens consumed */
+  tokens_used?: number;
+}
+
+/** Result from roof plan extraction API */
+export interface RoofPlanExtractionResult {
+  /** Extracted roof plan data (usually one per job) */
+  roofPlans: RoofPlanData[];
+  /** Aggregated totals across all roof plans */
+  aggregated: {
+    totalRoofAreaSF: number;
+    primaryPitch: string | null;
+    ridgeLF: number;
+    hipLF: number;
+    valleyLF: number;
+    eaveLF: number;
+    rakeLF: number;
+    skylightCount: number;
+    chimneyCount: number;
+  };
+  /** Extraction timestamp */
+  extractedAt: string;
+  /** API version */
+  version: string;
+}
+
+// =============================================================================
+// Floor Plan Extraction Types (Phase 4 - Building Geometry Analysis)
+// =============================================================================
+
+/** Exterior corner type classification */
+export type ExteriorCornerType =
+  | 'outside_90'
+  | 'outside_45'
+  | 'inside_90'
+  | 'inside_45'
+  | 'outside_other'
+  | 'inside_other';
+
+/** Individual exterior corner detected on floor plan */
+export interface ExteriorCorner {
+  /** Type of corner */
+  type: ExteriorCornerType;
+  /** Location description (e.g., "front-left", "rear garage bump-out") */
+  location: string;
+  /** Actual angle if not 90 or 45 degrees */
+  angle?: number;
+  /** Confidence score (0-1) */
+  confidence: number;
+}
+
+/** Individual exterior wall segment */
+export interface ExteriorWallSegment {
+  /** Unique identifier for the segment */
+  id: string;
+  /** Compass orientation */
+  orientation: 'north' | 'south' | 'east' | 'west' | 'northeast' | 'northwest' | 'southeast' | 'southwest';
+  /** Length in linear feet */
+  lengthLF: number;
+  /** Wall height if noted on plan */
+  wallHeight?: number;
+  /** Additional notes about the segment */
+  notes: string | null;
+  /** Confidence score (0-1) */
+  confidence: number;
+}
+
+/** Summary of corner counts by type */
+export interface CornerSummary {
+  /** Count of 90-degree outside corners */
+  outsideCorners90: number;
+  /** Count of 90-degree inside corners */
+  insideCorners90: number;
+  /** Count of 45-degree outside corners */
+  outsideCorners45: number;
+  /** Count of 45-degree inside corners */
+  insideCorners45: number;
+  /** Total outside corners (all angles) */
+  totalOutsideCorners: number;
+  /** Total inside corners (all angles) */
+  totalInsideCorners: number;
+}
+
+/** Complete floor plan data extracted from a page */
+export interface FloorPlanData {
+  /** Unique identifier */
+  id: string;
+  /** Page reference (e.g., "Page 6") */
+  pageRef: string;
+  /** Floor level identifier */
+  floorLevel: 'crawlspace' | 'basement' | 'main' | 'second' | 'third' | 'fourth' | 'garage' | 'unknown';
+
+  // Area
+  /** Floor area in square feet */
+  floorAreaSF: number | null;
+
+  // Perimeter
+  /** Total exterior perimeter in linear feet */
+  exteriorPerimeterLF: number | null;
+  /** Individual wall segments */
+  wallSegments: ExteriorWallSegment[];
+
+  // Corners
+  /** Detailed corner list */
+  corners: ExteriorCorner[];
+  /** Summary of corner counts */
+  cornerSummary: CornerSummary;
+
+  // Openings (for cross-reference with schedules)
+  /** Count of windows on this floor */
+  windowCount: number;
+  /** Count of exterior doors (not interior) */
+  doorCount: number;
+  /** Count of garage doors */
+  garageDoorCount: number;
+
+  // Building dimensions
+  /** Overall width (typically East-West) in feet */
+  overallWidth: number | null;
+  /** Overall depth (typically North-South) in feet */
+  overallDepth: number | null;
+
+  // Metadata
+  /** Scale notation (e.g., "1/4\" = 1'-0\"") */
+  scale: string | null;
+  /** Overall confidence score (0-1) */
+  confidence: number;
+  /** Notes explaining confidence */
+  confidenceNotes: string;
+  /** General extraction notes */
+  extractionNotes: string;
+  /** Extraction timestamp */
+  extractedAt?: string;
+  /** API version */
+  version?: string;
+  /** Model used */
+  model_used?: string;
+  /** Tokens consumed */
+  tokens_used?: number;
+}
+
+/** Aggregated totals across all floor plans */
+export interface FloorPlanAggregates {
+  /** Total floor area across all floors */
+  totalFloorAreaSF: number;
+  /** Total exterior perimeter (note: may not be additive for multi-story) */
+  totalExteriorPerimeterLF: number;
+  /** Total outside corners */
+  totalOutsideCorners: number;
+  /** Total inside corners */
+  totalInsideCorners: number;
+  /** Total window count across all floors */
+  totalWindowCount: number;
+  /** Total exterior door count */
+  totalExteriorDoorCount: number;
+  /** Total garage door count */
+  totalGarageDoorCount: number;
+}
+
+/** Result from floor plan extraction API */
+export interface FloorPlanExtractionResult {
+  /** Extracted floor plan data (one per floor) */
+  floors: FloorPlanData[];
+  /** Aggregated totals across all floors */
+  aggregated: FloorPlanAggregates;
+  /** Extraction timestamp */
+  extractedAt: string;
+  /** API version */
+  version: string;
+}
+
+// =============================================================================
+// Notes & Specifications Extraction Types
+// =============================================================================
+
+/** Individual takeoff note/specification */
+export interface TakeoffNote {
+  /** Unique identifier */
+  id: string;
+  /** Category of the specification */
+  category: TakeoffNoteCategory;
+  /** Brief title */
+  item: string;
+  /** Full specification details */
+  details: string;
+  /** Page where this was found */
+  source_page: string;
+  /** Importance level */
+  importance: 'critical' | 'standard' | 'optional';
+}
+
+/** Categories for takeoff notes */
+export type TakeoffNoteCategory =
+  | 'siding_specs'
+  | 'trim_details'
+  | 'flashing_waterproofing'
+  | 'weather_barrier'
+  | 'fasteners_adhesives'
+  | 'code_requirements'
+  | 'installation_notes'
+  | 'special_conditions';
+
+/** Complete notes/specs extraction result */
+export interface NotesSpecsData {
+  /** Summary of extracted specifications */
+  summary: string;
+  /** Array of extracted notes */
+  notes: TakeoffNote[];
+  /** Category counts */
+  categories: Record<string, number>;
+  /** Number of pages analyzed */
+  pages_analyzed: number;
+  /** Extraction timestamp */
+  extracted_at: string;
+  /** API version */
+  version: string;
+  /** Model used */
+  model_used: string;
+  /** Tokens consumed */
+  tokens_used: number;
+  /** Overall confidence (0-1) */
+  confidence: number;
+  /** Notes about confidence */
+  confidenceNotes: string;
+}
+
+// =============================================================================
+// RFI (Request for Information) Types
+// =============================================================================
+
+/** Status of an individual RFI item */
+export type RFIStatus =
+  | 'unresolved'    // Not yet addressed
+  | 'will_clarify'  // User will get clarification from client/architect
+  | 'resolved'      // Resolved with user-provided answer
+  | 'not_applicable'; // Not relevant to this project
+
+/** Individual RFI item derived from missing/unclear specifications */
+export interface RFIItem {
+  /** Unique identifier */
+  id: string;
+  /** Related note ID from notes extraction (if applicable) */
+  source_note_id?: string;
+  /** Category of the specification */
+  category: TakeoffNoteCategory;
+  /** Brief description of what's missing or unclear */
+  question: string;
+  /** More detailed context */
+  details?: string;
+  /** Why this is important for the takeoff */
+  impact: string;
+  /** Suggested default or common practice (if applicable) */
+  suggested_default?: string;
+  /** Current status */
+  status: RFIStatus;
+  /** User's resolution/answer (if resolved) */
+  resolution?: string;
+  /** Who resolved it */
+  resolved_by?: string;
+  /** When it was resolved */
+  resolved_at?: string;
+  /** Priority level */
+  priority: 'high' | 'medium' | 'low';
+  /** Page reference where the gap was identified */
+  source_page?: string;
+}
+
+/** RFI list data structure */
+export interface RFIListData {
+  /** Unique identifier */
+  id: string;
+  /** Parent job ID */
+  job_id: string;
+  /** List of RFI items */
+  items: RFIItem[];
+  /** Summary statistics */
+  summary: {
+    total: number;
+    unresolved: number;
+    will_clarify: number;
+    resolved: number;
+    not_applicable: number;
+    high_priority: number;
+    medium_priority: number;
+    low_priority: number;
+  };
+  /** When the RFI list was generated */
+  generated_at: string;
+  /** When last updated */
+  updated_at: string;
+  /** Version */
+  version: string;
+}
+
+/** RFI generation result from API */
+export interface RFIGenerationResult {
+  success: boolean;
+  rfi_list?: RFIListData;
+  error?: string;
+}
+
+/** Approval confirmation data (includes RFI summary) */
+export interface ApprovalConfirmation {
+  /** Can proceed with approval */
+  can_proceed: boolean;
+  /** RFI summary for display */
+  rfi_summary: {
+    total_items: number;
+    unresolved_critical: number;
+    unresolved_other: number;
+    will_clarify: number;
+  };
+  /** Warning messages to display */
+  warnings: string[];
+  /** Blocking issues (if can_proceed is false) */
+  blockers?: string[];
 }

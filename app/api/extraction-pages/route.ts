@@ -14,6 +14,9 @@ interface ExtractionPageRecord {
   page_type: string | null;
   elevation_name: string | null;
   original_image_url: string | null;
+  ocr_data?: Record<string, unknown> | null;
+  ocr_status?: string | null;
+  ocr_processed_at?: string | null;
 }
 
 interface DetectionRecord {
@@ -43,43 +46,107 @@ export async function GET(request: Request) {
   try {
     const { searchParams } = new URL(request.url);
     const projectId = searchParams.get('project_id');
+    const jobIdParam = searchParams.get('job_id');
+    const pageType = searchParams.get('page_type') || 'elevation'; // Default to elevation for backwards compatibility
     console.log('[API] Project ID:', projectId);
+    console.log('[API] Job ID:', jobIdParam);
+    console.log('[API] Page Type:', pageType);
 
-    if (!projectId) {
+    if (!projectId && !jobIdParam) {
       return NextResponse.json(
-        { success: false, error: 'project_id is required' },
+        { success: false, error: 'project_id or job_id is required' },
         { status: 400 }
       );
     }
 
     const supabase = await createClient();
 
-    // First, find the extraction job for this project
-    const { data: jobData, error: jobError } = await supabase
-      .from('extraction_jobs')
-      .select('id')
-      .eq('project_id', projectId)
-      .order('created_at', { ascending: false })
-      .limit(1)
-      .single();
+    let jobId: string;
 
-    if (jobError || !jobData) {
-      console.error('[API] Extraction job fetch error:', jobError);
-      return NextResponse.json(
-        { success: false, error: 'No extraction job found for this project' },
-        { status: 404 }
-      );
+    // Get job ID either from parameter or by looking up from project
+    if (jobIdParam) {
+      jobId = jobIdParam;
+    } else {
+      // Find the extraction job for this project
+      const { data: jobData, error: jobError } = await supabase
+        .from('extraction_jobs')
+        .select('id')
+        .eq('project_id', projectId!)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .single();
+
+      if (jobError || !jobData) {
+        console.error('[API] Extraction job fetch error:', jobError);
+        return NextResponse.json(
+          { success: false, error: 'No extraction job found for this project' },
+          { status: 404 }
+        );
+      }
+
+      jobId = (jobData as { id: string }).id;
     }
 
-    const jobId = (jobData as { id: string }).id;
+    // Fetch pages for this job filtered by page_type
+    console.log('[API] Querying extraction_pages with job_id:', jobId, 'page_type:', pageType);
 
-    // Fetch all elevation pages for this job
-    const { data: pagesData, error: pagesError } = await supabase
+    // First try query with OCR columns (they may not exist in older databases)
+    let pagesData: ExtractionPageRecord[] | null = null;
+    let pagesError: { message: string; code?: string } | null = null;
+
+    // Try with OCR columns first (ocr_data, ocr_status, ocr_processed_at)
+    const { data: pagesWithOCR, error: ocrError } = await supabase
       .from('extraction_pages')
-      .select('id, job_id, page_number, image_url, thumbnail_url, page_type, elevation_name, original_image_url')
+      .select('id, job_id, page_number, image_url, thumbnail_url, page_type, elevation_name, original_image_url, ocr_data, ocr_status, ocr_processed_at')
       .eq('job_id', jobId)
-      .eq('page_type', 'elevation')
+      .eq('page_type', pageType)
       .order('page_number', { ascending: true });
+
+    if (ocrError) {
+      console.log('[API] Query with OCR columns failed, trying without OCR columns:', ocrError.message);
+      // Fall back to query without OCR columns
+      const { data: pagesWithoutOCR, error: basicError } = await supabase
+        .from('extraction_pages')
+        .select('id, job_id, page_number, image_url, thumbnail_url, page_type, elevation_name, original_image_url')
+        .eq('job_id', jobId)
+        .eq('page_type', pageType)
+        .order('page_number', { ascending: true });
+
+      if (basicError) {
+        pagesError = basicError;
+      } else {
+        // Add null OCR fields to match the interface
+        pagesData = (pagesWithoutOCR || []).map((p: Record<string, unknown>) => ({
+          id: p.id as string,
+          job_id: p.job_id as string,
+          page_number: p.page_number as number,
+          image_url: p.image_url as string,
+          thumbnail_url: p.thumbnail_url as string | null,
+          page_type: p.page_type as string | null,
+          elevation_name: p.elevation_name as string | null,
+          original_image_url: p.original_image_url as string | null,
+          ocr_data: null,
+          ocr_status: null,
+          ocr_processed_at: null,
+        })) as ExtractionPageRecord[];
+      }
+    } else {
+      pagesData = pagesWithOCR as ExtractionPageRecord[];
+    }
+
+    console.log('[API] Pages query result - count:', pagesData?.length || 0);
+    console.log('[API] Pages query result - error:', pagesError ? JSON.stringify(pagesError) : 'none');
+
+    if (pagesData && pagesData.length > 0) {
+      console.log('[API] First page:', JSON.stringify({
+        id: pagesData[0].id,
+        page_number: pagesData[0].page_number,
+        page_type: pagesData[0].page_type,
+        image_url: pagesData[0].image_url?.substring(0, 50) + '...',
+      }));
+    } else {
+      console.log('[API] ⚠️ NO PAGES FOUND for job_id:', jobId, 'page_type:', pageType);
+    }
 
     if (pagesError) {
       console.error('[API] Extraction pages fetch error:', pagesError);
@@ -128,9 +195,13 @@ export async function GET(request: Request) {
         pages: pages.map(page => ({
           id: page.id,
           page_number: page.page_number,
+          page_type: page.page_type,
           elevation_name: page.elevation_name,
           image_url: page.original_image_url || page.image_url,
           thumbnail_url: page.thumbnail_url,
+          ocr_data: page.ocr_data,
+          ocr_status: page.ocr_status,
+          ocr_processed_at: page.ocr_processed_at,
           detections: (detectionsByPage.get(page.id) || []).map(d => ({
             id: d.id,
             class: d.class,
@@ -181,7 +252,7 @@ export async function GET(request: Request) {
         console.log('[API] Returning DRAFT data - NOT querying validated or AI');
 
         // Normalize draft data to match DetectionRecord (add null for missing columns)
-        const normalizedDraftData = draftData.map(det => ({
+        const normalizedDraftData = draftData.map((det: Record<string, unknown>) => ({
           ...det,
           area_sf: null,
           perimeter_lf: null,

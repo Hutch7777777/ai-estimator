@@ -104,6 +104,40 @@ const CLASS_SHORTCUTS: AllDetectionClasses[] = [
   'building', // Internal class - still accessible via shortcut for power users
 ];
 
+// Display metadata for detection count classes
+const CLASS_COUNT_INFO: Record<string, {
+  display_name: string;
+  measurement_type: 'count' | 'area' | 'linear';
+  unit: string;
+}> = {
+  // === LINEAR CLASSES (LF) ===
+  belly_band: { display_name: 'Belly Band', measurement_type: 'linear', unit: 'LF' },
+  fascia: { display_name: 'Fascia', measurement_type: 'linear', unit: 'LF' },
+  gutter: { display_name: 'Gutter', measurement_type: 'linear', unit: 'LF' },
+  eave: { display_name: 'Eave', measurement_type: 'linear', unit: 'LF' },
+  rake: { display_name: 'Rake', measurement_type: 'linear', unit: 'LF' },
+  ridge: { display_name: 'Ridge', measurement_type: 'linear', unit: 'LF' },
+  valley: { display_name: 'Valley', measurement_type: 'linear', unit: 'LF' },
+  trim: { display_name: 'Trim', measurement_type: 'linear', unit: 'LF' },
+
+  // === AREA CLASSES (SF) ===
+  soffit: { display_name: 'Soffit', measurement_type: 'area', unit: 'SF' },
+
+  // === COUNT CLASSES (EA) ===
+  corbel: { display_name: 'Corbel', measurement_type: 'count', unit: 'EA' },
+  bracket: { display_name: 'Bracket', measurement_type: 'count', unit: 'EA' },
+  shutter: { display_name: 'Shutter', measurement_type: 'count', unit: 'EA' },
+  post: { display_name: 'Post', measurement_type: 'count', unit: 'EA' },
+  column: { display_name: 'Column', measurement_type: 'count', unit: 'EA' },
+  vent: { display_name: 'Vent', measurement_type: 'count', unit: 'EA' },
+  gable_vent: { display_name: 'Gable Vent', measurement_type: 'count', unit: 'EA' },
+  downspout: { display_name: 'Downspout', measurement_type: 'count', unit: 'EA' },
+  light_fixture: { display_name: 'Light Fixture', measurement_type: 'count', unit: 'EA' },
+  outlet: { display_name: 'Outlet', measurement_type: 'count', unit: 'EA' },
+  hose_bib: { display_name: 'Hose Bib', measurement_type: 'count', unit: 'EA' },
+  flashing: { display_name: 'Flashing', measurement_type: 'count', unit: 'EA' },
+};
+
 // =============================================================================
 // Helper Functions
 // =============================================================================
@@ -1780,6 +1814,9 @@ export default function DetectionEditor({
       // FASCIA (line)
       fasciaCount: 0,
       fasciaLf: 0,
+      // BELLY BAND (line)
+      bellyBandCount: 0,
+      bellyBandLf: 0,
       // GUTTERS
       gutterCount: 0,
       gutterLf: 0,
@@ -1884,6 +1921,10 @@ export default function DetectionEditor({
         const lineMeasurement = calculateLineMeasurements(points, scaleRatio);
         totals.fasciaCount++;
         totals.fasciaLf += lineMeasurement.length_lf;
+      } else if (cls === 'belly_band') {
+        const lineMeasurement = calculateLineMeasurements(points, scaleRatio);
+        totals.bellyBandCount++;
+        totals.bellyBandLf += lineMeasurement.length_lf;
       } else if (cls === 'gutter') {
         const lineMeasurement = calculateLineMeasurements(points, scaleRatio);
         totals.gutterCount++;
@@ -2096,6 +2137,8 @@ export default function DetectionEditor({
       soffitAreaSf: 0,
       fasciaCount: 0,
       fasciaLf: 0,
+      bellyBandCount: 0,
+      bellyBandLf: 0,
       gutterCount: 0,
       gutterLf: 0,
       downspoutCount: 0,
@@ -2190,6 +2233,10 @@ export default function DetectionEditor({
           const lineMeasurement = calculateLineMeasurements(points, scaleRatio);
           aggregateTotals.fasciaCount++;
           aggregateTotals.fasciaLf += lineMeasurement.length_lf;
+        } else if (cls === 'belly_band') {
+          const lineMeasurement = calculateLineMeasurements(points, scaleRatio);
+          aggregateTotals.bellyBandCount++;
+          aggregateTotals.bellyBandLf += lineMeasurement.length_lf;
         } else if (cls === 'gutter') {
           const lineMeasurement = calculateLineMeasurements(points, scaleRatio);
           aggregateTotals.gutterCount++;
@@ -2452,6 +2499,98 @@ export default function DetectionEditor({
         selectedTrades,
       });
 
+      // Build enriched detection_counts from countsByClass
+      const detectionCounts: Record<string, {
+        count: number;
+        total_lf?: number;
+        total_sf?: number;
+        display_name: string;
+        measurement_type: 'count' | 'area' | 'linear';
+        unit: string;
+      }> = {};
+
+      // Add point-type detections from countsByClass
+      if (totals.countsByClass) {
+        Object.entries(totals.countsByClass).forEach(([className, count]) => {
+          if (count > 0) {
+            const info = CLASS_COUNT_INFO[className] || {
+              display_name: className.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase()),
+              measurement_type: 'count' as const,
+              unit: 'EA'
+            };
+
+            detectionCounts[className] = {
+              count: count as number,
+              display_name: info.display_name,
+              measurement_type: info.measurement_type,
+              unit: info.unit
+            };
+          }
+        });
+      }
+
+      // Add linear measurements (not in countsByClass, have dedicated fields)
+      // These are line-type detections that have both count and total_lf
+      const linearDetections = [
+        { key: 'belly_band', count: totals.bellyBandCount, lf: totals.bellyBandLf },
+        { key: 'fascia', count: totals.fasciaCount, lf: totals.fasciaLf },
+        { key: 'gutter', count: totals.gutterCount, lf: totals.gutterLf },
+        { key: 'eave', count: totals.eavesCount, lf: totals.eavesLf },
+        { key: 'rake', count: totals.rakesCount, lf: totals.rakesLf },
+        { key: 'ridge', count: totals.ridgeCount, lf: totals.ridgeLf },
+        { key: 'valley', count: totals.valleyCount, lf: totals.valleyLf },
+      ];
+
+      linearDetections.forEach(({ key, count, lf }) => {
+        if (count > 0) {
+          const info = CLASS_COUNT_INFO[key] || {
+            display_name: key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase()),
+            measurement_type: 'linear' as const,
+            unit: 'LF'
+          };
+          detectionCounts[key] = {
+            count,
+            total_lf: lf,
+            display_name: info.display_name,
+            measurement_type: info.measurement_type,
+            unit: info.unit
+          };
+        }
+      });
+
+      // Add soffit as an area measurement
+      if (totals.soffitCount > 0) {
+        const soffitInfo = CLASS_COUNT_INFO['soffit'] || {
+          display_name: 'Soffit',
+          measurement_type: 'area' as const,
+          unit: 'SF'
+        };
+        detectionCounts['soffit'] = {
+          count: totals.soffitCount,
+          total_sf: totals.soffitAreaSf,
+          display_name: soffitInfo.display_name,
+          measurement_type: soffitInfo.measurement_type,
+          unit: soffitInfo.unit
+        };
+      }
+
+      // Add downspout as a count measurement
+      if (totals.downspoutCount > 0) {
+        const downspoutInfo = CLASS_COUNT_INFO['downspout'] || {
+          display_name: 'Downspout',
+          measurement_type: 'count' as const,
+          unit: 'EA'
+        };
+        detectionCounts['downspout'] = {
+          count: totals.downspoutCount,
+          display_name: downspoutInfo.display_name,
+          measurement_type: downspoutInfo.measurement_type,
+          unit: downspoutInfo.unit
+        };
+      }
+
+      console.log('[Approve] Detection counts:', detectionCounts);
+
       return {
         job_id: jobId,
         project_id: projectId,
@@ -2531,6 +2670,12 @@ export default function DetectionEditor({
 
         // NEW: Include organization_id for multi-tenant pricing overrides
         organization_id: organization?.id,
+
+        // Detection counts by class (corbels, brackets, belly_bands, etc.)
+        detection_counts: Object.keys(detectionCounts).length > 0 ? detectionCounts : undefined,
+
+        // Total point markers count
+        total_point_count: totals.totalPointCount > 0 ? totals.totalPointCount : undefined,
       };
     },
     [jobId, projectId, job?.project_name, getAllDetections, organization?.id]

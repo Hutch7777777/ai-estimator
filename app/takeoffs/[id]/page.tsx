@@ -18,6 +18,7 @@ import {
   OverheadTable,
   PlanIntelligence,
 } from './components';
+import RFIEmailModal from './components/RFIEmailModal';
 
 // =============================================================================
 // Types
@@ -131,6 +132,7 @@ export default function TakeoffDetailsPage() {
   const [isDownloadingVendor, setIsDownloadingVendor] = useState(false);
   const [isDownloadingMarkup, setIsDownloadingMarkup] = useState(false);
   const [activeTab, setActiveTab] = useState<'summary' | 'plan-intelligence'>('summary');
+  const [showRFIModal, setShowRFIModal] = useState(false);
 
   // Fetch takeoff data
   const fetchTakeoff = async () => {
@@ -325,10 +327,20 @@ export default function TakeoffDetailsPage() {
           onDownloadExcel={handleDownloadExcel}
           onDownloadVendor={handleDownloadVendorTakeoff}
           onDownloadMarkup={handleDownloadMarkupPlans}
+          onGenerateRFI={takeoff.extraction_job_id ? () => setShowRFIModal(true) : undefined}
           isDownloading={isDownloading}
           isDownloadingVendor={isDownloadingVendor}
           isDownloadingMarkup={isDownloadingMarkup}
         />
+
+        {/* RFI Email Modal */}
+        {takeoff.extraction_job_id && (
+          <RFIEmailModal
+            isOpen={showRFIModal}
+            onClose={() => setShowRFIModal(false)}
+            jobId={takeoff.extraction_job_id}
+          />
+        )}
 
         {/* Tab Navigation */}
         <div className="flex border-b border-gray-200 dark:border-gray-700">

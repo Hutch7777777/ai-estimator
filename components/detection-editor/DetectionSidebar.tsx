@@ -723,6 +723,19 @@ const DetectionSidebar = memo(function DetectionSidebar({
                   </div>
                 )}
 
+                {/* Belly Band */}
+                {displayTotals.bellyBandLf > 0 && (
+                  <div className="bg-amber-50 dark:bg-amber-900/20 rounded-lg p-3 space-y-2">
+                    <div className="text-xs font-semibold text-amber-700 dark:text-amber-300 uppercase">
+                      Belly Band ({displayTotals.bellyBandCount})
+                    </div>
+                    <div className="grid grid-cols-2 gap-x-4 text-xs text-gray-600 dark:text-gray-400">
+                      <span>Total Length:</span>
+                      <span className="text-right font-mono">{displayTotals.bellyBandLf.toFixed(1)} LF</span>
+                    </div>
+                  </div>
+                )}
+
                 {/* Roofline */}
                 {(displayTotals.eavesLf > 0 || displayTotals.rakesLf > 0 || displayTotals.ridgeLf > 0 || displayTotals.valleyLf > 0) && (
                   <div className="bg-slate-50 dark:bg-slate-800/50 rounded-lg p-3 space-y-2">

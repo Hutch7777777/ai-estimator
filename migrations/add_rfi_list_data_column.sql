@@ -1,0 +1,62 @@
+-- Migration: Add rfi_list_data column to extraction_jobs table
+-- Stores RFI (Request for Information) items generated from notes analysis
+-- Created: 2024-01-23
+
+-- Add rfi_list_data JSONB column to store RFI items
+ALTER TABLE extraction_jobs
+ADD COLUMN IF NOT EXISTS rfi_list_data JSONB;
+
+-- Add comment describing the column purpose
+COMMENT ON COLUMN extraction_jobs.rfi_list_data IS 'RFI (Request for Information) items generated from notes analysis. Tracks missing specs, user resolutions, and approval status.';
+
+-- Example of expected data structure:
+-- {
+--   "id": "rfi-list-job-uuid",
+--   "job_id": "job-uuid",
+--   "items": [
+--     {
+--       "id": "rfi-1705000000000-abc123def",
+--       "category": "siding_specs",
+--       "question": "What siding manufacturer should be used?",
+--       "impact": "Affects material cost, labor rate, and warranty requirements",
+--       "suggested_default": "James Hardie",
+--       "status": "unresolved",
+--       "priority": "high",
+--       "source_page": "Page 3"
+--     },
+--     {
+--       "id": "rfi-1705000000001-xyz789ghi",
+--       "source_note_id": "note-5",
+--       "category": "flashing_waterproofing",
+--       "question": "Clarify: Window Flashing Method",
+--       "details": "The specification 'per manufacturer recommendations' needs clarification.",
+--       "impact": "Critical specification with incomplete information",
+--       "status": "will_clarify",
+--       "priority": "medium"
+--     },
+--     {
+--       "id": "rfi-1705000000002-jkl456mno",
+--       "category": "weather_barrier",
+--       "question": "What weather resistive barrier is specified?",
+--       "impact": "Required for code compliance and warranty",
+--       "status": "resolved",
+--       "resolution": "Customer confirmed Tyvek HomeWrap",
+--       "resolved_by": "user-uuid",
+--       "resolved_at": "2024-01-23T10:30:00Z",
+--       "priority": "high"
+--     }
+--   ],
+--   "summary": {
+--     "total": 9,
+--     "unresolved": 5,
+--     "will_clarify": 2,
+--     "resolved": 2,
+--     "not_applicable": 0,
+--     "high_priority": 4,
+--     "medium_priority": 3,
+--     "low_priority": 2
+--   },
+--   "generated_at": "2024-01-23T...",
+--   "updated_at": "2024-01-23T...",
+--   "version": "v1"
+-- }
