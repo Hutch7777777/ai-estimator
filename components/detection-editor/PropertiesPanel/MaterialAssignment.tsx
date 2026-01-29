@@ -25,6 +25,26 @@ interface MaterialAssignmentProps {
 // Constants
 // =============================================================================
 
+// Friendly display names for manufacturers
+const MANUFACTURER_DISPLAY_NAMES: Record<string, string> = {
+  'LP Building Solutions': 'LP SmartSide',
+  'Engage Building Products': 'FastPlank',
+  'James Hardie': 'James Hardie',
+  'CertainTeed': 'CertainTeed',
+  'Ply Gem': 'Ply Gem',
+  'Mastic': 'Mastic',
+  'Alcoa': 'Alcoa',
+  'Milgard': 'Milgard',
+  'Marvin': 'Marvin',
+  'Pella': 'Pella',
+  'Andersen': 'Andersen',
+};
+
+// Get display name for manufacturer (fallback to original if not mapped)
+function getManufacturerDisplayName(manufacturer: string): string {
+  return MANUFACTURER_DISPLAY_NAMES[manufacturer] || manufacturer;
+}
+
 // Map detection classes to trades for filtering products
 const CLASS_TO_TRADE: Record<string, string> = {
   // Area classes (SF)
@@ -158,6 +178,7 @@ const MaterialAssignment = memo(function MaterialAssignment({
   // Local state
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string>('');
+  const [selectedManufacturer, setSelectedManufacturer] = useState<string>('');
   const [assignedMaterial, setAssignedMaterial] = useState<MaterialItem | null>(null);
   const [loadingAssigned, setLoadingAssigned] = useState(false);
 
@@ -188,10 +209,11 @@ const MaterialAssignment = memo(function MaterialAssignment({
   }, [selectedDetections]);
 
   // Fetch products filtered by trade and detection class
-  const { items, categories, isLoading, error } = useMaterialSearch({
+  const { items, categories, manufacturers, isLoading, error } = useMaterialSearch({
     trade,
     detectionClass: detectionClass || undefined,
     category: selectedCategory || undefined,
+    manufacturer: selectedManufacturer || undefined,
     search: searchQuery || undefined,
     enabled: selectedDetections.length > 0,
     limit: 20,
@@ -350,6 +372,22 @@ const MaterialAssignment = memo(function MaterialAssignment({
             </div>
           ) : null}
         </div>
+      )}
+
+      {/* Manufacturer Filter - only show if there are manufacturers to choose from */}
+      {manufacturers.length > 0 && (
+        <select
+          value={selectedManufacturer}
+          onChange={(e) => setSelectedManufacturer(e.target.value)}
+          className="w-full h-8 px-2 text-xs rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-1 focus:ring-blue-500"
+        >
+          <option value="">All Manufacturers</option>
+          {manufacturers.map((mfr) => (
+            <option key={mfr} value={mfr}>
+              {getManufacturerDisplayName(mfr)}
+            </option>
+          ))}
+        </select>
       )}
 
       {/* Category Filter - only show if there are categories to choose from */}

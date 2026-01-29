@@ -3,7 +3,7 @@
 import { Suspense, useState, useEffect } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
-import { ArrowLeft, Loader2, User, Building2, Users, HelpCircle, CreditCard, Save, ChevronDown, ChevronUp, Trash2 } from 'lucide-react';
+import { ArrowLeft, Loader2, User, Building2, Users, HelpCircle, CreditCard, Save, ChevronDown, ChevronUp, Trash2, Package, Calculator, Briefcase, Info } from 'lucide-react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -14,6 +14,8 @@ import { useOrganization } from '@/lib/hooks/useOrganization';
 import { createClient } from '@/lib/supabase/client';
 import { toast } from 'sonner';
 import { NoOrganization } from '@/components/no-organization';
+import { resolveSettings } from '@/lib/types/organization';
+import { ProductSelector } from '@/components/settings/ProductSelector';
 
 function AccountSettingsContent() {
   const router = useRouter();
@@ -34,10 +36,38 @@ function AccountSettingsContent() {
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
 
-  // Company form state
+  // Company form state - General
   const [companyName, setCompanyName] = useState('');
   const [defaultMarkup, setDefaultMarkup] = useState('');
   const [timezone, setTimezone] = useState('');
+
+  // Company form state - Labor Rates
+  const [liInsuranceRate, setLiInsuranceRate] = useState('12.65');
+  const [unemploymentRate, setUnemploymentRate] = useState('6.60');
+  const [wasteFactorPercent, setWasteFactorPercent] = useState('12');
+  const [overheadMultiplier, setOverheadMultiplier] = useState('1.0');
+  const [baseLaborRateHourly, setBaseLaborRateHourly] = useState('');
+  const [defaultCrewSize, setDefaultCrewSize] = useState('');
+
+  // Company form state - Business Info
+  const [licenseNumber, setLicenseNumber] = useState('');
+  const [insurancePolicyNumber, setInsurancePolicyNumber] = useState('');
+  const [insuranceExpiration, setInsuranceExpiration] = useState('');
+  const [defaultPaymentTerms, setDefaultPaymentTerms] = useState('');
+  const [defaultWarrantyPeriod, setDefaultWarrantyPeriod] = useState('');
+  const [companyTagline, setCompanyTagline] = useState('');
+  const [estimateContactPhone, setEstimateContactPhone] = useState('');
+  const [estimateContactEmail, setEstimateContactEmail] = useState('');
+
+  // Material Defaults
+  const [defaultTrimSku, setDefaultTrimSku] = useState<string | null>(null);
+  const [defaultWrbSku, setDefaultWrbSku] = useState<string | null>(null);
+  const [defaultFlashingSku, setDefaultFlashingSku] = useState<string | null>(null);
+  const [defaultCaulkSku, setDefaultCaulkSku] = useState<string | null>(null);
+  const [defaultFastenerSku, setDefaultFastenerSku] = useState<string | null>(null);
+  const [defaultSidingSku, setDefaultSidingSku] = useState<string | null>(null);
+  const [defaultSoffitSku, setDefaultSoffitSku] = useState<string | null>(null);
+  const [defaultCornerSku, setDefaultCornerSku] = useState<string | null>(null);
 
   // Support form state
   const [supportSubject, setSupportSubject] = useState('');
@@ -79,11 +109,46 @@ function AccountSettingsContent() {
 
   useEffect(() => {
     if (organization) {
+      // Resolve settings with defaults
+      const settings = resolveSettings(organization.settings);
+
+      // General settings
       setCompanyName(organization.name || '');
-      setDefaultMarkup(organization.settings?.default_markup_percent?.toString() || '');
-      setTimezone(organization.settings?.timezone || 'America/Los_Angeles');
+      setDefaultMarkup(settings.default_markup_percent?.toString() || '35');
+      setTimezone(settings.timezone || 'America/Los_Angeles');
+
+      // Labor rates
+      setLiInsuranceRate(settings.labor_rates?.li_insurance_rate_percent?.toString() || '12.65');
+      setUnemploymentRate(settings.labor_rates?.unemployment_rate_percent?.toString() || '6.60');
+      setWasteFactorPercent(settings.labor_rates?.default_waste_factor_percent?.toString() || '12');
+      setOverheadMultiplier(settings.labor_rates?.overhead_multiplier?.toString() || '1.0');
+      setBaseLaborRateHourly(settings.labor_rates?.base_labor_rate_hourly?.toString() || '');
+      setDefaultCrewSize(settings.labor_rates?.default_crew_size?.toString() || '');
+
+      // Business info
+      setLicenseNumber(settings.business_info?.license_number || '');
+      setInsurancePolicyNumber(settings.business_info?.insurance_policy_number || '');
+      setInsuranceExpiration(settings.business_info?.insurance_expiration || '');
+      setDefaultPaymentTerms(settings.business_info?.default_payment_terms || '');
+      setDefaultWarrantyPeriod(settings.business_info?.default_warranty_period || '');
+      setCompanyTagline(settings.business_info?.company_tagline || '');
+      setEstimateContactPhone(settings.business_info?.estimate_contact_phone || '');
+      setEstimateContactEmail(settings.business_info?.estimate_contact_email || '');
+
+      // Material defaults
+      setDefaultTrimSku(settings.material_defaults?.default_trim_sku || null);
+      setDefaultWrbSku(settings.material_defaults?.default_wrb_sku || null);
+      setDefaultFlashingSku(settings.material_defaults?.default_flashing_sku || null);
+      setDefaultCaulkSku(settings.material_defaults?.default_caulk_sku || null);
+      setDefaultFastenerSku(settings.material_defaults?.default_fastener_sku || null);
+      setDefaultSidingSku(settings.material_defaults?.default_siding_sku || null);
+      setDefaultSoffitSku(settings.material_defaults?.default_soffit_sku || null);
+      setDefaultCornerSku(settings.material_defaults?.default_corner_sku || null);
     }
   }, [organization]);
+
+  // Calculate total burden rate for display
+  const totalBurdenRate = (parseFloat(liInsuranceRate) || 0) + (parseFloat(unemploymentRate) || 0);
 
   // Load team members
   useEffect(() => {
@@ -215,8 +280,26 @@ function AccountSettingsContent() {
           name: companyName,
           settings: {
             ...organization.settings,
-            default_markup_percent: defaultMarkup ? parseFloat(defaultMarkup) : null,
+            default_markup_percent: defaultMarkup ? parseFloat(defaultMarkup) : 35,
             timezone: timezone,
+            labor_rates: {
+              li_insurance_rate_percent: parseFloat(liInsuranceRate) || 12.65,
+              unemployment_rate_percent: parseFloat(unemploymentRate) || 6.60,
+              default_waste_factor_percent: parseFloat(wasteFactorPercent) || 12,
+              overhead_multiplier: parseFloat(overheadMultiplier) || 1.0,
+              base_labor_rate_hourly: baseLaborRateHourly ? parseFloat(baseLaborRateHourly) : null,
+              default_crew_size: defaultCrewSize ? parseInt(defaultCrewSize, 10) : null,
+            },
+            business_info: {
+              license_number: licenseNumber || null,
+              insurance_policy_number: insurancePolicyNumber || null,
+              insurance_expiration: insuranceExpiration || null,
+              default_payment_terms: defaultPaymentTerms || null,
+              default_warranty_period: defaultWarrantyPeriod || null,
+              company_tagline: companyTagline || null,
+              estimate_contact_phone: estimateContactPhone || null,
+              estimate_contact_email: estimateContactEmail || null,
+            },
           }
         })
         .eq('id', organization.id);
@@ -227,6 +310,41 @@ function AccountSettingsContent() {
       toast.success('Company settings updated');
     } catch (err: any) {
       toast.error(err.message || 'Failed to update company settings');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleSaveMaterials = async () => {
+    if (!organization) return;
+    setIsSaving(true);
+
+    try {
+      const { error } = await supabase
+        .from('organizations')
+        .update({
+          settings: {
+            ...organization.settings,
+            material_defaults: {
+              default_trim_sku: defaultTrimSku,
+              default_wrb_sku: defaultWrbSku,
+              default_flashing_sku: defaultFlashingSku,
+              default_caulk_sku: defaultCaulkSku,
+              default_fastener_sku: defaultFastenerSku,
+              default_siding_sku: defaultSidingSku,
+              default_soffit_sku: defaultSoffitSku,
+              default_corner_sku: defaultCornerSku,
+            },
+          }
+        })
+        .eq('id', organization.id);
+
+      if (error) throw error;
+
+      await refreshOrganization();
+      toast.success('Default materials updated');
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to update default materials');
     } finally {
       setIsSaving(false);
     }
@@ -377,6 +495,12 @@ function AccountSettingsContent() {
               </TabsTrigger>
             )}
             {isAdmin && (
+              <TabsTrigger value="materials" className="data-[state=active]:bg-[#f1f5f9]">
+                <Package className="mr-2 h-4 w-4" />
+                Materials
+              </TabsTrigger>
+            )}
+            {isAdmin && (
               <TabsTrigger value="team" className="data-[state=active]:bg-[#f1f5f9]">
                 <Users className="mr-2 h-4 w-4" />
                 Team
@@ -480,49 +604,432 @@ function AccountSettingsContent() {
 
           {/* Company Tab */}
           <TabsContent value="company">
-            <div className="bg-white border border-[#e2e8f0] rounded-lg p-6 shadow-sm space-y-6">
-              <h2 className="text-lg font-semibold text-[#0f172a]">Company Settings</h2>
+            <div className="space-y-6">
+              {/* General Settings Section */}
+              <div className="bg-white border border-[#e2e8f0] rounded-lg p-6 shadow-sm space-y-6">
+                <div className="flex items-center gap-2">
+                  <div className="p-2 rounded-lg bg-blue-100">
+                    <Building2 className="h-5 w-5 text-blue-600" />
+                  </div>
+                  <h2 className="text-lg font-semibold text-[#0f172a]">General Settings</h2>
+                </div>
 
-              <div className="grid gap-4 sm:grid-cols-2">
-                <div className="space-y-2 sm:col-span-2">
-                  <Label htmlFor="companyName">Company Name</Label>
-                  <Input
-                    id="companyName"
-                    value={companyName}
-                    onChange={(e) => setCompanyName(e.target.value)}
-                    placeholder="Acme Exteriors LLC"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="defaultMarkup">Default Markup (%)</Label>
-                  <Input
-                    id="defaultMarkup"
-                    type="number"
-                    value={defaultMarkup}
-                    onChange={(e) => setDefaultMarkup(e.target.value)}
-                    placeholder="25"
-                  />
-                  <p className="text-xs text-[#94a3b8]">Applied to estimates by default</p>
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="timezone">Timezone</Label>
-                  <select
-                    id="timezone"
-                    value={timezone}
-                    onChange={(e) => setTimezone(e.target.value)}
-                    className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                  >
-                    {timezones.map(tz => (
-                      <option key={tz.value} value={tz.value}>{tz.label}</option>
-                    ))}
-                  </select>
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <div className="space-y-2 sm:col-span-2">
+                    <Label htmlFor="companyName">Company Name</Label>
+                    <Input
+                      id="companyName"
+                      value={companyName}
+                      onChange={(e) => setCompanyName(e.target.value)}
+                      placeholder="Acme Exteriors LLC"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="timezone">Timezone</Label>
+                    <select
+                      id="timezone"
+                      value={timezone}
+                      onChange={(e) => setTimezone(e.target.value)}
+                      className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    >
+                      {timezones.map(tz => (
+                        <option key={tz.value} value={tz.value}>{tz.label}</option>
+                      ))}
+                    </select>
+                  </div>
                 </div>
               </div>
 
+              {/* Pricing & Labor Rates Section */}
+              <div className="bg-white border border-[#e2e8f0] rounded-lg p-6 shadow-sm space-y-6">
+                <div className="flex items-center gap-2">
+                  <div className="p-2 rounded-lg bg-green-100">
+                    <Calculator className="h-5 w-5 text-green-600" />
+                  </div>
+                  <div>
+                    <h2 className="text-lg font-semibold text-[#0f172a]">Pricing & Labor Rates</h2>
+                    <p className="text-sm text-[#64748b]">Configure markup and labor burden rates for estimates</p>
+                  </div>
+                </div>
+
+                <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                  <div className="space-y-2">
+                    <Label htmlFor="defaultMarkup">Default Markup (%)</Label>
+                    <div className="relative">
+                      <Input
+                        id="defaultMarkup"
+                        type="number"
+                        step="0.1"
+                        value={defaultMarkup}
+                        onChange={(e) => setDefaultMarkup(e.target.value)}
+                        placeholder="35"
+                        className="pr-8"
+                      />
+                      <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[#94a3b8]">%</span>
+                    </div>
+                    <p className="text-xs text-[#94a3b8]">Applied to all estimates</p>
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="liInsuranceRate">L&I Insurance Rate (%)</Label>
+                    <div className="relative">
+                      <Input
+                        id="liInsuranceRate"
+                        type="number"
+                        step="0.01"
+                        value={liInsuranceRate}
+                        onChange={(e) => setLiInsuranceRate(e.target.value)}
+                        placeholder="12.65"
+                        className="pr-8"
+                      />
+                      <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[#94a3b8]">%</span>
+                    </div>
+                    <p className="text-xs text-[#94a3b8]">Washington State L&I</p>
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="unemploymentRate">Unemployment Rate (%)</Label>
+                    <div className="relative">
+                      <Input
+                        id="unemploymentRate"
+                        type="number"
+                        step="0.01"
+                        value={unemploymentRate}
+                        onChange={(e) => setUnemploymentRate(e.target.value)}
+                        placeholder="6.60"
+                        className="pr-8"
+                      />
+                      <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[#94a3b8]">%</span>
+                    </div>
+                    <p className="text-xs text-[#94a3b8]">State unemployment tax</p>
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="wasteFactorPercent">Default Waste Factor (%)</Label>
+                    <div className="relative">
+                      <Input
+                        id="wasteFactorPercent"
+                        type="number"
+                        step="1"
+                        value={wasteFactorPercent}
+                        onChange={(e) => setWasteFactorPercent(e.target.value)}
+                        placeholder="12"
+                        className="pr-8"
+                      />
+                      <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[#94a3b8]">%</span>
+                    </div>
+                    <p className="text-xs text-[#94a3b8]">Added to material quantities</p>
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="overheadMultiplier">Overhead Multiplier</Label>
+                    <Input
+                      id="overheadMultiplier"
+                      type="number"
+                      step="0.1"
+                      value={overheadMultiplier}
+                      onChange={(e) => setOverheadMultiplier(e.target.value)}
+                      placeholder="1.0"
+                    />
+                    <p className="text-xs text-[#94a3b8]">1.0 = no additional overhead</p>
+                  </div>
+                </div>
+
+                {/* Labor Burden Summary */}
+                <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                  <div className="flex items-start gap-3">
+                    <Info className="h-5 w-5 text-blue-600 mt-0.5" />
+                    <div>
+                      <p className="font-medium text-blue-900">Total Labor Burden Rate</p>
+                      <p className="text-sm text-blue-700 mt-1">
+                        L&I ({liInsuranceRate || '0'}%) + Unemployment ({unemploymentRate || '0'}%) = <span className="font-bold">{totalBurdenRate.toFixed(2)}%</span>
+                      </p>
+                      <p className="text-xs text-blue-600 mt-1">
+                        This rate is applied to base labor costs in all estimates.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Optional Advanced Settings */}
+                <div className="border-t border-[#e2e8f0] pt-4">
+                  <p className="text-sm font-medium text-[#64748b] mb-3">Advanced Settings (Optional)</p>
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <div className="space-y-2">
+                      <Label htmlFor="baseLaborRateHourly">Base Labor Rate ($/hr)</Label>
+                      <div className="relative">
+                        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-[#94a3b8]">$</span>
+                        <Input
+                          id="baseLaborRateHourly"
+                          type="number"
+                          step="0.01"
+                          value={baseLaborRateHourly}
+                          onChange={(e) => setBaseLaborRateHourly(e.target.value)}
+                          placeholder="45.00"
+                          className="pl-7"
+                        />
+                      </div>
+                      <p className="text-xs text-[#94a3b8]">Hourly rate for labor calculations</p>
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="defaultCrewSize">Default Crew Size</Label>
+                      <Input
+                        id="defaultCrewSize"
+                        type="number"
+                        step="1"
+                        min="1"
+                        value={defaultCrewSize}
+                        onChange={(e) => setDefaultCrewSize(e.target.value)}
+                        placeholder="3"
+                      />
+                      <p className="text-xs text-[#94a3b8]">Number of workers per crew</p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Business Information Section */}
+              <div className="bg-white border border-[#e2e8f0] rounded-lg p-6 shadow-sm space-y-6">
+                <div className="flex items-center gap-2">
+                  <div className="p-2 rounded-lg bg-purple-100">
+                    <Briefcase className="h-5 w-5 text-purple-600" />
+                  </div>
+                  <div>
+                    <h2 className="text-lg font-semibold text-[#0f172a]">Business Information</h2>
+                    <p className="text-sm text-[#64748b]">This information appears on proposals and contracts</p>
+                  </div>
+                </div>
+
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <div className="space-y-2">
+                    <Label htmlFor="licenseNumber">License Number</Label>
+                    <Input
+                      id="licenseNumber"
+                      value={licenseNumber}
+                      onChange={(e) => setLicenseNumber(e.target.value)}
+                      placeholder="EXTERFLLC123AB"
+                    />
+                    <p className="text-xs text-[#94a3b8]">Contractor license #</p>
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="insurancePolicyNumber">Insurance Policy Number</Label>
+                    <Input
+                      id="insurancePolicyNumber"
+                      value={insurancePolicyNumber}
+                      onChange={(e) => setInsurancePolicyNumber(e.target.value)}
+                      placeholder="POL-12345678"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="insuranceExpiration">Insurance Expiration</Label>
+                    <Input
+                      id="insuranceExpiration"
+                      type="date"
+                      value={insuranceExpiration}
+                      onChange={(e) => setInsuranceExpiration(e.target.value)}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="defaultPaymentTerms">Default Payment Terms</Label>
+                    <Input
+                      id="defaultPaymentTerms"
+                      value={defaultPaymentTerms}
+                      onChange={(e) => setDefaultPaymentTerms(e.target.value)}
+                      placeholder="50% deposit, 50% upon completion"
+                    />
+                  </div>
+                  <div className="space-y-2 sm:col-span-2">
+                    <Label htmlFor="defaultWarrantyPeriod">Default Warranty Period</Label>
+                    <Input
+                      id="defaultWarrantyPeriod"
+                      value={defaultWarrantyPeriod}
+                      onChange={(e) => setDefaultWarrantyPeriod(e.target.value)}
+                      placeholder="2 years labor, 30 years material warranty"
+                    />
+                  </div>
+                  <div className="space-y-2 sm:col-span-2">
+                    <Label htmlFor="companyTagline">Company Tagline</Label>
+                    <Input
+                      id="companyTagline"
+                      value={companyTagline}
+                      onChange={(e) => setCompanyTagline(e.target.value)}
+                      placeholder="Quality Exteriors, Built to Last"
+                    />
+                    <p className="text-xs text-[#94a3b8]">Appears in proposal headers</p>
+                  </div>
+                </div>
+
+                <div className="border-t border-[#e2e8f0] pt-4">
+                  <p className="text-sm font-medium text-[#64748b] mb-3">Estimate Contact Information</p>
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <div className="space-y-2">
+                      <Label htmlFor="estimateContactPhone">Contact Phone</Label>
+                      <Input
+                        id="estimateContactPhone"
+                        type="tel"
+                        value={estimateContactPhone}
+                        onChange={(e) => setEstimateContactPhone(e.target.value)}
+                        placeholder="(555) 123-4567"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="estimateContactEmail">Contact Email</Label>
+                      <Input
+                        id="estimateContactEmail"
+                        type="email"
+                        value={estimateContactEmail}
+                        onChange={(e) => setEstimateContactEmail(e.target.value)}
+                        placeholder="estimates@exteriorfinishes.com"
+                      />
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Save Button */}
               <div className="flex justify-end">
-                <Button onClick={handleSaveCompany} disabled={isSaving}>
+                <Button onClick={handleSaveCompany} disabled={isSaving} size="lg">
                   {isSaving ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Save className="h-4 w-4 mr-2" />}
-                  Save Changes
+                  Save All Company Settings
+                </Button>
+              </div>
+            </div>
+          </TabsContent>
+
+          {/* Materials Tab */}
+          <TabsContent value="materials">
+            <div className="space-y-6">
+              <div className="bg-white border border-[#e2e8f0] rounded-lg p-6 shadow-sm space-y-6">
+                <div className="flex items-center gap-2">
+                  <div className="p-2 rounded-lg bg-orange-100">
+                    <Package className="h-5 w-5 text-orange-600" />
+                  </div>
+                  <div>
+                    <h2 className="text-lg font-semibold text-[#0f172a]">Default Materials</h2>
+                    <p className="text-sm text-[#64748b]">
+                      Set default products for when no specific material is assigned to a detection.
+                      These are used as fallbacks in auto-scope calculations.
+                    </p>
+                  </div>
+                </div>
+
+                {/* Primary Siding Products */}
+                <div className="space-y-4">
+                  <h3 className="text-sm font-semibold text-[#0f172a] border-b border-[#e2e8f0] pb-2">
+                    Primary Siding
+                  </h3>
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <ProductSelector
+                      label="Default Siding"
+                      category={['lap_siding', 'panel']}
+                      value={defaultSidingSku}
+                      onChange={setDefaultSidingSku}
+                      placeholder="Select default siding product..."
+                      helpText="Used for main siding areas"
+                    />
+                    <ProductSelector
+                      label="Default Soffit"
+                      category="soffit"
+                      value={defaultSoffitSku}
+                      onChange={setDefaultSoffitSku}
+                      placeholder="Select default soffit product..."
+                      helpText="Used for soffit areas"
+                    />
+                  </div>
+                </div>
+
+                {/* Trim & Corners */}
+                <div className="space-y-4">
+                  <h3 className="text-sm font-semibold text-[#0f172a] border-b border-[#e2e8f0] pb-2">
+                    Trim & Corners
+                  </h3>
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <ProductSelector
+                      label="Default Trim"
+                      category="trim"
+                      value={defaultTrimSku}
+                      onChange={setDefaultTrimSku}
+                      placeholder="Select default trim product..."
+                      helpText="Used for window/door trim"
+                    />
+                    <ProductSelector
+                      label="Default Corner"
+                      category={['corner', 'corners']}
+                      value={defaultCornerSku}
+                      onChange={setDefaultCornerSku}
+                      placeholder="Select default corner product..."
+                      helpText="Used for outside/inside corners"
+                    />
+                  </div>
+                </div>
+
+                {/* Weatherproofing */}
+                <div className="space-y-4">
+                  <h3 className="text-sm font-semibold text-[#0f172a] border-b border-[#e2e8f0] pb-2">
+                    Weatherproofing
+                  </h3>
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <ProductSelector
+                      label="Default WRB / Housewrap"
+                      category={['wrb', 'water_barrier', 'housewrap']}
+                      value={defaultWrbSku}
+                      onChange={setDefaultWrbSku}
+                      placeholder="Select default WRB product..."
+                      helpText="Weather-resistant barrier"
+                    />
+                    <ProductSelector
+                      label="Default Flashing"
+                      category="flashing"
+                      value={defaultFlashingSku}
+                      onChange={setDefaultFlashingSku}
+                      placeholder="Select default flashing product..."
+                      helpText="Z-flashing, drip edge, etc."
+                    />
+                  </div>
+                </div>
+
+                {/* Accessories */}
+                <div className="space-y-4">
+                  <h3 className="text-sm font-semibold text-[#0f172a] border-b border-[#e2e8f0] pb-2">
+                    Accessories
+                  </h3>
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <ProductSelector
+                      label="Default Caulk / Sealant"
+                      category={['sealants', 'caulk']}
+                      value={defaultCaulkSku}
+                      onChange={setDefaultCaulkSku}
+                      placeholder="Select default caulk product..."
+                      helpText="Sealants and caulk"
+                    />
+                    <ProductSelector
+                      label="Default Fasteners"
+                      category="fasteners"
+                      value={defaultFastenerSku}
+                      onChange={setDefaultFastenerSku}
+                      placeholder="Select default fastener product..."
+                      helpText="Nails, screws, etc."
+                    />
+                  </div>
+                </div>
+
+                {/* Info Box */}
+                <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
+                  <div className="flex items-start gap-3">
+                    <Info className="h-5 w-5 text-amber-600 mt-0.5" />
+                    <div>
+                      <p className="font-medium text-amber-900">How Default Materials Work</p>
+                      <p className="text-sm text-amber-700 mt-1">
+                        When generating a takeoff, if a detection doesn&apos;t have a specific material assigned,
+                        the system will use these default products from your pricing catalog.
+                        This ensures all line items have pricing even without manual assignment.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Save Button */}
+              <div className="flex justify-end">
+                <Button onClick={handleSaveMaterials} disabled={isSaving} size="lg">
+                  {isSaving ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Save className="h-4 w-4 mr-2" />}
+                  Save Default Materials
                 </Button>
               </div>
             </div>

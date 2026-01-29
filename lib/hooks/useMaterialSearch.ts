@@ -16,6 +16,7 @@ interface PricingRow {
   unit: string;
   is_colorplus: boolean;
   category: string;
+  manufacturer: string | null;
 }
 
 // =============================================================================
@@ -41,6 +42,8 @@ export interface UseMaterialSearchOptions {
   detectionClass?: string;
   /** Category to filter by (case-insensitive) - overrides class-based filtering */
   category?: string;
+  /** Manufacturer to filter by (exact match) */
+  manufacturer?: string;
   /** Search query for product_name */
   search?: string;
   /** Whether to enable the query */
@@ -54,6 +57,8 @@ export interface UseMaterialSearchReturn {
   items: MaterialItem[];
   /** List of unique categories for filtering */
   categories: string[];
+  /** List of unique manufacturers for filtering */
+  manufacturers: string[];
   /** Whether the query is loading */
   isLoading: boolean;
   /** Error if query failed */
@@ -201,10 +206,11 @@ export function getSelectableCategoriesForClass(detectionClass: string | undefin
 // =============================================================================
 
 export function useMaterialSearch(options: UseMaterialSearchOptions = {}): UseMaterialSearchReturn {
-  const { trade, detectionClass, category, search, enabled = true, limit = DEFAULT_LIMIT } = options;
+  const { trade, detectionClass, category, manufacturer, search, enabled = true, limit = DEFAULT_LIMIT } = options;
 
   const [items, setItems] = useState<MaterialItem[]>([]);
   const [categories, setCategories] = useState<string[]>([]);
+  const [manufacturers, setManufacturers] = useState<string[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<Error | null>(null);
 
@@ -212,16 +218,16 @@ export function useMaterialSearch(options: UseMaterialSearchOptions = {}): UseMa
   const debounceRef = useRef<NodeJS.Timeout | null>(null);
   const isMountedRef = useRef(true);
 
-  // Fetch categories on mount - from pricing_items table
+  // Fetch categories and manufacturers on mount - from pricing_items table
   // Now filters out auto-scope categories and applies class-based filtering
   useEffect(() => {
     if (!enabled) {
-      console.log('[useMaterialSearch] Categories fetch skipped - not enabled');
+      console.log('[useMaterialSearch] Categories/manufacturers fetch skipped - not enabled');
       return;
     }
 
-    const fetchCategories = async () => {
-      console.log('[useMaterialSearch] Fetching categories from pricing_items...', { detectionClass });
+    const fetchCategoriesAndManufacturers = async () => {
+      console.log('[useMaterialSearch] Fetching categories and manufacturers from pricing_items...', { detectionClass });
       try {
         // Use direct fetch instead of Supabase JS client
         const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -233,7 +239,7 @@ export function useMaterialSearch(options: UseMaterialSearchOptions = {}): UseMa
         }
 
         const params = new URLSearchParams();
-        params.set('select', 'category');
+        params.set('select', 'category,manufacturer');
         params.set('material_cost', 'not.is.null');
         params.set('order', 'category.asc');
 
@@ -243,7 +249,7 @@ export function useMaterialSearch(options: UseMaterialSearchOptions = {}): UseMa
         }
 
         const fetchUrl = `${url}/rest/v1/pricing_items?${params.toString()}`;
-        console.log('[useMaterialSearch] Fetching categories:', fetchUrl, 'trade:', trade);
+        console.log('[useMaterialSearch] Fetching categories/manufacturers:', fetchUrl, 'trade:', trade);
 
         const response = await fetch(fetchUrl, {
           headers: {
@@ -253,16 +259,16 @@ export function useMaterialSearch(options: UseMaterialSearchOptions = {}): UseMa
           },
         });
 
-        console.log('[useMaterialSearch] Categories response status:', response.status);
+        console.log('[useMaterialSearch] Categories/manufacturers response status:', response.status);
 
         if (!response.ok) {
           const errorText = await response.text();
-          console.error('[useMaterialSearch] Categories fetch error:', errorText);
+          console.error('[useMaterialSearch] Categories/manufacturers fetch error:', errorText);
           return;
         }
 
-        const data: CategoryRow[] = await response.json();
-        console.log('[useMaterialSearch] Raw categories fetched:', data.length);
+        const data: { category: string; manufacturer: string | null }[] = await response.json();
+        console.log('[useMaterialSearch] Raw data fetched:', data.length);
 
         if (data && isMountedRef.current) {
           // Get unique categories
@@ -300,18 +306,25 @@ export function useMaterialSearch(options: UseMaterialSearchOptions = {}): UseMa
           }
 
           setCategories(finalCategories.sort());
+
+          // Get unique manufacturers
+          const uniqueManufacturers = Array.from(
+            new Set(data.map((d) => d.manufacturer).filter((m): m is string => Boolean(m)))
+          ).sort();
+          console.log('[useMaterialSearch] Unique manufacturers:', uniqueManufacturers.length);
+          setManufacturers(uniqueManufacturers);
         }
       } catch (err) {
-        console.error('[useMaterialSearch] Unexpected error fetching categories:', err);
+        console.error('[useMaterialSearch] Unexpected error fetching categories/manufacturers:', err);
       }
     };
 
-    fetchCategories();
+    fetchCategoriesAndManufacturers();
   }, [enabled, trade, detectionClass]);
 
   // Fetch products with debounced search - from pricing_items table
   useEffect(() => {
-    console.log('[useMaterialSearch] Products effect triggered:', { enabled, trade, category, search, limit });
+    console.log('[useMaterialSearch] Products effect triggered:', { enabled, trade, category, manufacturer, search, limit });
 
     if (!enabled) {
       console.log('[useMaterialSearch] Products fetch skipped - not enabled');
@@ -356,7 +369,7 @@ export function useMaterialSearch(options: UseMaterialSearchOptions = {}): UseMa
 
         // Build query params for PostgREST - querying pricing_items table
         const params = new URLSearchParams();
-        params.set('select', 'id,sku,product_name,material_cost,unit,is_colorplus,category');
+        params.set('select', 'id,sku,product_name,material_cost,unit,is_colorplus,category,manufacturer');
         params.set('material_cost', 'not.is.null'); // Only items with prices
         params.set('order', 'product_name.asc');
         params.set('limit', String(limit));
@@ -365,6 +378,12 @@ export function useMaterialSearch(options: UseMaterialSearchOptions = {}): UseMa
         if (trade) {
           console.log('[useMaterialSearch] Applying trade filter:', trade);
           params.set('trade', `eq.${trade}`);
+        }
+
+        // Apply manufacturer filter
+        if (manufacturer) {
+          console.log('[useMaterialSearch] Applying manufacturer filter:', manufacturer);
+          params.set('manufacturer', `eq.${manufacturer}`);
         }
 
         // Apply category filter - priority: user-selected > class-specific > trade-based
@@ -427,7 +446,7 @@ export function useMaterialSearch(options: UseMaterialSearchOptions = {}): UseMa
             labor_cost: null, // pricing_items doesn't have labor_cost per item
             unit: item.unit || 'ea',
             category: item.category || '',
-            manufacturer: '', // pricing_items doesn't have manufacturer
+            manufacturer: item.manufacturer || '',
             sku: item.sku || '',
             is_colorplus: item.is_colorplus,
           }));
@@ -453,7 +472,7 @@ export function useMaterialSearch(options: UseMaterialSearchOptions = {}): UseMa
         clearTimeout(debounceRef.current);
       }
     };
-  }, [enabled, trade, detectionClass, category, search, limit]);
+  }, [enabled, trade, detectionClass, category, manufacturer, search, limit]);
 
   // Cleanup on unmount
   useEffect(() => {
@@ -463,7 +482,7 @@ export function useMaterialSearch(options: UseMaterialSearchOptions = {}): UseMa
     };
   }, []);
 
-  return { items, categories, isLoading, error };
+  return { items, categories, manufacturers, isLoading, error };
 }
 
 // =============================================================================
