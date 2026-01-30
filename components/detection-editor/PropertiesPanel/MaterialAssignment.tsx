@@ -30,6 +30,7 @@ const MANUFACTURER_DISPLAY_NAMES: Record<string, string> = {
   'LP Building Solutions': 'LP SmartSide',
   'Engage Building Products': 'FastPlank',
   'James Hardie': 'James Hardie',
+  'Allura': 'Allura',
   'CertainTeed': 'CertainTeed',
   'Ply Gem': 'Ply Gem',
   'Mastic': 'Mastic',

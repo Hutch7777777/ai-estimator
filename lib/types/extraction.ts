@@ -1457,6 +1457,7 @@ export const MATERIAL_TYPES_BY_TRADE: Record<MaterialTrade, string[]> = {
 /** Known manufacturer keywords for recognition */
 export const MANUFACTURER_KEYWORDS: Record<string, string[]> = {
   'James Hardie': ['hardie', 'hardieplank', 'hardipanel', 'hardietrim', 'artisan', 'colorplus'],
+  'Allura': ['allura', 'allura fiber cement', 'plycem'],
   'LP Building Products': ['lp', 'smartside', 'smarttrim', 'smart side', 'smart trim'],
   'CertainTeed': ['certainteed', 'landmark', 'presidential', 'northgate'],
   'GAF': ['gaf', 'timberline', 'hdz', 'camelot', 'grand sequoia'],
