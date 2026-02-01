@@ -15,6 +15,7 @@ import {
   Redo2,
   Save,
   ArrowLeft,
+  FileDown,
 } from 'lucide-react';
 import type { ToolMode, DetectionClass } from '@/lib/types/extraction';
 import { DETECTION_CLASS_COLORS } from '@/lib/types/extraction';
@@ -47,6 +48,10 @@ export interface DetectionToolbarProps {
   isApproving?: boolean;
   canApprove?: boolean; // False when liveDerivedTotals is null (no scale calibrated)
   isApproved?: boolean; // True after successful approval
+  // Bluebeam export props
+  onExportBluebeam?: () => void;
+  isExportingBluebeam?: boolean;
+  canExportBluebeam?: boolean; // True when job is approved
   // Local-first editing props
   hasUnsavedChanges?: boolean;
   canUndo?: boolean;
@@ -138,6 +143,10 @@ const DetectionToolbar = memo(function DetectionToolbar({
   isApproving = false,
   canApprove = true,
   isApproved = false,
+  // Bluebeam export props
+  onExportBluebeam,
+  isExportingBluebeam = false,
+  canExportBluebeam = false,
   // Local-first editing props
   hasUnsavedChanges = false,
   canUndo = false,
@@ -375,6 +384,36 @@ const DetectionToolbar = memo(function DetectionToolbar({
             <>
               <CheckCircle className="w-4 h-4" />
               <span>Approve & Calculate</span>
+            </>
+          )}
+        </button>
+      )}
+
+      {/* Export to Bluebeam Button */}
+      {canExportBluebeam && onExportBluebeam && (
+        <button
+          type="button"
+          onClick={onExportBluebeam}
+          disabled={isExportingBluebeam}
+          className={`
+            flex items-center gap-2 px-4 py-2 rounded-md font-medium transition-colors
+            ${
+              isExportingBluebeam
+                ? 'bg-gray-200 dark:bg-gray-700 text-gray-400 dark:text-gray-500 cursor-not-allowed'
+                : 'bg-gray-100 hover:bg-gray-200 dark:bg-gray-700 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-200'
+            }
+          `}
+          title="Export detections to Bluebeam-compatible PDF"
+        >
+          {isExportingBluebeam ? (
+            <>
+              <Loader2 className="w-4 h-4 animate-spin" />
+              <span>Exporting...</span>
+            </>
+          ) : (
+            <>
+              <FileDown className="w-4 h-4" />
+              <span>Export to Bluebeam</span>
             </>
           )}
         </button>

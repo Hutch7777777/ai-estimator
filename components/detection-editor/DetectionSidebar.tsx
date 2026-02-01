@@ -5,7 +5,6 @@ import {
   FileImage,
   Calculator,
   SlidersHorizontal,
-  Check,
   RotateCcw,
   Trash2,
 } from 'lucide-react';
@@ -19,9 +18,13 @@ import type {
   ExtractionJobTotals,
 } from '@/lib/types/extraction';
 import ClassSelector from './PropertiesPanel/ClassSelector';
+import { ColorPicker } from './PropertiesPanel/ColorPicker';
 import SelectionProperties from './PropertiesPanel/SelectionProperties';
 import MaterialAssignment from './PropertiesPanel/MaterialAssignment';
 import NotesField from './PropertiesPanel/NotesField';
+import { getDetectionColor } from '@/lib/types/extraction';
+import { getMaterialById, type MaterialItem } from '@/lib/hooks/useMaterialSearch';
+import { Badge } from '@/components/ui/badge';
 
 // =============================================================================
 // Types
@@ -35,6 +38,7 @@ export interface DetectionSidebarProps {
   // Selection properties (for Properties tab)
   selectedDetections: ExtractionDetection[];
   onClassChange: (detectionIds: string[], newClass: DetectionClass) => void;
+  onColorChange?: (detectionIds: string[], color: string | null) => void;
   onStatusChange: (detectionIds: string[], newStatus: DetectionStatus) => void;
   onMaterialAssign: (detectionIds: string[], materialId: string | null) => void;
   onNotesChange: (detectionIds: string[], notes: string) => void;
@@ -198,6 +202,7 @@ const DetectionSidebar = memo(function DetectionSidebar({
   detections,
   selectedDetections,
   onClassChange,
+  onColorChange,
   onStatusChange,
   onMaterialAssign,
   onNotesChange,
@@ -215,6 +220,8 @@ const DetectionSidebar = memo(function DetectionSidebar({
   const [activeTab, setActiveTab] = useState<TabType>('pages');
   // Toggle between current page and all pages totals
   const [totalsScope, setTotalsScope] = useState<'current' | 'all'>('current');
+  // Assigned material for display
+  const [assignedMaterial, setAssignedMaterial] = useState<MaterialItem | null>(null);
 
   // Auto-switch to Properties tab when selection changes from empty to non-empty
   const prevSelectedCountRef = useRef(0);
@@ -224,6 +231,35 @@ const DetectionSidebar = memo(function DetectionSidebar({
     }
     prevSelectedCountRef.current = selectedDetections.length;
   }, [selectedDetections.length]);
+
+  // Extract the material ID as a separate variable to watch directly
+  // This ensures the effect triggers when assigned_material_id changes,
+  // not just when the selectedDetections array reference changes
+  const currentMaterialId = selectedDetections.length === 1
+    ? selectedDetections[0]?.assigned_material_id
+    : null;
+
+  // Debug: Log when selectedDetections or currentMaterialId changes
+  console.log('[DetectionSidebar] selectedDetections changed:', {
+    count: selectedDetections.length,
+    firstDetectionId: selectedDetections[0]?.id,
+    assignedMaterialId: selectedDetections[0]?.assigned_material_id,
+    currentMaterialId,
+  });
+
+  // Fetch assigned material when selection or material assignment changes
+  useEffect(() => {
+    console.log('[DetectionSidebar] useEffect triggered, currentMaterialId:', currentMaterialId);
+    if (currentMaterialId) {
+      getMaterialById(currentMaterialId).then((material) => {
+        console.log('[DetectionSidebar] Fetched material:', material?.product_name);
+        setAssignedMaterial(material);
+      });
+    } else {
+      console.log('[DetectionSidebar] Clearing assignedMaterial');
+      setAssignedMaterial(null);
+    }
+  }, [currentMaterialId]);
 
   // Group detections by page for counts (shown on page thumbnails)
   const detectionCountsByPage = useMemo(() => {
@@ -338,8 +374,81 @@ const DetectionSidebar = memo(function DetectionSidebar({
                   />
                 </div>
 
+                {/* Color Picker */}
+                {onColorChange && (
+                  <ColorPicker
+                    currentColor={
+                      selectedDetections.length === 1
+                        ? selectedDetections[0].color_override
+                        : selectedDetections.every(d => d.color_override === selectedDetections[0].color_override)
+                          ? selectedDetections[0].color_override
+                          : undefined
+                    }
+                    defaultColor={getDetectionColor(selectedDetections[0].class)}
+                    detectionClass={selectedDetections[0].class}
+                    onChange={(color) => {
+                      const ids = selectedDetections.map((d) => d.id);
+                      onColorChange(ids, color);
+                    }}
+                  />
+                )}
+
                 {/* Selection Properties (status, measurements) */}
                 <SelectionProperties selectedDetections={selectedDetections} pixelsPerFoot={pixelsPerFoot} />
+
+                {/* Assigned Material Display */}
+                <div className="space-y-1.5">
+                  <span className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                    Assigned Material
+                  </span>
+
+                  {selectedDetections.length > 1 ? (
+                    // Multi-select: Show summary
+                    <div className="bg-gray-50 dark:bg-gray-800/50 rounded-md p-3 border border-gray-200 dark:border-gray-700">
+                      <div className="text-sm text-gray-600 dark:text-gray-400">
+                        {selectedDetections.filter(d => d.assigned_material_id).length} of {selectedDetections.length} have materials assigned
+                      </div>
+                    </div>
+                  ) : assignedMaterial ? (
+                    // Single selection with material assigned
+                    <div className="bg-gray-50 dark:bg-gray-800/50 rounded-md p-3 border border-gray-200 dark:border-gray-700">
+                      {/* Product Name - Full display with wrapping */}
+                      <div className="text-sm font-medium text-gray-900 dark:text-gray-100 leading-snug">
+                        {assignedMaterial.product_name}
+                      </div>
+
+                      {/* Manufacturer */}
+                      {assignedMaterial.manufacturer && (
+                        <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                          {assignedMaterial.manufacturer}
+                        </div>
+                      )}
+
+                      {/* Price and Badges Row */}
+                      <div className="flex items-center gap-2 mt-2 flex-wrap">
+                        <span className="text-xs font-mono text-gray-700 dark:text-gray-300">
+                          ${assignedMaterial.material_cost?.toFixed(2) || '0.00'}/{assignedMaterial.unit}
+                        </span>
+
+                        {assignedMaterial.is_colorplus && (
+                          <Badge variant="default" className="text-[10px] px-1.5 py-0 bg-blue-500/20 text-blue-600 dark:text-blue-400 border-blue-500/30">
+                            Pre-finished
+                          </Badge>
+                        )}
+                      </div>
+                    </div>
+                  ) : (
+                    // No material assigned
+                    <div className="bg-yellow-50 dark:bg-yellow-500/10 rounded-md p-3 border border-yellow-200 dark:border-yellow-500/30">
+                      <div className="text-sm text-yellow-700 dark:text-yellow-300">
+                        No material assigned
+                      </div>
+                      <div className="text-xs text-yellow-600 dark:text-yellow-400 mt-1">
+                        Select a material below
+                      </div>
+                    </div>
+                  )}
+                </div>
 
                 {/* Quick Actions */}
                 <div className="space-y-2">
@@ -347,20 +456,6 @@ const DetectionSidebar = memo(function DetectionSidebar({
                     Actions
                   </span>
                   <div className="flex gap-2">
-                    {/* Verify Button */}
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const ids = selectedDetections.map((d) => d.id);
-                        onStatusChange(ids, 'verified');
-                      }}
-                      disabled={selectedDetections.every((d) => d.status === 'verified')}
-                      className="flex-1 flex items-center justify-center gap-1 px-2 py-1.5 text-xs font-medium rounded-md border border-green-300 dark:border-green-700 text-green-700 dark:text-green-400 hover:bg-green-50 dark:hover:bg-green-900/20 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                    >
-                      <Check className="w-3.5 h-3.5" />
-                      Verify
-                    </button>
-
                     {/* Reset Button */}
                     <button
                       type="button"

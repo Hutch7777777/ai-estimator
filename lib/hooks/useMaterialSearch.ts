@@ -81,8 +81,9 @@ const DEFAULT_LIMIT = 20;
 const SELECTABLE_CATEGORIES: Record<string, string[]> = {
   // Siding products - user selects the siding type
   // Includes lap_siding explicitly for HardiePlank widths and LP SmartSide
+  // Includes board_batten for Board & Batten System products (12"/16"/24" OC)
   siding: [
-    'lap_siding', 'shingle', 'panel', 'siding', 'Siding',
+    'lap_siding', 'shingle', 'panel', 'siding', 'Siding', 'board_batten', 'artisan',
     'LAP SIDING - SMOOTH', 'LAP SIDING - CEDARMILL', 'PANEL SIDING', 'SHINGLE SIDING',
   ],
   // Soffit products (vinyl, aluminum, Hardie)

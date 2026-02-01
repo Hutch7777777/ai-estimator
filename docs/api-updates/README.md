@@ -15,6 +15,19 @@ Auto-scope rules must calculate quantities based on each manufacturer's square f
 - `['James Hardie']` = Only applies to James Hardie SF
 - `['Engage Building Products']` = Only applies to FastPlank SF
 
+---
+
+## SKU Pattern Matching (NEW)
+
+**Problem:** Some auto-scope rules should only fire when specific product types are assigned:
+- Board & Batten siding requires different accessories than lap siding
+- ColorPlus products need color-matched accessories
+- 16" on-center products need different nail patterns than 12" OC
+
+**Solution:** Add `material_category` and `sku_pattern` to trigger_condition:
+- `material_category`: Matches against pricing_items.category (e.g., "board_batten")
+- `sku_pattern`: Substring match against pricing_items.sku (e.g., "16OC-CP")
+
 ## Files to Modify
 
 ### 1. `src/types/autoscope.ts`
@@ -25,9 +38,14 @@ Add the new types from `autoscope-types.ts`:
 ### 2. `src/calculations/siding/autoscope-v2.ts`
 Apply changes from `autoscope-v2-changes.ts`:
 - Add `manufacturer_filter` to `DbAutoScopeRule` interface
+- Add `DbTriggerCondition` interface with `material_category` and `sku_pattern` (NEW)
+- Add `AssignedMaterial` interface for material context (NEW)
+- Add `TriggerContext` interface for full trigger evaluation context (NEW)
 - Add `buildManufacturerGroups()` function
 - Add `buildManufacturerContext()` function
-- Update `generateAutoScopeItemsV2()` to apply rules per-manufacturer
+- Add `buildAssignedMaterialsFromPricing()` function (NEW)
+- Replace `shouldApplyRule()` with updated version supporting material triggers (NEW)
+- Update `generateAutoScopeItemsV2()` to apply rules per-manufacturer and pass material context
 
 ### 3. `src/calculations/siding/orchestrator-v2.ts`
 Apply changes from `orchestrator-v2-changes.ts`:
@@ -201,6 +219,63 @@ INSERT INTO siding_auto_scope_rules (
 );
 ```
 
+### SKU Pattern Matching Rules (NEW)
+
+```sql
+-- Board & Batten specific nails - only fires when board_batten category products assigned
+INSERT INTO siding_auto_scope_rules (
+  rule_name, material_sku, quantity_formula,
+  manufacturer_filter, trigger_condition, presentation_group
+) VALUES (
+  'Board & Batten Nails (Stainless)',
+  'NAIL-BB-SS-2.5',
+  'Math.ceil(facade_area_sqft / 80)',
+  ARRAY['James Hardie'],
+  '{"material_category": "board_batten"}',  -- Only fires for B&B products
+  'Fasteners'
+);
+
+-- 16" OC specific starter - only fires when SKU contains "16OC"
+INSERT INTO siding_auto_scope_rules (
+  rule_name, material_sku, quantity_formula,
+  manufacturer_filter, trigger_condition, presentation_group
+) VALUES (
+  'Starter Strip 16" OC',
+  'JH-START-16OC',
+  'Math.ceil(level_starter_lf * 1.1 / 12)',
+  ARRAY['James Hardie'],
+  '{"sku_pattern": "16OC"}',  -- Only fires when assigned SKU contains "16OC"
+  'Accessories'
+);
+
+-- ColorPlus touch-up kit - only fires for ColorPlus products
+INSERT INTO siding_auto_scope_rules (
+  rule_name, material_sku, quantity_formula,
+  manufacturer_filter, trigger_condition, presentation_group
+) VALUES (
+  'ColorPlus Touch-Up Kit',
+  'JH-TOUCHUP-CP',
+  '1',  -- Always 1 per project
+  ARRAY['James Hardie'],
+  '{"sku_pattern": "-CP-"}',  -- Matches ColorPlus SKUs like "JH-BBCP-16OC-CP-AW"
+  'Accessories'
+);
+
+-- Combined: Board & Batten + 16" OC specific accessory
+-- BOTH conditions must match for rule to fire
+INSERT INTO siding_auto_scope_rules (
+  rule_name, material_sku, quantity_formula,
+  manufacturer_filter, trigger_condition, presentation_group
+) VALUES (
+  'B&B 16" OC Reveal Mold',
+  'JH-BB-REVEAL-16',
+  'Math.ceil(facade_area_sqft / 50)',
+  ARRAY['James Hardie'],
+  '{"material_category": "board_batten", "sku_pattern": "16OC"}',  -- BOTH must match
+  'Trim Accessories'
+);
+```
+
 ## Expected Behavior
 
 ### Input: Mixed Project
@@ -267,6 +342,82 @@ const materialAssignments = [];
 // No manufacturer groups = skip manufacturer-specific rules
 ```
 
+### Test 5: SKU Pattern Matching - Board & Batten
+```typescript
+const assignedMaterials = [
+  { sku: 'JH-BBCP-16OC-CP-AW', category: 'board_batten', manufacturer: 'James Hardie' }
+];
+
+// Rule: trigger_condition = {"material_category": "board_batten"}
+// Expected: FIRES - material with board_batten category is assigned
+
+// Rule: trigger_condition = {"material_category": "lap_siding"}
+// Expected: SKIPPED - no lap_siding category assigned
+```
+
+### Test 6: SKU Pattern Matching - 16" OC Products
+```typescript
+const assignedMaterials = [
+  { sku: 'JH-BBCP-16OC-CP-AW', category: 'board_batten', manufacturer: 'James Hardie' }
+];
+
+// Rule: trigger_condition = {"sku_pattern": "16OC"}
+// Expected: FIRES - SKU contains "16OC"
+
+// Rule: trigger_condition = {"sku_pattern": "12OC"}
+// Expected: SKIPPED - SKU does not contain "12OC"
+```
+
+### Test 7: SKU Pattern Matching - Combined Conditions
+```typescript
+const assignedMaterials = [
+  { sku: 'JH-BBCP-16OC-CP-AW', category: 'board_batten', manufacturer: 'James Hardie' }
+];
+
+// Rule: trigger_condition = {"material_category": "board_batten", "sku_pattern": "16OC"}
+// Expected: FIRES - BOTH conditions match
+
+// Rule: trigger_condition = {"material_category": "board_batten", "sku_pattern": "12OC"}
+// Expected: SKIPPED - category matches but SKU pattern doesn't
+
+// Rule: trigger_condition = {"material_category": "lap_siding", "sku_pattern": "16OC"}
+// Expected: SKIPPED - SKU pattern matches but category doesn't
+```
+
+### Test 8: SKU Pattern Matching - Multiple Assigned Materials
+```typescript
+const assignedMaterials = [
+  { sku: 'JH-LAP-8.25-PRM-AW', category: 'lap_siding', manufacturer: 'James Hardie' },
+  { sku: 'JH-BBCP-16OC-CP-AW', category: 'board_batten', manufacturer: 'James Hardie' }
+];
+
+// Rule: trigger_condition = {"material_category": "board_batten"}
+// Expected: FIRES - at least one material has board_batten category
+
+// Rule: trigger_condition = {"sku_pattern": "16OC"}
+// Expected: FIRES - at least one SKU contains "16OC"
+
+// Rule: trigger_condition = {"material_category": "shake_siding"}
+// Expected: SKIPPED - no material has shake_siding category
+```
+
+### Test 9: SKU Pattern Matching with Measurement Conditions
+```typescript
+const assignedMaterials = [
+  { sku: 'JH-BBCP-16OC-CP-AW', category: 'board_batten', manufacturer: 'James Hardie' }
+];
+const measurements = { openings_count: 5, corners_count: 4 };
+
+// Rule: trigger_condition = {"material_category": "board_batten", "min_openings": 3}
+// Expected: FIRES - category matches AND openings >= 3
+
+// Rule: trigger_condition = {"material_category": "board_batten", "min_openings": 10}
+// Expected: SKIPPED - category matches but openings < 10
+
+// Rule: trigger_condition = {"sku_pattern": "16OC", "min_corners": 2}
+// Expected: FIRES - SKU pattern matches AND corners >= 2
+```
+
 ## Verification
 
 After implementation, verify with this console output:
@@ -286,17 +437,28 @@ After implementation, verify with this console output:
     - Pieces: 0
     - Detections: 4
 
-📋 Evaluating 25 auto-scope rules...
+[AutoScope] Built 2 unique assigned materials for trigger evaluation:
+  - JH-BBCP-16OC-CP-AW (board_batten) [James Hardie]
+  - FP-PLANK-6IN (lap_siding) [Engage Building Products]
+
+📋 Evaluating 30 auto-scope rules...
    Total project area: 1500.00 SF
    Manufacturer groups: James Hardie, Engage Building Products
+   Assigned materials: JH-BBCP-16OC-CP-AW, FP-PLANK-6IN
   ✓ Rule 1: HardieWrap Weather Barrier [GENERIC: 1500 SF] → 2 ROLL (always=true)
   ✓ Rule 5: Siding Nails [James Hardie: 800 SF] → 8 BOX (always=true)
   ✓ Rule 6: ColorMatch Caulk [James Hardie: 800 SF] → 2 TUBE (openings >= 1)
   ✓ Rule 10: FastPlank Clips [Engage Building Products: 700 SF] → 8 BAG (always=true)
   ✓ Rule 11: FastPlank Screws [Engage Building Products: 700 SF] → 4 BAG (always=true)
+  ✓ Rule 20: B&B Nails [James Hardie: 800 SF] → 10 BOX (category=board_batten)
+  ✓ Rule 21: Starter Strip 16" OC [James Hardie: 800 SF] → 11 EA (sku~16OC)
+  ✓ Rule 22: ColorPlus Touch-Up Kit [James Hardie: 800 SF] → 1 EA (sku~-CP-)
+  ✓ Rule 23: B&B 16" OC Reveal Mold [James Hardie: 800 SF] → 16 EA (category=board_batten, sku~16OC)
+  ✗ Rule 24: Standard Lap Starter [James Hardie: 800 SF] → skipped (no material with category 'lap_siding')
+  ✗ Rule 25: 12" OC Starter [James Hardie: 800 SF] → skipped (no material SKU matching pattern '12OC')
   ...
 
-✅ Auto-scope V2 complete: 15/25 rules triggered, 15 line items
+✅ Auto-scope V2 complete: 18/30 rules triggered, 18 line items
 ```
 
 ## Rollback

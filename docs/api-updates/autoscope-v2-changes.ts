@@ -1,14 +1,27 @@
 /**
- * Auto-Scope V2 - Changes for Manufacturer-Aware Rules
+ * Auto-Scope V2 - Changes for Manufacturer-Aware Rules + SKU Pattern Matching
  *
  * This file contains the CHANGES to apply to autoscope-v2.ts
- * to support per-manufacturer auto-scope rules.
+ * to support per-manufacturer auto-scope rules AND material-based trigger conditions.
  *
  * INSTRUCTIONS:
- * 1. Add manufacturer_filter to DbAutoScopeRule interface
- * 2. Add the new buildManufacturerGroups() function
- * 3. Add the new buildManufacturerContext() function
- * 4. Replace the generateAutoScopeItemsV2() function
+ * 1. Add DbTriggerCondition interface with material_category/sku_pattern
+ * 2. Add AssignedMaterial and TriggerContext interfaces
+ * 3. Add manufacturer_filter to DbAutoScopeRule interface
+ * 4. Add the new buildManufacturerGroups() function
+ * 5. Add the new buildManufacturerContext() function
+ * 6. Replace shouldApplyRule() with new version supporting material triggers
+ * 7. Add buildAssignedMaterialsFromPricing() helper function
+ * 8. Replace the generateAutoScopeItemsV2() function with assignedMaterials support
+ *
+ * NEW TRIGGER CONDITIONS (v2.1):
+ * - material_category: Matches against assigned material's category (e.g., "board_batten")
+ * - sku_pattern: Substring match against assigned material's SKU (e.g., "16OC-CP")
+ *
+ * These enable rules that only fire for specific product types:
+ * - Board & Batten specific accessories
+ * - ColorPlus specific touch-up kits
+ * - 16" OC vs 12" OC specific fasteners
  */
 
 import { getSupabaseClient, isDatabaseConfigured } from '../../services/database';
@@ -26,6 +39,56 @@ import {
 // CHANGE 1: Update DbAutoScopeRule interface
 // Add this field to the existing interface (around line 28)
 // ============================================================================
+
+// ============================================================================
+// CHANGE 1a: Add DbTriggerCondition interface
+// This defines all supported trigger condition types
+// ============================================================================
+
+interface DbTriggerCondition {
+  // Existing measurement-based triggers
+  always?: boolean;
+  min_corners?: number;
+  min_openings?: number;
+  min_net_area?: number;
+  min_facade_area?: number;
+  min_belly_band_lf?: number;
+  min_trim_total_lf?: number;
+  trim_total_lf_gt?: number;
+
+  // NEW: Material-based triggers for SKU pattern matching
+  // Matches against assigned materials from the Detection Editor
+  material_category?: string;  // e.g., "board_batten" - matches pricing_items.category
+  sku_pattern?: string;        // e.g., "16OC-CP" - substring match against pricing_items.sku
+}
+
+// ============================================================================
+// CHANGE 1b: Add AssignedMaterial interface for trigger context
+// Contains material info needed for category/SKU matching in trigger conditions
+// ============================================================================
+
+export interface AssignedMaterial {
+  /** SKU from pricing_items table (e.g., "JH-BBCP-16OC-CP-AW") */
+  sku: string;
+  /** Category from pricing_items table (e.g., "board_batten", "lap_siding") */
+  category: string;
+  /** Manufacturer name (e.g., "James Hardie") */
+  manufacturer: string;
+  /** Optional: pricing item ID for traceability */
+  pricing_item_id?: string;
+}
+
+// ============================================================================
+// CHANGE 1c: Add TriggerContext interface
+// Extended context for evaluating trigger conditions with material info
+// ============================================================================
+
+export interface TriggerContext {
+  /** Measurement data for measurement-based triggers */
+  measurements: MeasurementContext;
+  /** Material context for category/SKU matching triggers */
+  assignedMaterials?: AssignedMaterial[];
+}
 
 interface DbAutoScopeRule {
   rule_id: number;
@@ -235,6 +298,8 @@ export async function generateAutoScopeItemsV2(
   options?: {
     skipSidingPanels?: boolean;
     manufacturerGroups?: ManufacturerGroups;
+    /** NEW: Assigned materials for material_category/sku_pattern trigger conditions */
+    assignedMaterials?: AssignedMaterial[];
   }
 ): Promise<AutoScopeV2Result> {
   const result: AutoScopeV2Result = {
@@ -262,6 +327,14 @@ export async function generateAutoScopeItemsV2(
   const totalContext = buildMeasurementContext(dbMeasurements, webhookMeasurements);
   const manufacturerGroups = options?.manufacturerGroups || {};
   const hasManufacturerGroups = Object.keys(manufacturerGroups).length > 0;
+
+  // NEW: Extract assigned materials for material-based trigger conditions
+  const assignedMaterials = options?.assignedMaterials || [];
+  const hasAssignedMaterials = assignedMaterials.length > 0;
+
+  if (hasAssignedMaterials) {
+    console.log(`   Assigned materials: ${assignedMaterials.map(m => m.sku).join(', ')}`);
+  }
 
   // 2. Fetch auto-scope rules
   const rules = await fetchAutoScopeRules();
@@ -324,7 +397,8 @@ export async function generateAutoScopeItemsV2(
         // Build manufacturer-specific context
         const mfrContext = buildManufacturerContext(groupMeasurements, totalContext);
 
-        const { applies, reason } = shouldApplyRule(rule, mfrContext);
+        // Pass assigned materials for material_category/sku_pattern trigger checks
+        const { applies, reason } = shouldApplyRule(rule, mfrContext, assignedMaterials);
 
         if (applies) {
           const { result: quantity, error } = evaluateFormula(rule.quantity_formula, mfrContext);
@@ -357,7 +431,8 @@ export async function generateAutoScopeItemsV2(
       // Apply to total project measurements
       // =====================================================================
 
-      const { applies, reason } = shouldApplyRule(rule, totalContext);
+      // Pass assigned materials for material_category/sku_pattern trigger checks
+      const { applies, reason } = shouldApplyRule(rule, totalContext, assignedMaterials);
 
       if (applies) {
         const { result: quantity, error } = evaluateFormula(rule.quantity_formula, totalContext);
@@ -431,14 +506,244 @@ export async function generateAutoScopeItemsV2(
 }
 
 // ============================================================================
+// CHANGE 6: Replace shouldApplyRule() function
+// Updated to support material_category and sku_pattern trigger conditions
+// ============================================================================
+
+/**
+ * Evaluate whether a rule should apply based on its trigger_condition
+ *
+ * UPDATED: Now supports material-based triggers:
+ * - material_category: matches against assigned material's category
+ * - sku_pattern: substring match against assigned material's SKU
+ *
+ * @param rule - The auto-scope rule to evaluate
+ * @param context - Measurement context OR full trigger context with materials
+ * @param assignedMaterials - Optional array of assigned materials (if not in context)
+ * @returns Object with applies boolean and reason string
+ */
+function shouldApplyRule(
+  rule: DbAutoScopeRule,
+  context: MeasurementContext | TriggerContext,
+  assignedMaterials?: AssignedMaterial[]
+): { applies: boolean; reason: string } {
+  const condition = rule.trigger_condition;
+
+  // No condition = always apply
+  if (!condition) {
+    return { applies: true, reason: 'no trigger condition' };
+  }
+
+  // Extract measurements and materials from context
+  const measurements: MeasurementContext = 'measurements' in context
+    ? context.measurements
+    : context;
+  const materials: AssignedMaterial[] = 'assignedMaterials' in context
+    ? (context.assignedMaterials || [])
+    : (assignedMaterials || []);
+
+  // =========================================================================
+  // Check "always" condition first
+  // =========================================================================
+  if (condition.always === true) {
+    return { applies: true, reason: 'always=true' };
+  }
+
+  // =========================================================================
+  // Check material-based conditions (NEW)
+  // These conditions check against assigned materials from Detection Editor
+  // =========================================================================
+
+  // Check material_category - must have at least one material with matching category
+  if (condition.material_category) {
+    const requiredCategory = condition.material_category.toLowerCase();
+    const hasMatchingCategory = materials.some(
+      m => m.category?.toLowerCase() === requiredCategory
+    );
+
+    if (!hasMatchingCategory) {
+      return {
+        applies: false,
+        reason: `no material with category '${condition.material_category}'`
+      };
+    }
+    // If we get here, material_category check passed - continue to other checks
+  }
+
+  // Check sku_pattern - must have at least one material with SKU containing pattern
+  if (condition.sku_pattern) {
+    const pattern = condition.sku_pattern.toLowerCase();
+    const hasMatchingSku = materials.some(
+      m => m.sku?.toLowerCase().includes(pattern)
+    );
+
+    if (!hasMatchingSku) {
+      return {
+        applies: false,
+        reason: `no material SKU matching pattern '${condition.sku_pattern}'`
+      };
+    }
+    // If we get here, sku_pattern check passed - continue to other checks
+  }
+
+  // =========================================================================
+  // Check measurement-based conditions (existing logic)
+  // =========================================================================
+
+  // min_corners check
+  if (condition.min_corners !== undefined) {
+    const cornerCount = measurements.outside_corners_count || measurements.outside_corner_count || 0;
+    if (cornerCount < condition.min_corners) {
+      return { applies: false, reason: `corners ${cornerCount} < ${condition.min_corners}` };
+    }
+  }
+
+  // min_openings check
+  if (condition.min_openings !== undefined) {
+    const openingsCount = measurements.openings_count || measurements.total_openings_count || 0;
+    if (openingsCount < condition.min_openings) {
+      return { applies: false, reason: `openings ${openingsCount} < ${condition.min_openings}` };
+    }
+  }
+
+  // min_net_area check
+  if (condition.min_net_area !== undefined) {
+    const netArea = measurements.net_siding_area_sqft || 0;
+    if (netArea < condition.min_net_area) {
+      return { applies: false, reason: `net area ${netArea.toFixed(0)} < ${condition.min_net_area}` };
+    }
+  }
+
+  // min_facade_area check
+  if (condition.min_facade_area !== undefined) {
+    const facadeArea = measurements.facade_area_sqft || measurements.facade_sqft || 0;
+    if (facadeArea < condition.min_facade_area) {
+      return { applies: false, reason: `facade area ${facadeArea.toFixed(0)} < ${condition.min_facade_area}` };
+    }
+  }
+
+  // min_belly_band_lf check
+  if (condition.min_belly_band_lf !== undefined) {
+    const bellyBandLf = measurements.belly_band_lf || 0;
+    if (bellyBandLf < condition.min_belly_band_lf) {
+      return { applies: false, reason: `belly band ${bellyBandLf.toFixed(0)} LF < ${condition.min_belly_band_lf}` };
+    }
+  }
+
+  // min_trim_total_lf check
+  if (condition.min_trim_total_lf !== undefined) {
+    const trimTotalLf = measurements.trim_total_lf || 0;
+    if (trimTotalLf < condition.min_trim_total_lf) {
+      return { applies: false, reason: `trim total ${trimTotalLf.toFixed(0)} LF < ${condition.min_trim_total_lf}` };
+    }
+  }
+
+  // trim_total_lf_gt check (alternative syntax: greater than)
+  if (condition.trim_total_lf_gt !== undefined) {
+    const trimTotalLf = measurements.trim_total_lf || 0;
+    if (trimTotalLf <= condition.trim_total_lf_gt) {
+      return { applies: false, reason: `trim total ${trimTotalLf.toFixed(0)} LF <= ${condition.trim_total_lf_gt}` };
+    }
+  }
+
+  // =========================================================================
+  // All conditions passed
+  // =========================================================================
+
+  // Build reason string showing which conditions matched
+  const matchedConditions: string[] = [];
+
+  if (condition.material_category) {
+    matchedConditions.push(`category=${condition.material_category}`);
+  }
+  if (condition.sku_pattern) {
+    matchedConditions.push(`sku~${condition.sku_pattern}`);
+  }
+  if (condition.min_corners !== undefined) {
+    matchedConditions.push(`corners>=${condition.min_corners}`);
+  }
+  if (condition.min_openings !== undefined) {
+    matchedConditions.push(`openings>=${condition.min_openings}`);
+  }
+  if (condition.min_net_area !== undefined) {
+    matchedConditions.push(`netArea>=${condition.min_net_area}`);
+  }
+  if (condition.min_facade_area !== undefined) {
+    matchedConditions.push(`facadeArea>=${condition.min_facade_area}`);
+  }
+  if (condition.min_belly_band_lf !== undefined) {
+    matchedConditions.push(`bellyBand>=${condition.min_belly_band_lf}`);
+  }
+  if (condition.min_trim_total_lf !== undefined) {
+    matchedConditions.push(`trimTotal>=${condition.min_trim_total_lf}`);
+  }
+  if (condition.trim_total_lf_gt !== undefined) {
+    matchedConditions.push(`trimTotal>${condition.trim_total_lf_gt}`);
+  }
+
+  return {
+    applies: true,
+    reason: matchedConditions.length > 0 ? matchedConditions.join(', ') : 'all conditions met'
+  };
+}
+
+// ============================================================================
+// CHANGE 7: Add buildAssignedMaterialsFromGroups() helper
+// Extracts AssignedMaterial[] from ManufacturerGroups + pricing data
+// ============================================================================
+
+/**
+ * Build AssignedMaterial array from material assignments and pricing data
+ * This is called by the orchestrator to prepare material context for trigger evaluation
+ *
+ * @param materialAssignments - Material assignments from Detection Editor
+ * @param pricingMap - Map of pricing item ID to PricingItem
+ * @returns Array of AssignedMaterial for trigger condition evaluation
+ */
+export function buildAssignedMaterialsFromPricing(
+  materialAssignments: MaterialAssignmentForGrouping[],
+  pricingMap: Map<string, PricingItem>
+): AssignedMaterial[] {
+  const materials: AssignedMaterial[] = [];
+  const seenSkus = new Set<string>();
+
+  for (const assignment of materialAssignments) {
+    const pricing = pricingMap.get(assignment.pricing_item_id);
+
+    if (!pricing || !pricing.sku) {
+      continue;
+    }
+
+    // Deduplicate by SKU - we only need one entry per SKU for trigger matching
+    if (seenSkus.has(pricing.sku)) {
+      continue;
+    }
+    seenSkus.add(pricing.sku);
+
+    materials.push({
+      sku: pricing.sku,
+      category: pricing.category || 'unknown',
+      manufacturer: pricing.manufacturer || 'Unknown',
+      pricing_item_id: assignment.pricing_item_id,
+    });
+  }
+
+  console.log(`[AutoScope] Built ${materials.length} unique assigned materials for trigger evaluation:`);
+  for (const m of materials) {
+    console.log(`  - ${m.sku} (${m.category}) [${m.manufacturer}]`);
+  }
+
+  return materials;
+}
+
+// ============================================================================
 // NOTE: The following functions are unchanged from the original file:
 // - fetchAutoScopeRules()
 // - fetchMeasurementsFromDatabase()
 // - buildMeasurementContext()
-// - shouldApplyRule()
 // - evaluateFormula()
 // - getFallbackRules()
 // - clearAutoScopeRulesCache()
 //
-// Just add the manufacturer_filter field handling, and the new functions above.
+// The shouldApplyRule() function has been REPLACED with the new version above.
 // ============================================================================

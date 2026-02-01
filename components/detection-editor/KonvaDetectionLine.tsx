@@ -4,7 +4,7 @@ import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { Line, Circle, Group, Text, Label, Tag } from 'react-konva';
 import type Konva from 'konva';
 import type { ExtractionDetection, DetectionClass, PolygonPoint, PolygonPoints } from '@/lib/types/extraction';
-import { CONFIDENCE_THRESHOLDS, isPolygonWithHoles, getDetectionColor, getClassDisplayLabel } from '@/lib/types/extraction';
+import { CONFIDENCE_THRESHOLDS, isPolygonWithHoles, getDetectionColor, getEffectiveDetectionColor, getClassDisplayLabel } from '@/lib/types/extraction';
 
 /**
  * Extract simple polygon points array from PolygonPoints union type.
@@ -169,7 +169,7 @@ export default function KonvaDetectionLine({
     }
   }, [detection.id, detection.polygon_points, isDraggingEndpoint, isDraggingLine, initialPoints]);
 
-  const color = getDetectionColor(detection.class);
+  const color = getEffectiveDetectionColor(detection);
   const lowConfidence = isLowConfidence(detection.confidence);
   const isDeleted = detection.status === 'deleted';
 

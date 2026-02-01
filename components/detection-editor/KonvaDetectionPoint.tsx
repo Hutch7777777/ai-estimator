@@ -4,7 +4,7 @@ import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { Circle, Group, Text, Label, Tag } from 'react-konva';
 import type Konva from 'konva';
 import type { ExtractionDetection, DetectionClass } from '@/lib/types/extraction';
-import { CONFIDENCE_THRESHOLDS, getDetectionColor, getClassDisplayLabel } from '@/lib/types/extraction';
+import { CONFIDENCE_THRESHOLDS, getDetectionColor, getEffectiveDetectionColor, getClassDisplayLabel } from '@/lib/types/extraction';
 
 // =============================================================================
 // Types
@@ -102,7 +102,7 @@ export default function KonvaDetectionPoint({
     }
   }, [detection.id, detection.pixel_x, detection.pixel_y, isDragging]);
 
-  const color = getDetectionColor(detection.class);
+  const color = getEffectiveDetectionColor(detection);
   const lowConfidence = isLowConfidence(detection.confidence);
   const isDeleted = detection.status === 'deleted';
 

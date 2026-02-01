@@ -269,35 +269,87 @@ export function ProductConfigStep({ data, onUpdate, onValidationChange }: Produc
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [formValues, configurations, data.selectedTrades, loading, error, onValidationChange]);
 
-  // Check if a product is a ColorPlus product
-  const isProductColorPlus = (productId: string): boolean => {
-    if (!productId) return false;
-    const product = productCatalog.find(p => p.id === productId);
-    return product?.physical_properties?.is_colorplus === true;
-  };
-
-  // Check if field should be visible based on show_if_conditions
+  // Check if field should be visible based on show_if_conditions and show_if_product_attributes
   const isFieldVisible = (field: TradeConfiguration, trade: string): boolean => {
     const tradeValues = formValues[trade] || {};
 
     // DEBUG LOG - Remove after debugging
-    if (field.show_if_conditions) {
+    if (field.show_if_conditions || field.show_if_product_attributes) {
       console.log('🔍 Visibility check:', JSON.stringify({
         fieldName: field.config_name,
         fieldLabel: field.field_label,
         showIfConditions: field.show_if_conditions,
+        showIfProductAttributes: field.show_if_product_attributes,
         allTradeValues: tradeValues,
         isRequired: field.is_required
       }, null, 2));
     }
 
-    // Special case: ColorPlus color field should only show for ColorPlus products
-    if (field.config_name === 'colorplus_color') {
-      const selectedProductId = tradeValues['siding_product_type'];
-      if (!selectedProductId) return false;
-      return isProductColorPlus(selectedProductId);
+    // =========================================================================
+    // Check show_if_product_attributes (product physical_properties check)
+    // This is evaluated FIRST - if product attributes don't match, field is hidden
+    // =========================================================================
+    if (field.show_if_product_attributes) {
+      // Get the selected product ID from the appropriate field based on trade
+      // For siding, the product is in 'siding_product_type'
+      const productFieldMap: Record<string, string> = {
+        siding: 'siding_product_type',
+        roofing: 'roofing_product',
+        windows: 'window_series',
+        gutters: 'gutter_product',
+      };
+      const productFieldName = productFieldMap[trade] || 'siding_product_type';
+      const selectedProductId = tradeValues[productFieldName];
+
+      // If no product selected yet, hide fields that depend on product attributes
+      if (!selectedProductId) {
+        console.log('  ↳ Product attribute check: No product selected, hiding field');
+        return false;
+      }
+
+      // Find the selected product in the catalog
+      const product = productCatalog.find(p => p.id === selectedProductId);
+      if (!product) {
+        console.log('  ↳ Product attribute check: Product not found in catalog, hiding field');
+        return false;
+      }
+
+      const physicalProps = product.physical_properties || {};
+
+      // Check ALL key-value pairs in show_if_product_attributes
+      for (const [attrKey, expectedValue] of Object.entries(field.show_if_product_attributes)) {
+        const actualValue = physicalProps[attrKey];
+
+        // Handle boolean comparisons with type coercion
+        let matches = false;
+        if (typeof expectedValue === 'boolean') {
+          matches = actualValue === expectedValue ||
+                    actualValue === String(expectedValue) ||
+                    (expectedValue === true && actualValue === 1) ||
+                    (expectedValue === false && (actualValue === 0 || actualValue === '' || actualValue === undefined));
+        } else {
+          matches = actualValue === expectedValue;
+        }
+
+        console.log('  ↳ Product attribute check:', JSON.stringify({
+          attribute: attrKey,
+          expectedValue,
+          actualValue,
+          productName: product.product_name,
+          matches
+        }));
+
+        if (!matches) {
+          return false;
+        }
+      }
+      // All product attribute conditions passed
     }
 
+    // =========================================================================
+    // Check show_if_conditions (form field value check)
+    // Only evaluated if show_if_product_attributes passed (or wasn't defined)
+    // =========================================================================
     if (!field.show_if_conditions) {
       return true;
     }

@@ -8,7 +8,9 @@ import type {
   ExtractionPage,
   DetectionClass,
 } from '@/lib/types/extraction';
+import { getDetectionColor } from '@/lib/types/extraction';
 import ClassSelector from './ClassSelector';
+import { ColorPicker } from './ColorPicker';
 import SelectionProperties from './SelectionProperties';
 import PageTotals from './PageTotals';
 import MaterialAssignment from './MaterialAssignment';
@@ -22,6 +24,7 @@ export interface PropertiesPanelProps {
   allDetections: ExtractionDetection[];
   currentPage: ExtractionPage | null;
   onClassChange: (detectionIds: string[], newClass: DetectionClass) => void;
+  onColorChange?: (detectionIds: string[], color: string | null) => void;
   onMaterialChange?: (detectionIds: string[], materialId: string | null) => void;
   /** Callback when user edits the material price */
   onPriceOverride?: (detectionIds: string[], price: number | null) => void;
@@ -39,6 +42,7 @@ const PropertiesPanel = memo(function PropertiesPanel({
   allDetections,
   currentPage,
   onClassChange,
+  onColorChange,
   onMaterialChange,
   onPriceOverride,
   onMaterialAssignWithPrice,
@@ -66,6 +70,42 @@ const PropertiesPanel = memo(function PropertiesPanel({
       onMaterialChange(detectionIds, materialId);
     }
   };
+
+  // Handler for color change
+  const handleColorChange = (color: string | null) => {
+    if (onColorChange && selectedIds.length > 0) {
+      onColorChange(selectedIds, color);
+    }
+  };
+
+  // Determine current color state for color picker
+  const colorPickerState = useMemo(() => {
+    if (selectedDetections.length === 0) {
+      return { currentColor: null, defaultColor: '#6B7280', detectionClass: '' as DetectionClass };
+    }
+
+    const firstDetection = selectedDetections[0];
+    const defaultColor = getDetectionColor(firstDetection.class);
+
+    if (selectedDetections.length === 1) {
+      return {
+        currentColor: firstDetection.color_override,
+        defaultColor,
+        detectionClass: firstDetection.class,
+      };
+    }
+
+    // Multi-select: check if all have same color override
+    const allSameColor = selectedDetections.every(
+      d => d.color_override === firstDetection.color_override
+    );
+
+    return {
+      currentColor: allSameColor ? firstDetection.color_override : undefined,
+      defaultColor,
+      detectionClass: firstDetection.class,
+    };
+  }, [selectedDetections]);
 
   return (
     <div className="w-72 h-full bg-white dark:bg-gray-900 border-l border-gray-200 dark:border-gray-700 flex flex-col">
@@ -106,6 +146,17 @@ const PropertiesPanel = memo(function PropertiesPanel({
               disabled={disabled}
             />
           </div>
+
+          {/* Color Picker */}
+          {onColorChange && (
+            <ColorPicker
+              currentColor={colorPickerState.currentColor}
+              defaultColor={colorPickerState.defaultColor}
+              detectionClass={colorPickerState.detectionClass}
+              onChange={handleColorChange}
+              disabled={disabled}
+            />
+          )}
 
           {/* Measurements */}
           <SelectionProperties selectedDetections={selectedDetections} pixelsPerFoot={currentPage?.scale_ratio || 64} />

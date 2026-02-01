@@ -4,7 +4,7 @@ import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { Line, Circle, Group, Text, Label, Tag, Rect, Shape } from 'react-konva';
 import type Konva from 'konva';
 import type { ExtractionDetection, DetectionClass, PolygonPoint } from '@/lib/types/extraction';
-import { CONFIDENCE_THRESHOLDS, isPolygonWithHoles, type PolygonWithHoles, getDetectionColor, getClassDisplayLabel } from '@/lib/types/extraction';
+import { CONFIDENCE_THRESHOLDS, isPolygonWithHoles, type PolygonWithHoles, getDetectionColor, getEffectiveDetectionColor, getClassDisplayLabel } from '@/lib/types/extraction';
 import { formatArea } from '@/lib/utils/coordinates';
 import {
   rectToPolygonPoints,
@@ -218,7 +218,7 @@ export default function KonvaDetectionPolygon({
     }
   }, [detection.id, detection.polygon_points, isDraggingHoleCorner]);
 
-  const color = getDetectionColor(detection.class);
+  const color = getEffectiveDetectionColor(detection);
   // Unselected: light grey to match standard detection style
   // Selected: use class color for prominence
   const strokeColor = isSelected ? darkenColor(color, 20) : STROKE_COLOR_UNSELECTED;

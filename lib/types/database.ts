@@ -99,7 +99,8 @@ export interface TradeConfiguration {
   default_value: string | null; // Default value for the field
   is_required: boolean;
   validation_rules: Record<string, any> | null; // JSONB - Validation rules
-  show_if_conditions: Record<string, any> | null; // JSONB - Conditional visibility logic
+  show_if_conditions: Record<string, any> | null; // JSONB - Conditional visibility based on form field values
+  show_if_product_attributes: Record<string, any> | null; // JSONB - Conditional visibility based on selected product's physical_properties
   hide_if_conditions: Record<string, any> | null; // JSONB - Conditional hiding logic
   triggers_auto_scope: boolean; // Whether this field triggers auto-scope calculation
   auto_scope_rule_id: string | null; // UUID - Reference to auto-scope rule
