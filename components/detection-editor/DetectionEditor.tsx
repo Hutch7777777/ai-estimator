@@ -313,6 +313,7 @@ export default function DetectionEditor({
   const [showDimensions, setShowDimensions] = useState(true);
   const [showArea, setShowArea] = useState(true);
   const [isApproving, setIsApproving] = useState(false);
+  const [isExportingBluebeam, setIsExportingBluebeam] = useState(false);
   const [approvalResult, setApprovalResult] = useState<ApprovalResult | null>(null);
   const [showApprovalResults, setShowApprovalResults] = useState(false);
   const [takeoffDetails, setTakeoffDetails] = useState<TakeoffData | null>(null);
@@ -1240,8 +1241,48 @@ export default function DetectionEditor({
     [currentPageDetections, updateDetectionLocally]
   );
 
+  // Handle color override from Properties panel
+  // Saves directly to Supabase and updates local state
+  const handleColorChange = useCallback(
+    async (detectionIds: string[], color: string | null) => {
+      if (detectionIds.length === 0) return;
+
+      // Update local state immediately for optimistic UI
+      detectionIds.forEach((id) => {
+        const detection = currentPageDetections.find((d) => d.id === id);
+        if (detection) {
+          const updatedDetection = {
+            ...detection,
+            color_override: color,
+            edited_at: new Date().toISOString(),
+          };
+          updateDetectionLocally(updatedDetection);
+        }
+      });
+
+      // Save to database directly
+      const supabase = getSupabaseClient();
+      const { error } = await supabase
+        .from('extraction_detections_draft')
+        .update({
+          color_override: color,
+          updated_at: new Date().toISOString()
+        })
+        .in('id', detectionIds);
+
+      if (error) {
+        console.error('[DetectionEditor] Failed to save color override to database:', error);
+        toast.error('Failed to save color change');
+      } else {
+        console.log(`[DetectionEditor] Color override saved: ${color} for ${detectionIds.length} detection(s)`);
+      }
+    },
+    [currentPageDetections, updateDetectionLocally]
+  );
+
   // Handle material assignment from Properties panel
   // Saves directly to Supabase and updates local state
+  // Auto-verifies detection when a material is assigned
   const handleMaterialAssign = useCallback(
     async (detectionIds: string[], materialId: string | null) => {
       console.log('[DetectionEditor] handleMaterialAssign called:', { detectionIds, materialId });
@@ -1262,9 +1303,15 @@ export default function DetectionEditor({
             assigned_material_id: materialId,
             // Clear price override when material is cleared
             material_cost_override: materialId === null ? null : detection.material_cost_override,
+            // Auto-verify when material is assigned (don't change status if clearing)
+            status: materialId ? 'verified' as const : detection.status,
             edited_at: new Date().toISOString(),
           };
-          console.log('[DetectionEditor] Updating detection with:', { id: updatedDetection.id, assigned_material_id: updatedDetection.assigned_material_id });
+          console.log('[DetectionEditor] Updating detection with:', {
+            id: updatedDetection.id,
+            assigned_material_id: updatedDetection.assigned_material_id,
+            status: updatedDetection.status
+          });
           updateDetectionLocally(updatedDetection);
         }
       });
@@ -1279,17 +1326,36 @@ export default function DetectionEditor({
       if (materialId === null) {
         updateData.material_cost_override = null;
       }
+      // Auto-verify when material is assigned
+      if (materialId) {
+        updateData.status = 'verified';
+      }
 
-      const { error } = await supabase
+      console.log('[DetectionEditor] Saving to database:', {
+        table: 'extraction_detections_draft',
+        updateData,
+        detectionIds,
+      });
+
+      const { data, error, status, statusText } = await supabase
         .from('extraction_detections_draft')
         .update(updateData)
-        .in('id', detectionIds);
+        .in('id', detectionIds)
+        .select();
 
       if (error) {
-        console.error('[DetectionEditor] Failed to save material assignment to database:', error);
-        toast.error('Failed to save material assignment');
+        console.error('[DetectionEditor] Failed to save material assignment to database:');
+        console.error('  Error object:', error);
+        console.error('  Error message:', error?.message);
+        console.error('  Error code:', error?.code);
+        console.error('  Error details:', error?.details);
+        console.error('  Error hint:', error?.hint);
+        console.error('  HTTP status:', status, statusText);
+        console.error('  Full error JSON:', JSON.stringify(error, null, 2));
+        toast.error(`Failed to save material assignment: ${error?.message || 'Unknown error'}`);
       } else {
         console.log('[DetectionEditor] Material assignment saved to database successfully');
+        console.log('[DetectionEditor] Updated rows:', data);
       }
 
       console.log(
@@ -2878,6 +2944,56 @@ export default function DetectionEditor({
   ]);
 
   // ==========================================================================
+  // Export to Bluebeam Handler
+  // ==========================================================================
+
+  const handleExportBluebeam = useCallback(async () => {
+    if (!jobId) {
+      toast.error('No job ID available');
+      return;
+    }
+
+    setIsExportingBluebeam(true);
+
+    try {
+      const apiUrl = process.env.NEXT_PUBLIC_EXTRACTION_API_URL || 'https://extraction-api-production.up.railway.app';
+
+      const response = await fetch(`${apiUrl}/export-bluebeam`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          job_id: jobId,
+          include_materials: true,
+        }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok || !data.success) {
+        throw new Error(data.error || 'Export failed');
+      }
+
+      // Open the download URL in a new tab
+      if (data.download_url) {
+        window.open(data.download_url, '_blank');
+        toast.success('Bluebeam PDF exported successfully');
+      } else {
+        throw new Error('No download URL returned');
+      }
+    } catch (err) {
+      const error = err instanceof Error ? err : new Error('Export failed');
+      console.error('[ExportBluebeam] Error:', error);
+      toast.error(`Failed to export to Bluebeam: ${error.message}`);
+    } finally {
+      if (isMountedRef.current) {
+        setIsExportingBluebeam(false);
+      }
+    }
+  }, [jobId]);
+
+  // ==========================================================================
   // Download Markup Plans Handler
   // ==========================================================================
 
@@ -3022,6 +3138,10 @@ export default function DetectionEditor({
             isApproving={isApproving}
             canApprove={!!liveDerivedTotals}
             isApproved={!!approvalResult}
+            // Bluebeam export props
+            onExportBluebeam={handleExportBluebeam}
+            isExportingBluebeam={isExportingBluebeam}
+            canExportBluebeam={!!approvalResult}
             // Local-first editing props
             hasUnsavedChanges={hasUnsavedChanges}
             canUndo={canUndo}
@@ -3202,6 +3322,7 @@ export default function DetectionEditor({
               detections={currentPageDetections}
               selectedDetections={selectedDetections}
               onClassChange={handleClassChange}
+              onColorChange={handleColorChange}
               onStatusChange={handleStatusChange}
               onMaterialAssign={handleMaterialAssign}
               onNotesChange={handleNotesChange}
@@ -3309,35 +3430,38 @@ export default function DetectionEditor({
               </div>
 
               {/* Cost Summary Card */}
+              {/* NOTE: Display BASE costs (before markup) to match Estimate page */}
+              {/* material_cost = base, material_total = with markup */}
+              {/* installation_labor_subtotal = base labor, labor_total = with markup */}
               <div className="bg-gray-50 dark:bg-gray-800/50 rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden">
-                {/* Materials Row */}
+                {/* Materials Row - Use base material_cost, not marked-up material_total */}
                 <div className="flex justify-between items-center px-4 py-3 border-b border-gray-200 dark:border-gray-700">
                   <span className="text-sm text-gray-600 dark:text-gray-400">Materials</span>
                   <span className="font-mono font-medium text-gray-900 dark:text-white">
                     {new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(
-                      projectTotals?.material_total ?? approvalResult?.totals?.material_cost ?? 0
+                      projectTotals?.material_cost ?? approvalResult?.totals?.material_cost ?? 0
                     )}
                   </span>
                 </div>
-                {/* Labor Row */}
+                {/* Labor Row - Use base installation_labor_subtotal, not marked-up labor_total */}
                 <div className="flex justify-between items-center px-4 py-3 border-b border-gray-200 dark:border-gray-700">
                   <span className="text-sm text-gray-600 dark:text-gray-400">Labor</span>
                   <span className="font-mono font-medium text-gray-900 dark:text-white">
                     {new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(
-                      projectTotals?.labor_total ?? approvalResult?.totals?.labor_cost ?? 0
+                      projectTotals?.installation_labor_subtotal ?? laborSection?.installation_subtotal ?? 0
                     )}
                   </span>
                 </div>
-                {/* Overhead Row */}
+                {/* Overhead Row - Use overhead_total (includes project insurance) for display */}
                 <div className="flex justify-between items-center px-4 py-3 border-b border-gray-200 dark:border-gray-700">
                   <span className="text-sm text-gray-600 dark:text-gray-400">Overhead</span>
                   <span className="font-mono font-medium text-gray-900 dark:text-white">
                     {new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(
-                      projectTotals?.overhead_subtotal ?? overheadSection?.subtotal ?? approvalResult?.totals?.overhead_cost ?? 0
+                      projectTotals?.overhead_total ?? projectTotals?.overhead_subtotal ?? overheadSection?.subtotal ?? approvalResult?.totals?.overhead_cost ?? 0
                     )}
                   </span>
                 </div>
-                {/* Grand Total Row */}
+                {/* Grand Total Row - Keep using grand_total which includes markup + insurance */}
                 <div className="flex justify-between items-center px-4 py-4 bg-green-50 dark:bg-green-900/20">
                   <span className="font-semibold text-gray-900 dark:text-white">Grand Total</span>
                   <span className="font-mono font-bold text-xl text-green-600 dark:text-green-400">

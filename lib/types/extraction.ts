@@ -279,6 +279,9 @@ export interface ExtractionDetection {
 
   // User notes/comments
   notes?: string | null;
+
+  // Color override (user-selected color that overrides class-based default)
+  color_override?: string | null;
 }
 
 /** Material/product details for assigned detections */
@@ -947,7 +950,8 @@ export interface ProjectTotals {
 
   // Labor breakdown
   installation_labor_subtotal: number;
-  overhead_subtotal: number;
+  overhead_subtotal: number;         // Base overhead (without insurance)
+  overhead_total: number;            // For display: overhead_subtotal + project_insurance
   labor_cost_before_markup: number;  // installation + overhead
   labor_markup_rate: number;         // 0.26 (26%)
   labor_markup_amount: number;
@@ -1012,6 +1016,20 @@ export function getDetectionColor(detectionClass: DetectionClass | InternalDetec
   const normalized = normalizeClass(detectionClass as string);
 
   return DETECTION_CLASS_COLORS[normalized] ?? DETECTION_CLASS_COLORS[''];
+}
+
+/**
+ * Gets the effective color for a detection, respecting user color overrides.
+ * If the detection has a color_override set, it will be used instead of the class-based color.
+ *
+ * @param detection - Detection object with class and optional color_override
+ * @returns Hex color code (either override or class-based default)
+ */
+export function getEffectiveDetectionColor(detection: { class: string; color_override?: string | null }): string {
+  if (detection.color_override) {
+    return detection.color_override;
+  }
+  return getDetectionColor(detection.class as DetectionClass);
 }
 
 // =============================================================================

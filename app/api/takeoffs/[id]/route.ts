@@ -206,10 +206,20 @@ export async function GET(
     // Use stored totals if available, otherwise use calculated
     const materialCost = takeoff.total_material_cost ?? calculatedMaterialCost;
     const laborCost = takeoff.total_labor_cost ?? calculatedLaborCost;
-    const overheadCost = takeoff.total_overhead_cost ?? calculatedOverheadCost;
-    const subtotal = takeoff.subtotal ?? (materialCost + laborCost + overheadCost);
+    const overheadCostBase = takeoff.total_overhead_cost ?? calculatedOverheadCost;
+    const subtotal = takeoff.subtotal ?? (materialCost + laborCost + overheadCostBase);
     const markupPercent = takeoff.markup_percent ?? 15;
     const finalPrice = takeoff.final_price ?? (subtotal * (1 + markupPercent / 100));
+
+    // Calculate project insurance ($24.38 per $1,000 of subtotal before insurance)
+    // This matches the Mike Skjei methodology in the calculation API
+    const INSURANCE_RATE_PER_THOUSAND = 24.38;
+    const subtotalBeforeInsurance = (materialCost * (1 + markupPercent / 100)) +
+                                     ((laborCost + overheadCostBase) * (1 + markupPercent / 100));
+    const projectInsurance = Math.round((subtotalBeforeInsurance / 1000) * INSURANCE_RATE_PER_THOUSAND * 100) / 100;
+
+    // Overhead total for display (includes project insurance)
+    const overheadCostWithInsurance = Math.round((overheadCostBase + projectInsurance) * 100) / 100;
 
     // ==========================================================================
     // Return response
@@ -227,7 +237,7 @@ export async function GET(
         address: takeoff.address,
         total_material_cost: materialCost,
         total_labor_cost: laborCost,
-        total_overhead_cost: overheadCost,
+        total_overhead_cost: overheadCostWithInsurance,  // Include project insurance
         subtotal: subtotal,
         markup_percent: markupPercent,
         final_price: finalPrice,
@@ -240,10 +250,13 @@ export async function GET(
       totals: {
         material_cost: materialCost,
         labor_cost: laborCost,
-        overhead_cost: overheadCost,
+        overhead_cost: overheadCostWithInsurance,  // Include project insurance for display
         subtotal: subtotal,
         markup_percent: markupPercent,
         final_price: finalPrice,
+        // Additional fields for transparency
+        overhead_cost_base: overheadCostBase,
+        project_insurance: projectInsurance,
       },
     });
   } catch (error) {
