@@ -12,6 +12,12 @@ SELECT definition
 FROM pg_views
 WHERE viewname = 'v_pricing_current';
 
+-- Check what columns exist in pricing_items
+SELECT column_name, data_type
+FROM information_schema.columns
+WHERE table_name = 'pricing_items'
+ORDER BY ordinal_position;
+
 -- Check if pricing_items has the coverage_value for Tyvek
 SELECT sku, product_name, coverage_value, coverage_unit
 FROM pricing_items
@@ -21,12 +27,14 @@ WHERE LOWER(sku) LIKE '%tyvek%'
 -- ============================================================================
 -- RECREATE v_pricing_current VIEW
 -- Include coverage_value and coverage_unit columns
+-- Only include columns that exist in pricing_items table
 -- ============================================================================
 
 -- Drop existing view if it exists
 DROP VIEW IF EXISTS v_pricing_current CASCADE;
 
 -- Create the view with all necessary columns including coverage_value
+-- NOTE: Only include columns that actually exist in pricing_items
 CREATE OR REPLACE VIEW v_pricing_current AS
 SELECT
   pi.id,
@@ -39,15 +47,12 @@ SELECT
   pi.material_cost,
   pi.base_labor_cost,
   pi.total_labor_cost,
-  pi.markup_percent,
   pi.manufacturer,
-  pi.texture,
-  pi.coverage_value,    -- Include coverage_value
-  pi.coverage_unit,     -- Include coverage_unit
+  pi.coverage_value,    -- Include coverage_value (for SF/roll, LF/piece, etc.)
+  pi.coverage_unit,     -- Include coverage_unit (SF, LF, etc.)
   pi.reveal_inches,
-  pi.is_colorplus,
-  pi.notes,
   pi.labor_class,
+  pi.notes,
   pi.created_at,
   pi.updated_at
 FROM pricing_items pi
@@ -72,4 +77,5 @@ WHERE LOWER(sku) LIKE '%tyvek%'
 SELECT sku, product_name, category, coverage_value, coverage_unit
 FROM v_pricing_current
 WHERE coverage_value IS NOT NULL
-ORDER BY category, sku;
+ORDER BY category, sku
+LIMIT 50;
