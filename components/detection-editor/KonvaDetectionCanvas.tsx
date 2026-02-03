@@ -25,6 +25,7 @@ import {
   flattenPoints,
   calculatePolygonMeasurements,
 } from '@/lib/utils/polygonUtils';
+import { usePdfRenderer } from '@/lib/hooks/usePdfRenderer';
 
 // =============================================================================
 // Types
@@ -106,6 +107,8 @@ export interface KonvaDetectionCanvasProps {
     originalDetection: ExtractionDetection,
     splitPolygon: PolygonPoint[]
   ) => void;
+  /** URL to the source PDF for crisp rendering at any zoom level */
+  pdfUrl?: string | null;
 }
 
 // =============================================================================
@@ -186,6 +189,7 @@ export default function KonvaDetectionCanvas({
   containerWidth,
   containerHeight,
   onSplitDetection,
+  pdfUrl,
 }: KonvaDetectionCanvasProps) {
   const stageRef = useRef<Konva.Stage>(null);
   const imageRef = useRef<Konva.Image>(null);
@@ -414,6 +418,78 @@ export default function KonvaDetectionCanvas({
     };
     img.src = imageUrl;
   }, [imageUrl, imageWidth, imageHeight, containerWidth, containerHeight]);
+
+  // ==========================================================================
+  // PDF Rendering (provides crisp zoom at any level)
+  // ==========================================================================
+
+  // Get actual image dimensions from the loaded image (critical for coordinate alignment)
+  const actualImageWidth = image?.naturalWidth || page.original_width || imageWidth;
+  const actualImageHeight = image?.naturalHeight || page.original_height || imageHeight;
+
+  // PDF rendering hook - renders PDF at resolution matching original image pixels
+  const {
+    pdfCanvas,
+    isLoading: pdfLoading,
+    pdfDimensions,
+    renderAtZoom,
+    error: pdfError
+  } = usePdfRenderer({
+    pdfUrl: pdfUrl || null,
+    pageNumber: page.page_number || 1,
+    dpi: page.dpi || 200,
+    imageWidth: actualImageWidth,
+    imageHeight: actualImageHeight,
+  });
+
+  // Track current render zoom level to avoid unnecessary re-renders
+  const lastRenderZoomRef = useRef<number>(0);
+
+  // Re-render PDF when zoom changes significantly (crossing integer thresholds)
+  useEffect(() => {
+    if (!pdfCanvas || !renderAtZoom) return;
+
+    const renderZoom = Math.max(1, Math.ceil(scale));
+
+    // Only re-render if we've crossed a zoom threshold
+    if (renderZoom !== lastRenderZoomRef.current) {
+      lastRenderZoomRef.current = renderZoom;
+      renderAtZoom(scale);
+    }
+  }, [pdfCanvas, renderAtZoom, scale]);
+
+  // Initial render when PDF is ready
+  useEffect(() => {
+    if (pdfCanvas && renderAtZoom && lastRenderZoomRef.current === 0) {
+      renderAtZoom(1);
+      lastRenderZoomRef.current = 1;
+    }
+  }, [pdfCanvas, renderAtZoom]);
+
+  // Determine if we should use PDF rendering (available and loaded)
+  const usePdfRendering = !!pdfCanvas && !pdfLoading && !pdfError;
+
+  // Use PDF dimensions if available, fall back to existing image dimensions
+  // These are the "display" dimensions - Konva will scale the hi-res canvas to fit
+  const effectiveWidth = usePdfRendering && pdfDimensions ? pdfDimensions.width : imageWidth;
+  const effectiveHeight = usePdfRendering && pdfDimensions ? pdfDimensions.height : imageHeight;
+
+  // Debug: Log PDF rendering state
+  useEffect(() => {
+    if (pdfUrl) {
+      console.log('[KonvaCanvas] PDF rendering state:', {
+        pdfUrl: pdfUrl?.substring(0, 50) + '...',
+        pdfLoading,
+        pdfError: pdfError?.message,
+        usePdfRendering,
+        pdfDimensions,
+        effectiveWidth,
+        effectiveHeight,
+        actualImageDimensions: actualImageWidth && actualImageHeight ? `${actualImageWidth}x${actualImageHeight}` : 'not loaded',
+        currentZoom: scale,
+      });
+    }
+  }, [pdfUrl, pdfLoading, pdfError, usePdfRendering, pdfDimensions, effectiveWidth, effectiveHeight, actualImageWidth, actualImageHeight, scale]);
 
   // ==========================================================================
   // Scale Ratio for Measurements
@@ -1321,6 +1397,18 @@ export default function KonvaDetectionCanvas({
   // Cursor Style
   // ==========================================================================
 
+  // Determine if we're in a mode that requires consistent crosshair cursor
+  // This is used to prevent child elements from overriding the cursor
+  const isDrawingMode =
+    isDrawingPolygon ||
+    lineStartPoint !== null ||
+    isSplitDrawing ||
+    toolMode === 'create' ||
+    toolMode === 'line' ||
+    toolMode === 'point' ||
+    toolMode === 'calibrate' ||
+    toolMode === 'split';
+
   const getCursor = () => {
     if (isDrawingPolygon) return 'crosshair';
     if (lineStartPoint) return 'crosshair';
@@ -1370,7 +1458,7 @@ export default function KonvaDetectionCanvas({
 
   return (
     <div
-      className="w-full h-full overflow-hidden"
+      className={`w-full h-full overflow-hidden ${isDrawingMode ? 'drawing-mode-active' : ''}`}
       style={{
         cursor: getCursor(),
         backgroundColor: '#1a1a2e',
@@ -1381,6 +1469,16 @@ export default function KonvaDetectionCanvas({
         backgroundSize: '20px 20px',
       }}
     >
+      {/* Force crosshair cursor during drawing modes - prevents child elements from overriding */}
+      {isDrawingMode && (
+        <style>{`
+          .drawing-mode-active,
+          .drawing-mode-active *,
+          .drawing-mode-active canvas {
+            cursor: crosshair !important;
+          }
+        `}</style>
+      )}
       <Stage
         ref={stageRef}
         width={containerWidth}
@@ -1402,15 +1500,25 @@ export default function KonvaDetectionCanvas({
         onTouchEnd={handleStageMouseUp}
       >
         <Layer>
-          {/* Background Image */}
-          {image && (
+          {/* Background: PDF (preferred for crisp zoom) or Image (fallback) */}
+          {/* When using PDF, Konva scales the hi-res canvas to fit the display dimensions */}
+          {/* listening={false} prevents background from capturing mouse events */}
+          {usePdfRendering ? (
+            <KonvaImage
+              image={pdfCanvas!}
+              width={effectiveWidth}
+              height={effectiveHeight}
+              listening={false}
+            />
+          ) : image ? (
             <KonvaImage
               ref={imageRef}
               image={image}
               width={imageWidth}
               height={imageHeight}
+              listening={false}
             />
-          )}
+          ) : null}
 
           {/* Detection Polygons (filter out lines and points) */}
           {sortedDetections
@@ -1756,9 +1864,18 @@ export default function KonvaDetectionCanvas({
       </div>
 
       {/* Loading State */}
-      {!imageLoaded && (
+      {(!imageLoaded && !usePdfRendering) && (
         <div className="absolute inset-0 flex items-center justify-center bg-neutral-900">
-          <div className="text-gray-400">Loading image...</div>
+          <div className="text-gray-400">
+            {pdfUrl && pdfLoading ? 'Loading PDF...' : 'Loading image...'}
+          </div>
+        </div>
+      )}
+
+      {/* PDF Rendering Indicator (subtle, in corner) */}
+      {usePdfRendering && (
+        <div className="absolute bottom-4 left-24 bg-green-900/70 text-green-300 px-2 py-1 rounded text-xs font-mono">
+          PDF
         </div>
       )}
     </div>

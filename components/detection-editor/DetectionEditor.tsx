@@ -3265,6 +3265,7 @@ export default function DetectionEditor({
                     containerWidth={canvasContainerSize.width}
                     containerHeight={canvasContainerSize.height}
                     onSplitDetection={handleSplitDetection}
+                    pdfUrl={job?.source_pdf_url}
                   />
                 </div>
               ) : (
