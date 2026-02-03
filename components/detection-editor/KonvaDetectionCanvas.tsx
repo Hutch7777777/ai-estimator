@@ -117,6 +117,46 @@ const MAX_SCALE = 5;
 const ZOOM_FACTOR = 1.1;
 const CLOSE_THRESHOLD = 15; // Pixels to detect "near starting point"
 const MIN_POLYGON_POINTS = 3;
+const SNAP_ANGLE_INCREMENT = 45; // Degrees for angle snapping when Shift is held
+
+// =============================================================================
+// Utility Functions
+// =============================================================================
+
+/**
+ * Snap a point to the nearest angle increment from a reference point.
+ * Used when Shift is held during polygon/split drawing.
+ * @param fromPoint - The reference point (last placed point)
+ * @param toPoint - The target point (current cursor position)
+ * @param snapDegrees - The angle increment to snap to (default 45°)
+ * @returns The snapped point at the same distance but adjusted angle
+ */
+function snapToAngle(
+  fromPoint: PolygonPoint,
+  toPoint: PolygonPoint,
+  snapDegrees: number = SNAP_ANGLE_INCREMENT
+): PolygonPoint {
+  const dx = toPoint.x - fromPoint.x;
+  const dy = toPoint.y - fromPoint.y;
+  const distance = Math.sqrt(dx * dx + dy * dy);
+
+  // If points are too close, don't snap
+  if (distance < 5) return toPoint;
+
+  // Calculate current angle in radians, then convert to degrees
+  const angleRadians = Math.atan2(dy, dx);
+  const angleDegrees = angleRadians * (180 / Math.PI);
+
+  // Snap to nearest increment
+  const snappedDegrees = Math.round(angleDegrees / snapDegrees) * snapDegrees;
+  const snappedRadians = snappedDegrees * (Math.PI / 180);
+
+  // Calculate new point at snapped angle, same distance
+  return {
+    x: fromPoint.x + Math.cos(snappedRadians) * distance,
+    y: fromPoint.y + Math.sin(snappedRadians) * distance,
+  };
+}
 
 // Classes appropriate for linear measurements (lines) - measured in LF, not SF
 // Note: soffit is NOT included here - it uses area (SF) measurement via rectangle/polygon tool
@@ -194,6 +234,117 @@ export default function KonvaDetectionCanvas({
   const [splitRectEnd, setSplitRectEnd] = useState<PolygonPoint | null>(null);
   const [isDraggingRect, setIsDraggingRect] = useState(false);
 
+  // Auto-pan state for edge scrolling during drawing
+  const [autoPanDirection, setAutoPanDirection] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
+  const autoPanAnimationRef = useRef<number | null>(null);
+  const lastPointerPositionRef = useRef<{ x: number; y: number } | null>(null);
+
+  // Auto-pan constants
+  const EDGE_THRESHOLD = 60; // pixels from edge to start panning
+  const PAN_SPEED_BASE = 8; // base pixels per frame
+  const PAN_SPEED_MAX = 25; // max pixels per frame when far past edge
+
+  // Shift key state for angle snapping during drawing
+  const [isShiftHeld, setIsShiftHeld] = useState(false);
+
+  // Ref to track current drawing state for keyboard handlers (avoids useEffect dependency issues)
+  const drawingStateRef = useRef({
+    isDrawingPolygon: false,
+    drawingPointsLength: 0,
+    isSplitDrawing: false,
+    splitPolygonPointsLength: 0,
+  });
+
+  // Keep ref in sync with state
+  useEffect(() => {
+    drawingStateRef.current = {
+      isDrawingPolygon,
+      drawingPointsLength: drawingPoints.length,
+      isSplitDrawing,
+      splitPolygonPointsLength: splitPolygonPoints.length,
+    };
+  }, [isDrawingPolygon, drawingPoints.length, isSplitDrawing, splitPolygonPoints.length]);
+
+  // Track shift key and handle keyboard shortcuts for drawing
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Shift key for angle snapping
+      if (e.key === 'Shift') setIsShiftHeld(true);
+
+      // Cmd+Z (Mac) / Ctrl+Z (Windows) - undo last point while drawing
+      if ((e.metaKey || e.ctrlKey) && e.key === 'z') {
+        const { isDrawingPolygon: isDrawing, drawingPointsLength, isSplitDrawing: isSplit, splitPolygonPointsLength } = drawingStateRef.current;
+
+        // Handle polygon drawing mode
+        if (isDrawing && drawingPointsLength > 0) {
+          e.preventDefault();
+          if (drawingPointsLength === 1) {
+            // Only one point - cancel drawing entirely
+            setDrawingPoints([]);
+            setIsDrawingPolygon(false);
+            setMousePosition(null);
+            setIsNearStart(false);
+          } else {
+            // Remove last point
+            setDrawingPoints(prev => prev.slice(0, -1));
+          }
+          return;
+        }
+
+        // Handle split drawing mode
+        if (isSplit && splitPolygonPointsLength > 0) {
+          e.preventDefault();
+          if (splitPolygonPointsLength === 1) {
+            // Only one point - cancel drawing entirely
+            setSplitPolygonPoints([]);
+            setIsSplitDrawing(false);
+            setSplitMousePos(null);
+            setIsSplitNearStart(false);
+          } else {
+            // Remove last point
+            setSplitPolygonPoints(prev => prev.slice(0, -1));
+          }
+          return;
+        }
+      }
+
+      // Cmd+X (Mac) / Ctrl+X (Windows) - cancel entire drawing
+      if ((e.metaKey || e.ctrlKey) && e.key === 'x') {
+        const { isDrawingPolygon: isDrawing, isSplitDrawing: isSplit } = drawingStateRef.current;
+
+        // Only preventDefault if actively drawing (preserve normal cut behavior otherwise)
+        if (isDrawing || isSplit) {
+          e.preventDefault();
+
+          if (isDrawing) {
+            setDrawingPoints([]);
+            setIsDrawingPolygon(false);
+            setMousePosition(null);
+            setIsNearStart(false);
+          }
+
+          if (isSplit) {
+            setSplitPolygonPoints([]);
+            setIsSplitDrawing(false);
+            setSplitMousePos(null);
+            setIsSplitNearStart(false);
+          }
+          return;
+        }
+      }
+    };
+    const handleKeyUp = (e: KeyboardEvent) => {
+      if (e.key === 'Shift') setIsShiftHeld(false);
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('keyup', handleKeyUp);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('keyup', handleKeyUp);
+    };
+  }, []); // Empty deps - ref always has current values
+
   // Get image dimensions
   const imageWidth = page.original_width || 1920;
   const imageHeight = page.original_height || 1080;
@@ -270,6 +421,97 @@ export default function KonvaDetectionCanvas({
 
   // Get scale ratio from page (pixels per foot) - default to 64 if not set
   const scaleRatio = page.scale_ratio ?? 64;
+
+  // ==========================================================================
+  // Auto-Pan During Drawing (Edge Scrolling)
+  // ==========================================================================
+
+  // Check if we're in an active drawing state that should trigger auto-pan
+  const isActivelyDrawing = isDrawingPolygon || isSplitDrawing || isDraggingCreateRect || isDraggingRect;
+
+  // Auto-pan animation effect
+  useEffect(() => {
+    // Only run if we have a pan direction and are actively drawing
+    if ((autoPanDirection.x === 0 && autoPanDirection.y === 0) || !isActivelyDrawing) {
+      // Cancel any existing animation
+      if (autoPanAnimationRef.current) {
+        cancelAnimationFrame(autoPanAnimationRef.current);
+        autoPanAnimationRef.current = null;
+      }
+      return;
+    }
+
+    const animate = () => {
+      setPosition(prev => ({
+        x: prev.x + autoPanDirection.x,
+        y: prev.y + autoPanDirection.y,
+      }));
+
+      // Continue animation
+      autoPanAnimationRef.current = requestAnimationFrame(animate);
+    };
+
+    // Start animation
+    autoPanAnimationRef.current = requestAnimationFrame(animate);
+
+    // Cleanup on unmount or when dependencies change
+    return () => {
+      if (autoPanAnimationRef.current) {
+        cancelAnimationFrame(autoPanAnimationRef.current);
+        autoPanAnimationRef.current = null;
+      }
+    };
+  }, [autoPanDirection.x, autoPanDirection.y, isActivelyDrawing]);
+
+  // Stop auto-pan when drawing ends
+  useEffect(() => {
+    if (!isActivelyDrawing) {
+      setAutoPanDirection({ x: 0, y: 0 });
+      lastPointerPositionRef.current = null;
+    }
+  }, [isActivelyDrawing]);
+
+  // Calculate auto-pan direction based on pointer position
+  const calculateAutoPan = useCallback((pointerX: number, pointerY: number) => {
+    if (!isActivelyDrawing) {
+      setAutoPanDirection({ x: 0, y: 0 });
+      return;
+    }
+
+    let panX = 0;
+    let panY = 0;
+
+    // Calculate distance from each edge
+    const distFromLeft = pointerX;
+    const distFromRight = containerWidth - pointerX;
+    const distFromTop = pointerY;
+    const distFromBottom = containerHeight - pointerY;
+
+    // Calculate pan speed based on how far past the threshold we are
+    // The further past, the faster we pan (up to PAN_SPEED_MAX)
+    const calculatePanSpeed = (distFromEdge: number) => {
+      if (distFromEdge >= EDGE_THRESHOLD) return 0;
+      // Linear interpolation from 0 at threshold to max at edge
+      const factor = 1 - (distFromEdge / EDGE_THRESHOLD);
+      return PAN_SPEED_BASE + (PAN_SPEED_MAX - PAN_SPEED_BASE) * factor * factor; // Quadratic for smoother feel
+    };
+
+    // Check horizontal edges
+    if (distFromLeft < EDGE_THRESHOLD) {
+      panX = calculatePanSpeed(distFromLeft); // Pan right (positive) to show more on left
+    } else if (distFromRight < EDGE_THRESHOLD) {
+      panX = -calculatePanSpeed(distFromRight); // Pan left (negative) to show more on right
+    }
+
+    // Check vertical edges
+    if (distFromTop < EDGE_THRESHOLD) {
+      panY = calculatePanSpeed(distFromTop); // Pan down (positive) to show more on top
+    } else if (distFromBottom < EDGE_THRESHOLD) {
+      panY = -calculatePanSpeed(distFromBottom); // Pan up (negative) to show more on bottom
+    }
+
+    setAutoPanDirection({ x: panX, y: panY });
+  }, [isActivelyDrawing, containerWidth, containerHeight, EDGE_THRESHOLD, PAN_SPEED_BASE, PAN_SPEED_MAX]);
 
   // ==========================================================================
   // Wheel Zoom
@@ -762,6 +1004,14 @@ export default function KonvaDetectionCanvas({
       const stage = stageRef.current;
       if (!stage) return;
 
+      // Get screen pointer position for auto-pan edge detection
+      const screenPointer = stage.getPointerPosition();
+      if (screenPointer) {
+        lastPointerPositionRef.current = screenPointer;
+        // Calculate auto-pan based on screen position (only when actively drawing)
+        calculateAutoPan(screenPointer.x, screenPointer.y);
+      }
+
       // Handle calibration mode mouse move - use screen coords + manual transform
       // to match the click handler (must use same coordinate system)
       if (toolMode === 'calibrate' && calibrationState.pointA) {
@@ -809,9 +1059,13 @@ export default function KonvaDetectionCanvas({
 
           // Track cursor for polygon preview when actively drawing polygon
           if (isSplitDrawing) {
-            setSplitMousePos(currentPoint);
+            // Apply angle snapping when Shift is held and we have at least one point
+            const previewPoint = (isShiftHeld && splitPolygonPoints.length > 0)
+              ? snapToAngle(splitPolygonPoints[splitPolygonPoints.length - 1], currentPoint)
+              : currentPoint;
+            setSplitMousePos(previewPoint);
 
-            // Check if near starting point for polygon completion
+            // Check if near starting point for polygon completion (use original point for proximity check)
             if (splitPolygonPoints.length >= MIN_POLYGON_POINTS) {
               setIsSplitNearStart(isPointNearStart(currentPoint, splitPolygonPoints[0]));
             } else {
@@ -842,9 +1096,13 @@ export default function KonvaDetectionCanvas({
 
           // Track cursor for polygon preview when actively drawing polygon
           if (isDrawingPolygon) {
-            setMousePosition(currentPoint);
+            // Apply angle snapping when Shift is held and we have at least one point
+            const previewPoint = (isShiftHeld && drawingPoints.length > 0)
+              ? snapToAngle(drawingPoints[drawingPoints.length - 1], currentPoint)
+              : currentPoint;
+            setMousePosition(previewPoint);
 
-            // Check if near starting point for polygon completion
+            // Check if near starting point for polygon completion (use original point for proximity check)
             if (drawingPoints.length >= MIN_POLYGON_POINTS) {
               setIsNearStart(isPointNearStart(currentPoint, drawingPoints[0]));
             } else {
@@ -862,7 +1120,7 @@ export default function KonvaDetectionCanvas({
       const currentPoint = { x: pointer.x, y: pointer.y };
       setMousePosition(currentPoint);
     },
-    [toolMode, isDrawingPolygon, drawingPoints, isPointNearStart, calibrationState.pointA, position, scale, lineStartPoint, isSplitDrawing, splitPolygonPoints, splitRectStart, createRectStart]
+    [toolMode, isDrawingPolygon, drawingPoints, isPointNearStart, calibrationState.pointA, position, scale, lineStartPoint, isSplitDrawing, splitPolygonPoints, splitRectStart, createRectStart, calculateAutoPan, isShiftHeld]
   );
 
   const handleStageMouseUp = useCallback(
@@ -878,13 +1136,16 @@ export default function KonvaDetectionCanvas({
           console.log('[Create MouseUp] Adding polygon point at', createRectStart);
 
           if (!isDrawingPolygon) {
-            // Start new polygon
+            // Start new polygon (first point - no snapping needed)
             setIsDrawingPolygon(true);
             setDrawingPoints([createRectStart]);
             setMousePosition(createRectStart);
           } else {
-            // Add point to existing polygon
-            setDrawingPoints(prev => [...prev, createRectStart]);
+            // Add point to existing polygon - apply snapping if Shift is held
+            const pointToAdd = (isShiftHeld && drawingPoints.length > 0)
+              ? snapToAngle(drawingPoints[drawingPoints.length - 1], createRectStart)
+              : createRectStart;
+            setDrawingPoints(prev => [...prev, pointToAdd]);
           }
 
           // Reset rectangle state but keep polygon drawing active
@@ -905,13 +1166,16 @@ export default function KonvaDetectionCanvas({
           console.log('[Split MouseUp] Adding polygon point at', splitRectStart);
 
           if (!isSplitDrawing) {
-            // Start new polygon
+            // Start new polygon (first point - no snapping needed)
             setIsSplitDrawing(true);
             setSplitPolygonPoints([splitRectStart]);
             setSplitMousePos(splitRectStart);
           } else {
-            // Add point to existing polygon
-            setSplitPolygonPoints(prev => [...prev, splitRectStart]);
+            // Add point to existing polygon - apply snapping if Shift is held
+            const pointToAdd = (isShiftHeld && splitPolygonPoints.length > 0)
+              ? snapToAngle(splitPolygonPoints[splitPolygonPoints.length - 1], splitRectStart)
+              : splitRectStart;
+            setSplitPolygonPoints(prev => [...prev, pointToAdd]);
           }
 
           // Reset rectangle state but keep polygon drawing active
@@ -921,7 +1185,7 @@ export default function KonvaDetectionCanvas({
         }
       }
     },
-    [toolMode, createRectStart, createRectEnd, isDraggingCreateRect, isDrawingPolygon, completeRectangleCreate, splitRectStart, splitRectEnd, isDraggingRect, isSplitDrawing, executeSplitWithRect]
+    [toolMode, createRectStart, createRectEnd, isDraggingCreateRect, isDrawingPolygon, completeRectangleCreate, splitRectStart, splitRectEnd, isDraggingRect, isSplitDrawing, executeSplitWithRect, isShiftHeld, drawingPoints, splitPolygonPoints]
   );
 
   const handleStageDoubleClick = useCallback(

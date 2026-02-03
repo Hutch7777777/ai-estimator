@@ -273,7 +273,7 @@ const DetectionSidebar = memo(function DetectionSidebar({
   }, [detections]);
 
   return (
-    <div className="w-72 h-full bg-white dark:bg-gray-900 border-l border-gray-200 dark:border-gray-700 flex flex-col">
+    <div className="h-full bg-white dark:bg-gray-900 flex flex-col">
       {/* Tab Bar */}
       <div className="flex border-b border-gray-200 dark:border-gray-700">
         {TABS.map((tab) => {

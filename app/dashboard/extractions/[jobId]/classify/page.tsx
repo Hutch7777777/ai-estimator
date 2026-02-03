@@ -18,13 +18,17 @@ import {
   Loader2,
   AlertCircle,
   ChevronDown,
+  ChevronLeft,
+  ChevronRight,
   Play,
   Check,
   FileUp,
   FileSearch,
   Layers,
   Sparkles,
+  ZoomIn,
 } from 'lucide-react';
+import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import type { ExtractionJob, ExtractionPage, PageType } from '@/lib/types/extraction';
 
 // =============================================================================
@@ -168,6 +172,10 @@ export default function ClassificationReviewPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Image preview lightbox state
+  const [previewPage, setPreviewPage] = useState<ExtractionPage | null>(null);
+  const [previewIndex, setPreviewIndex] = useState<number>(0);
 
   // Post-confirm processing state
   const [isProcessing, setIsProcessing] = useState(false);
@@ -355,6 +363,41 @@ export default function ClassificationReviewPage() {
     router.push('/project');
   };
 
+  // Lightbox navigation handlers
+  const handlePrevPage = useCallback(() => {
+    if (previewIndex > 0) {
+      const newIndex = previewIndex - 1;
+      setPreviewIndex(newIndex);
+      setPreviewPage(pages[newIndex]);
+    }
+  }, [previewIndex, pages]);
+
+  const handleNextPage = useCallback(() => {
+    if (previewIndex < pages.length - 1) {
+      const newIndex = previewIndex + 1;
+      setPreviewIndex(newIndex);
+      setPreviewPage(pages[newIndex]);
+    }
+  }, [previewIndex, pages]);
+
+  // Keyboard navigation for lightbox
+  useEffect(() => {
+    if (!previewPage) return;
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'ArrowLeft') {
+        handlePrevPage();
+      } else if (e.key === 'ArrowRight') {
+        handleNextPage();
+      } else if (e.key === 'Escape') {
+        setPreviewPage(null);
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [previewPage, handlePrevPage, handleNextPage]);
+
   // =============================================================================
   // Computed Values
   // =============================================================================
@@ -478,14 +521,24 @@ export default function ClassificationReviewPage() {
             }`}
           >
             <CardContent className="p-0">
-              {/* Thumbnail Image */}
-              <div className="aspect-[3/4] bg-muted relative">
+              {/* Thumbnail Image - Clickable for preview */}
+              <div
+                className="aspect-[3/4] bg-muted relative cursor-pointer group"
+                onClick={() => {
+                  setPreviewPage(page);
+                  setPreviewIndex(pages.findIndex(p => p.id === page.id));
+                }}
+              >
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img
                   src={page.thumbnail_url || page.image_url}
                   alt={`Page ${page.page_number}`}
                   className="w-full h-full object-contain"
                 />
+                {/* Hover overlay with zoom icon */}
+                <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-colors flex items-center justify-center">
+                  <ZoomIn className="w-8 h-8 text-white opacity-0 group-hover:opacity-100 transition-opacity" />
+                </div>
               </div>
 
               {/* Footer */}
@@ -530,6 +583,118 @@ export default function ClassificationReviewPage() {
           elevation{elevationCount !== 1 ? 's' : ''} will be processed for object detection
         </p>
       </div>
+
+      {/* Image Preview Lightbox */}
+      <Dialog open={!!previewPage} onOpenChange={(open) => !open && setPreviewPage(null)}>
+        <DialogContent
+          className="p-0 flex flex-col"
+          style={{ width: '85vw', height: '85vh', maxWidth: '1400px' }}
+          showCloseButton={false}
+        >
+          {/* Visually hidden title for accessibility */}
+          <DialogTitle className="sr-only">
+            Page {previewPage?.page_number ?? ''} Preview
+          </DialogTitle>
+
+          {previewPage && (
+            <>
+              {/* Header - fixed at top */}
+              <div className="flex items-center justify-between p-4 border-b bg-background shrink-0">
+                <div className="flex items-center gap-4">
+                  <span className="font-semibold">Page {previewPage.page_number}</span>
+                  <Badge className={getBadgeColor(previewPage.page_type)}>
+                    {formatPageType(previewPage.page_type)}
+                  </Badge>
+                  {previewPage.elevation_name && (
+                    <span className="text-sm text-muted-foreground">
+                      {previewPage.elevation_name}
+                    </span>
+                  )}
+                </div>
+                <div className="flex items-center gap-4">
+                  <span className="text-sm text-muted-foreground">
+                    {previewIndex + 1} of {pages.length}
+                  </span>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setPreviewPage(null)}
+                  >
+                    Close
+                  </Button>
+                </div>
+              </div>
+
+              {/* Scrollable Image Container */}
+              <div className="flex-1 relative bg-muted/50 overflow-auto min-h-0">
+                {/* Previous Button */}
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="absolute left-4 top-1/2 -translate-y-1/2 z-10 bg-background/80 hover:bg-background shadow-md"
+                  onClick={handlePrevPage}
+                  disabled={previewIndex === 0}
+                >
+                  <ChevronLeft className="h-6 w-6" />
+                </Button>
+
+                {/* Image */}
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={previewPage.image_url}
+                  alt={`Page ${previewPage.page_number}`}
+                  className="w-full h-auto"
+                />
+
+                {/* Next Button */}
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="absolute right-4 top-1/2 -translate-y-1/2 z-10 bg-background/80 hover:bg-background shadow-md"
+                  onClick={handleNextPage}
+                  disabled={previewIndex === pages.length - 1}
+                >
+                  <ChevronRight className="h-6 w-6" />
+                </Button>
+              </div>
+
+              {/* Footer */}
+              {/* Footer - fixed at bottom */}
+              <div className="p-4 border-t bg-background shrink-0 flex items-center justify-between">
+                <span className="text-sm text-muted-foreground">
+                  Use ← → arrow keys to navigate
+                </span>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button variant="outline" size="sm">
+                      <Badge className={`${getBadgeColor(previewPage.page_type)} mr-2`}>
+                        {formatPageType(previewPage.page_type)}
+                      </Badge>
+                      <ChevronDown className="h-4 w-4" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end">
+                    {PAGE_TYPES.map(type => (
+                      <DropdownMenuItem
+                        key={type}
+                        onClick={() => {
+                          handleTypeChange(previewPage.id, type);
+                          setPreviewPage({ ...previewPage, page_type: type });
+                        }}
+                        className={previewPage.page_type === type ? 'bg-accent' : ''}
+                      >
+                        <Badge className={`${getBadgeColor(type)} mr-2`}>
+                          {formatPageType(type)}
+                        </Badge>
+                      </DropdownMenuItem>
+                    ))}
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </div>
+            </>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

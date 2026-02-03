@@ -7,6 +7,12 @@ export { default as DetectionToolbar } from './DetectionToolbar';
 export { default as DetectionSidebar } from './DetectionSidebar';
 export { default as DetectionBox } from './DetectionBox';
 
+// Konva-based detection components
+export { default as KonvaDetectionPolygon } from './KonvaDetectionPolygon';
+export { default as KonvaDetectionRect } from './KonvaDetectionRect';
+export { default as KonvaDetectionLine } from './KonvaDetectionLine';
+export { default as KonvaDetectionPoint } from './KonvaDetectionPoint';
+
 // Re-export types
 export type { DetectionEditorProps } from './DetectionEditor';
 export type { DetectionCanvasProps } from './DetectionCanvas';
