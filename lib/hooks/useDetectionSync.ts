@@ -30,11 +30,8 @@ function getSimplePolygonPoints(points: PolygonPoints | null | undefined): Polyg
 // Configuration
 // =============================================================================
 
-const WEBHOOK_URL =
-  process.env.NEXT_PUBLIC_N8N_WEBHOOK_URL ||
-  'https://n8n-production-293e.up.railway.app';
-const SYNC_ENDPOINT = `${WEBHOOK_URL}/webhook/detection-edit-sync`;
-const VALIDATE_ENDPOINT = `${WEBHOOK_URL}/webhook/validate-detections`;
+const SYNC_ENDPOINT = '/api/n8n/detection-edit-sync';
+const VALIDATE_ENDPOINT = '/api/n8n/validate-detections';
 const MAX_RETRIES = 3;
 const RETRY_DELAYS = [1000, 2000, 4000]; // ms
 

@@ -3301,10 +3301,8 @@ export default function DetectionEditor({
         }
       }
 
-      const webhookUrl =
-        process.env.NEXT_PUBLIC_N8N_WEBHOOK_URL || 'https://n8n-production-293e.up.railway.app';
       const response = await fetch(
-        `${webhookUrl}/webhook/approve-detection-editor`,
+        '/api/n8n/approve-detection-editor',
         {
           method: 'POST',
           headers: {

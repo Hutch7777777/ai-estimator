@@ -205,15 +205,9 @@ export function HoverUploadStep({ data, onUpdate }: HoverUploadStepProps) {
     return payload;
   };
 
-  // Trigger n8n workflow
+  // Trigger n8n workflow (proxied through Next.js API to avoid CORS)
   const triggerWorkflow = async (projectData: any) => {
-    const webhookUrl = process.env.NEXT_PUBLIC_N8N_WEBHOOK_URL;
-
-    if (!webhookUrl) {
-      throw new Error('N8N webhook URL not configured. Please add NEXT_PUBLIC_N8N_WEBHOOK_URL to .env.local');
-    }
-
-    const response = await fetch(webhookUrl, {
+    const response = await fetch('/api/n8n/multi-trade-coordinator', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(projectData)

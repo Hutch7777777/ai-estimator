@@ -237,7 +237,7 @@ export function EstimateSummary({
     setIsGeneratingProposal(true);
 
     try {
-      const response = await fetch('https://n8n-production-293e.up.railway.app/webhook/generate-proposal', {
+      const response = await fetch('/api/n8n/generate-proposal', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ takeoff_id: takeoff.id })
