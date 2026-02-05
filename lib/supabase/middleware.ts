@@ -30,7 +30,7 @@ export async function updateSession(request: NextRequest) {
     console.error('Middleware auth error:', error.message);
   }
 
-  const publicRoutes = ['/login', '/signup', '/auth/callback', '/auth/confirm', '/onboarding'];
+  const publicRoutes = ['/login', '/signup', '/auth/callback', '/auth/confirm', '/onboarding', '/api'];
   const isPublicRoute = publicRoutes.some(route => request.nextUrl.pathname.startsWith(route));
 
   if (!session && !isPublicRoute) {

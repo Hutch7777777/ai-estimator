@@ -11,7 +11,7 @@ import type {
   PolygonPoint,
   MarkupType,
 } from '@/lib/types/extraction';
-import { DETECTION_CLASS_COLORS } from '@/lib/types/extraction';
+import { DETECTION_CLASS_COLORS, isPolygonWithHoles } from '@/lib/types/extraction';
 import KonvaDetectionPolygon, { type PolygonUpdatePayload } from './KonvaDetectionPolygon';
 import KonvaDetectionLine, { type LineUpdatePayload } from './KonvaDetectionLine';
 import KonvaDetectionPoint, { type PointUpdatePayload } from './KonvaDetectionPoint';
@@ -20,12 +20,14 @@ import {
   calculateCenterOffset,
   constrainScale,
 } from '@/lib/utils/coordinates';
+import { pointInPolygon } from '../cad-markup/hitTesting';
 import {
   getPolygonBoundingBox,
   flattenPoints,
   calculatePolygonMeasurements,
 } from '@/lib/utils/polygonUtils';
 import { usePdfRenderer } from '@/lib/hooks/usePdfRenderer';
+import SAMSelectOverlay from './SAMSelectOverlay';
 
 // =============================================================================
 // Types
@@ -57,6 +59,8 @@ export interface KonvaDetectionCanvasProps {
   toolMode: ToolMode;
   activeClass: DetectionClass;
   onSelectionChange: (id: string | null, addToSelection?: boolean) => void;
+  /** Called when paint selection completes with array of detection IDs */
+  onMultiSelect?: (ids: string[]) => void;
   onDetectionMove: (
     detection: ExtractionDetection,
     newPosition: { pixel_x: number; pixel_y: number }
@@ -109,6 +113,41 @@ export interface KonvaDetectionCanvasProps {
   ) => void;
   /** URL to the source PDF for crisp rendering at any zoom level */
   pdfUrl?: string | null;
+  /** Called when drawing state changes (for point-level undo coordination) */
+  onDrawingStateChange?: (isDrawing: boolean) => void;
+  /** Called when user right-clicks on a detection (for context menu) */
+  onDetectionContextMenu?: (
+    detection: ExtractionDetection,
+    screenPosition: { x: number; y: number }
+  ) => void;
+  /** Returns true if detection should be shown dimmed (below confidence threshold) */
+  isDetectionDimmed?: (detection: ExtractionDetection) => boolean;
+  /** Pending detections from Region Detect and SAM (shown with special preview styling) */
+  pendingDetections?: Array<{
+    id: string;
+    class: DetectionClass;
+    pixel_x: number;
+    pixel_y: number;
+    pixel_width: number;
+    pixel_height: number;
+    polygon_points?: PolygonPoint[];
+    confidence: number;
+  }>;
+  /** Called when user completes a region selection (region_detect mode) */
+  onRegionSelected?: (region: { x: number; y: number; width: number; height: number }) => void;
+  /** Whether region detection is currently running */
+  isRegionDetecting?: boolean;
+  /** Called when user clicks in SAM select mode */
+  onSAMClick?: (point: { x: number; y: number }) => void;
+  /** Whether SAM is currently segmenting */
+  isSAMSegmenting?: boolean;
+  /** Current SAM segmentation result */
+  samResult?: {
+    polygon_points: Array<{ x: number; y: number }>;
+    bounding_box?: { x: number; y: number; width: number; height: number };
+  } | null;
+  /** Click points used for SAM segmentation */
+  samClickPoints?: Array<{ x: number; y: number; label: 0 | 1 }>;
 }
 
 // =============================================================================
@@ -165,6 +204,76 @@ function snapToAngle(
 // Note: soffit is NOT included here - it uses area (SF) measurement via rectangle/polygon tool
 const LINEAR_CLASSES: DetectionClass[] = ['trim', 'fascia', 'gutter', 'eave', 'rake', 'ridge', 'valley', 'belly_band', 'corner_inside', 'corner_outside'];
 
+/**
+ * Get the simple points array from polygon_points (handles both formats)
+ */
+function getPolygonPointsArray(detection: ExtractionDetection): PolygonPoint[] | null {
+  if (!detection.polygon_points) return null;
+
+  // If it's a PolygonWithHoles, use the outer boundary
+  if (isPolygonWithHoles(detection.polygon_points)) {
+    return detection.polygon_points.outer;
+  }
+
+  // It's a simple array
+  return detection.polygon_points;
+}
+
+/**
+ * Get bounding box for a detection (works for both bbox and polygon formats)
+ */
+function getDetectionBounds(detection: ExtractionDetection): { x: number; y: number; width: number; height: number } {
+  // If detection has polygon_points, calculate bounds from those
+  const points = getPolygonPointsArray(detection);
+  if (points && points.length >= 3) {
+    const xs = points.map(p => p.x);
+    const ys = points.map(p => p.y);
+    const minX = Math.min(...xs);
+    const maxX = Math.max(...xs);
+    const minY = Math.min(...ys);
+    const maxY = Math.max(...ys);
+
+    return {
+      x: minX,
+      y: minY,
+      width: maxX - minX,
+      height: maxY - minY,
+    };
+  }
+
+  // Fall back to pixel coordinates (center-based format)
+  const halfWidth = detection.pixel_width / 2;
+  const halfHeight = detection.pixel_height / 2;
+
+  return {
+    x: detection.pixel_x - halfWidth,
+    y: detection.pixel_y - halfHeight,
+    width: detection.pixel_width,
+    height: detection.pixel_height,
+  };
+}
+
+/**
+ * Check if a point is inside a detection (works for both polygon and bbox formats)
+ * Uses pointInPolygon for polygons, bounding box check for rectangles
+ */
+function isPointInDetection(point: PolygonPoint, detection: ExtractionDetection): boolean {
+  // If detection has polygon_points, use point-in-polygon test
+  const points = getPolygonPointsArray(detection);
+  if (points && points.length >= 3) {
+    return pointInPolygon(point, points);
+  }
+
+  // Fall back to bounding box check
+  const bounds = getDetectionBounds(detection);
+  return (
+    point.x >= bounds.x &&
+    point.x <= bounds.x + bounds.width &&
+    point.y >= bounds.y &&
+    point.y <= bounds.y + bounds.height
+  );
+}
+
 // =============================================================================
 // Component
 // =============================================================================
@@ -177,6 +286,7 @@ export default function KonvaDetectionCanvas({
   toolMode,
   activeClass,
   onSelectionChange,
+  onMultiSelect,
   onDetectionMove,
   onDetectionResize,
   onDetectionCreate,
@@ -190,6 +300,16 @@ export default function KonvaDetectionCanvas({
   containerHeight,
   onSplitDetection,
   pdfUrl,
+  onDrawingStateChange,
+  onDetectionContextMenu,
+  isDetectionDimmed,
+  pendingDetections = [],
+  onRegionSelected,
+  isRegionDetecting = false,
+  onSAMClick,
+  isSAMSegmenting = false,
+  samResult = null,
+  samClickPoints = [],
 }: KonvaDetectionCanvasProps) {
   const stageRef = useRef<Konva.Stage>(null);
   const imageRef = useRef<Konva.Image>(null);
@@ -238,10 +358,22 @@ export default function KonvaDetectionCanvas({
   const [splitRectEnd, setSplitRectEnd] = useState<PolygonPoint | null>(null);
   const [isDraggingRect, setIsDraggingRect] = useState(false);
 
+  // Region detect state - click and drag to select region for AI detection
+  const [regionRectStart, setRegionRectStart] = useState<PolygonPoint | null>(null);
+  const [regionRectEnd, setRegionRectEnd] = useState<PolygonPoint | null>(null);
+  const [isDraggingRegion, setIsDraggingRegion] = useState(false);
+
+  // Paint selection state - drag across detections in select mode to add them to selection
+  const [isPaintSelecting, setIsPaintSelecting] = useState(false);
+  const [paintSelectedIds, setPaintSelectedIds] = useState<Set<string>>(new Set());
+
   // Auto-pan state for edge scrolling during drawing
   const [autoPanDirection, setAutoPanDirection] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
   const autoPanAnimationRef = useRef<number | null>(null);
   const lastPointerPositionRef = useRef<{ x: number; y: number } | null>(null);
+
+  // Ref to track if paint selection just completed (prevents detection click from overriding selection)
+  const paintSelectionJustCompletedRef = useRef(false);
 
   // Auto-pan constants
   const EDGE_THRESHOLD = 60; // pixels from edge to start panning
@@ -268,6 +400,12 @@ export default function KonvaDetectionCanvas({
       splitPolygonPointsLength: splitPolygonPoints.length,
     };
   }, [isDrawingPolygon, drawingPoints.length, isSplitDrawing, splitPolygonPoints.length]);
+
+  // Notify parent of drawing state changes (for point-level undo coordination)
+  useEffect(() => {
+    const isDrawing = isDrawingPolygon || isSplitDrawing || lineStartPoint !== null;
+    onDrawingStateChange?.(isDrawing);
+  }, [isDrawingPolygon, isSplitDrawing, lineStartPoint, onDrawingStateChange]);
 
   // Track shift key and handle keyboard shortcuts for drawing
   useEffect(() => {
@@ -503,7 +641,7 @@ export default function KonvaDetectionCanvas({
   // ==========================================================================
 
   // Check if we're in an active drawing state that should trigger auto-pan
-  const isActivelyDrawing = isDrawingPolygon || isSplitDrawing || isDraggingCreateRect || isDraggingRect;
+  const isActivelyDrawing = isDrawingPolygon || isSplitDrawing || isDraggingCreateRect || isDraggingRect || isDraggingRegion || isPaintSelecting;
 
   // Auto-pan animation effect
   useEffect(() => {
@@ -824,6 +962,37 @@ export default function KonvaDetectionCanvas({
     setCalibrationMousePos(null);
   }, []);
 
+  // Cancel region selection drawing
+  const cancelRegionDrawing = useCallback(() => {
+    setRegionRectStart(null);
+    setRegionRectEnd(null);
+    setIsDraggingRegion(false);
+  }, []);
+
+  // Execute region selection and call callback
+  const executeRegionSelection = useCallback(() => {
+    if (!regionRectStart || !regionRectEnd || !onRegionSelected) return;
+
+    const minX = Math.min(regionRectStart.x, regionRectEnd.x);
+    const maxX = Math.max(regionRectStart.x, regionRectEnd.x);
+    const minY = Math.min(regionRectStart.y, regionRectEnd.y);
+    const maxY = Math.max(regionRectStart.y, regionRectEnd.y);
+
+    const width = maxX - minX;
+    const height = maxY - minY;
+
+    // Only proceed if region is big enough
+    if (width >= 50 && height >= 50) {
+      console.log('[Region Detect] Executing region selection:', { x: minX, y: minY, width, height });
+      onRegionSelected({ x: minX, y: minY, width, height });
+    } else {
+      console.log('[Region Detect] Region too small, cancelling');
+    }
+
+    // Reset state
+    cancelRegionDrawing();
+  }, [regionRectStart, regionRectEnd, onRegionSelected, cancelRegionDrawing]);
+
   const handleStageMouseDown = useCallback(
     (e: Konva.KonvaEventObject<MouseEvent | TouchEvent>) => {
       // IMPORTANT: Check drawing tool modes FIRST before checking if we clicked on a detection
@@ -850,6 +1019,45 @@ export default function KonvaDetectionCanvas({
           class: activeClass,
           markup_type: 'point',
         });
+        return;
+      }
+
+      // Region detect mode - click and drag to select region for AI detection
+      if (toolMode === 'region_detect') {
+        const stage = stageRef.current;
+        if (!stage) return;
+
+        const pointer = stage.getPointerPosition();
+        if (!pointer) return;
+
+        // Transform to image coordinates
+        const imageX = (pointer.x - position.x) / scale;
+        const imageY = (pointer.y - position.y) / scale;
+        const newPoint = { x: imageX, y: imageY };
+
+        console.log('[Region Detect MouseDown] Starting at:', newPoint);
+
+        // Start rectangle drawing
+        setRegionRectStart(newPoint);
+        setRegionRectEnd(newPoint);
+        setIsDraggingRegion(false); // Not dragging yet
+        return;
+      }
+
+      // SAM Magic Select mode - single click to trigger segmentation
+      if (toolMode === 'sam_select' && onSAMClick) {
+        const stage = stageRef.current;
+        if (!stage) return;
+
+        const pointer = stage.getPointerPosition();
+        if (!pointer) return;
+
+        // Transform to image coordinates
+        const imageX = (pointer.x - position.x) / scale;
+        const imageY = (pointer.y - position.y) / scale;
+
+        console.log('[SAM Select] Click at:', { x: imageX, y: imageY });
+        onSAMClick({ x: imageX, y: imageY });
         return;
       }
 
@@ -1042,7 +1250,47 @@ export default function KonvaDetectionCanvas({
         return;
       }
 
-      // For select/pan/verify modes, check if we clicked on a detection
+      // For select mode, start paint selection regardless of whether we clicked on a detection or empty space
+      if (toolMode === 'select') {
+        const stage = stageRef.current;
+        if (!stage) return;
+
+        const pointer = stage.getPointerPosition();
+        if (!pointer) return;
+
+        // Transform to image coordinates
+        const imageX = (pointer.x - position.x) / scale;
+        const imageY = (pointer.y - position.y) / scale;
+        const startPoint = { x: imageX, y: imageY };
+
+        // Check if clicking on a detection using point-in-detection test
+        const clickedDetection = detections.find(d =>
+          d.status !== 'deleted' && isPointInDetection(startPoint, d)
+        );
+
+        // Check if shift is held to add to existing selection
+        const isShiftHeld = e.evt.shiftKey;
+
+        // Start paint selection
+        setIsPaintSelecting(true);
+
+        if (isShiftHeld && selectedIds.size > 0) {
+          // Add to existing selection
+          const newSet = new Set(selectedIds);
+          if (clickedDetection) newSet.add(clickedDetection.id);
+          setPaintSelectedIds(newSet);
+        } else {
+          // Start fresh with clicked detection (if any)
+          setPaintSelectedIds(clickedDetection ? new Set([clickedDetection.id]) : new Set());
+          if (!clickedDetection) {
+            // Only clear selection if clicking on empty space
+            onSelectionChange(null, false);
+          }
+        }
+        return;
+      }
+
+      // For pan/verify modes, check if we clicked on a detection
       // Walk up the parent chain to find if any parent is a detection
       let target = e.target;
       let isDetectionShape = false;
@@ -1055,24 +1303,15 @@ export default function KonvaDetectionCanvas({
         target = target.parent as typeof target;
       }
 
-      // If clicking on a detection shape (or child of one), let its own handler deal with it
+      // If clicking on a detection shape (and not in select mode), let its own handler deal with it
       if (isDetectionShape) {
-        return;
-      }
-
-      // Only handle clicks on the stage/image itself (empty space)
-      const isStageOrImage = e.target === stageRef.current || e.target === imageRef.current;
-
-      // Clear selection when clicking on empty space (in select mode)
-      if (toolMode === 'select' && isStageOrImage) {
-        onSelectionChange(null, false);
         return;
       }
 
       // Pan mode handled by Konva's draggable property
       // Verify mode handled by detection click handlers
     },
-    [toolMode, onSelectionChange, isDrawingPolygon, drawingPoints.length, isNearStart, completePolygon, calibrationState.pointA, onCalibrationComplete, resetCalibration, position, scale, lineStartPoint, scaleRatio, activeClass, onDetectionCreate, selectedIds, splitPolygonPoints, isSplitDrawing, completeSplitPolygon]
+    [toolMode, onSelectionChange, isDrawingPolygon, drawingPoints.length, isNearStart, completePolygon, calibrationState.pointA, onCalibrationComplete, resetCalibration, position, scale, lineStartPoint, scaleRatio, activeClass, onDetectionCreate, selectedIds, splitPolygonPoints, isSplitDrawing, completeSplitPolygon, onSAMClick, detections]
   );
 
   const handleStageMouseMove = useCallback(
@@ -1108,6 +1347,29 @@ export default function KonvaDetectionCanvas({
           const imageX = (pointer.x - position.x) / scale;
           const imageY = (pointer.y - position.y) / scale;
           setCalibrationMousePos({ x: imageX, y: imageY }); // Reuse for line preview
+        }
+        return;
+      }
+
+      // Handle region detect mode mouse move
+      if (toolMode === 'region_detect') {
+        const pointer = stage.getPointerPosition();
+        if (pointer) {
+          const imageX = (pointer.x - position.x) / scale;
+          const imageY = (pointer.y - position.y) / scale;
+          const currentPoint = { x: imageX, y: imageY };
+
+          // Check if we're dragging a rectangle (mouse button down)
+          const isMouseDown = 'buttons' in e.evt ? e.evt.buttons === 1 : true;
+          if (regionRectStart && isMouseDown) {
+            const dx = Math.abs(currentPoint.x - regionRectStart.x);
+            const dy = Math.abs(currentPoint.y - regionRectStart.y);
+            // Only consider it a drag if moved more than 5 pixels
+            if (dx > 5 || dy > 5) {
+              setIsDraggingRegion(true);
+              setRegionRectEnd(currentPoint);
+            }
+          }
         }
         return;
       }
@@ -1189,6 +1451,28 @@ export default function KonvaDetectionCanvas({
         return;
       }
 
+      // Handle paint selection mode (dragging in select mode adds detections as cursor touches them)
+      if (toolMode === 'select' && isPaintSelecting) {
+        const pointer = stage.getPointerPosition();
+        if (pointer) {
+          const imageX = (pointer.x - position.x) / scale;
+          const imageY = (pointer.y - position.y) / scale;
+          const currentPoint = { x: imageX, y: imageY };
+
+          // Check if cursor is over any detection and add it to selection
+          for (const detection of detections) {
+            if (detection.status === 'deleted') continue;
+            if (paintSelectedIds.has(detection.id)) continue; // Already selected
+
+            if (isPointInDetection(currentPoint, detection)) {
+              // Add this detection to the paint selection
+              setPaintSelectedIds(prev => new Set([...prev, detection.id]));
+            }
+          }
+        }
+        return;
+      }
+
       // For other modes, use getRelativePointerPosition (works for polygon drawing)
       const pointer = stage.getRelativePointerPosition();
       if (!pointer) return;
@@ -1196,11 +1480,43 @@ export default function KonvaDetectionCanvas({
       const currentPoint = { x: pointer.x, y: pointer.y };
       setMousePosition(currentPoint);
     },
-    [toolMode, isDrawingPolygon, drawingPoints, isPointNearStart, calibrationState.pointA, position, scale, lineStartPoint, isSplitDrawing, splitPolygonPoints, splitRectStart, createRectStart, calculateAutoPan, isShiftHeld]
+    [toolMode, isDrawingPolygon, drawingPoints, isPointNearStart, calibrationState.pointA, position, scale, lineStartPoint, isSplitDrawing, splitPolygonPoints, splitRectStart, createRectStart, calculateAutoPan, isShiftHeld, regionRectStart, isPaintSelecting, paintSelectedIds, detections]
   );
 
   const handleStageMouseUp = useCallback(
     (_e: Konva.KonvaEventObject<MouseEvent | TouchEvent>) => {
+      // Handle paint selection completion (select mode)
+      if (toolMode === 'select' && isPaintSelecting) {
+        // Finalize the paint selection
+        if (paintSelectedIds.size > 0 && onMultiSelect) {
+          console.log('[Canvas] Paint selected:', paintSelectedIds.size, 'detections');
+          onMultiSelect(Array.from(paintSelectedIds));
+        }
+        // Reset paint selection state
+        setIsPaintSelecting(false);
+        setPaintSelectedIds(new Set());
+
+        // Set flag to prevent detection's onClick from overriding selection
+        paintSelectionJustCompletedRef.current = true;
+        setTimeout(() => {
+          paintSelectionJustCompletedRef.current = false;
+        }, 50);
+        return;
+      }
+
+      // Handle region detect mode - execute region selection
+      if (toolMode === 'region_detect' && regionRectStart) {
+        if (isDraggingRegion && regionRectEnd) {
+          console.log('[Region Detect MouseUp] Executing region selection');
+          executeRegionSelection();
+        } else {
+          // Just clicked, not dragged - cancel
+          console.log('[Region Detect MouseUp] No drag detected, cancelling');
+          cancelRegionDrawing();
+        }
+        return;
+      }
+
       // Handle create mode - distinguish between rectangle drag and polygon click
       if (toolMode === 'create' && createRectStart) {
         if (isDraggingCreateRect && createRectEnd) {
@@ -1261,7 +1577,7 @@ export default function KonvaDetectionCanvas({
         }
       }
     },
-    [toolMode, createRectStart, createRectEnd, isDraggingCreateRect, isDrawingPolygon, completeRectangleCreate, splitRectStart, splitRectEnd, isDraggingRect, isSplitDrawing, executeSplitWithRect, isShiftHeld, drawingPoints, splitPolygonPoints]
+    [toolMode, createRectStart, createRectEnd, isDraggingCreateRect, isDrawingPolygon, completeRectangleCreate, splitRectStart, splitRectEnd, isDraggingRect, isSplitDrawing, executeSplitWithRect, isShiftHeld, drawingPoints, splitPolygonPoints, regionRectStart, regionRectEnd, isDraggingRegion, executeRegionSelection, cancelRegionDrawing, isPaintSelecting, paintSelectedIds, onMultiSelect]
   );
 
   const handleStageDoubleClick = useCallback(
@@ -1285,14 +1601,29 @@ export default function KonvaDetectionCanvas({
     [toolMode, isDrawingPolygon, drawingPoints.length, completePolygon, isSplitDrawing, splitPolygonPoints.length, completeSplitPolygon]
   );
 
-  // Right-click to exit point/line mode or cancel polygon drawing
+  // Right-click to complete polygon/split (if enough points) or cancel/exit drawing mode
+  // In select mode, right-click on a detection shows context menu
   const handleContextMenu = useCallback(
     (e: Konva.KonvaEventObject<PointerEvent>) => {
       e.evt.preventDefault();
 
-      // Cancel polygon drawing
+      // Split polygon drawing - complete if >= 3 points, otherwise cancel
+      if (isSplitDrawing) {
+        if (splitPolygonPoints.length >= MIN_POLYGON_POINTS) {
+          completeSplitPolygon();
+        } else {
+          cancelSplitDrawing();
+        }
+        return;
+      }
+
+      // Polygon drawing - complete if >= 3 points, otherwise cancel
       if (isDrawingPolygon) {
-        cancelDrawing();
+        if (drawingPoints.length >= MIN_POLYGON_POINTS) {
+          completePolygon();
+        } else {
+          cancelDrawing();
+        }
         return;
       }
 
@@ -1303,19 +1634,37 @@ export default function KonvaDetectionCanvas({
         return;
       }
 
-      // Cancel split polygon drawing
-      if (isSplitDrawing) {
-        cancelSplitDrawing();
-        return;
-      }
-
-      // Exit point mode or split mode
+      // Exit point mode, line mode, or split mode (when not actively drawing)
       if (toolMode === 'point' || toolMode === 'line' || toolMode === 'split') {
         onExitDrawingMode?.();
         return;
       }
+
+      // In select mode, check if right-click is on a detection for context menu
+      if (toolMode === 'select' && onDetectionContextMenu) {
+        // Check if the click target or any parent has a detection ID
+        // The name attribute is on the Group, but the click target might be a child shape
+        let node: Konva.Node | null = e.target;
+        while (node) {
+          const nodeName = node.name();
+          if (nodeName && nodeName.startsWith('detection-')) {
+            const detectionId = nodeName.replace('detection-', '');
+            const detection = detections.find(d => d.id === detectionId);
+            if (detection) {
+              // Get screen position for the context menu
+              const screenPosition = {
+                x: e.evt.clientX,
+                y: e.evt.clientY,
+              };
+              onDetectionContextMenu(detection, screenPosition);
+              return;
+            }
+          }
+          node = node.parent;
+        }
+      }
     },
-    [isDrawingPolygon, cancelDrawing, lineStartPoint, toolMode, onExitDrawingMode, isSplitDrawing, cancelSplitDrawing]
+    [isDrawingPolygon, drawingPoints.length, completePolygon, cancelDrawing, lineStartPoint, toolMode, onExitDrawingMode, isSplitDrawing, splitPolygonPoints.length, completeSplitPolygon, cancelSplitDrawing, onDetectionContextMenu, detections]
   );
 
   // Escape key to cancel drawing, calibration, line drawing, or split
@@ -1344,12 +1693,28 @@ export default function KonvaDetectionCanvas({
           e.preventDefault();
           onExitDrawingMode?.();
         }
+        // Cancel region detection drawing
+        if (isDraggingRegion || regionRectStart) {
+          e.preventDefault();
+          cancelRegionDrawing();
+        }
+        // Exit region_detect mode on escape
+        if (toolMode === 'region_detect') {
+          e.preventDefault();
+          onExitDrawingMode?.();
+        }
+        // Cancel paint selection
+        if (isPaintSelecting) {
+          e.preventDefault();
+          setIsPaintSelecting(false);
+          setPaintSelectedIds(new Set());
+        }
       }
     };
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isDrawingPolygon, isDraggingCreateRect, createRectStart, cancelDrawing, calibrationState.isCalibrating, calibrationState.pointA, resetCalibration, lineStartPoint, isSplitDrawing, isDraggingRect, splitRectStart, cancelSplitDrawing, toolMode, onExitDrawingMode]);
+  }, [isDrawingPolygon, isDraggingCreateRect, createRectStart, cancelDrawing, calibrationState.isCalibrating, calibrationState.pointA, resetCalibration, lineStartPoint, isSplitDrawing, isDraggingRect, splitRectStart, cancelSplitDrawing, toolMode, onExitDrawingMode, isDraggingRegion, regionRectStart, cancelRegionDrawing, isPaintSelecting]);
 
   // ==========================================================================
   // Detection Handlers
@@ -1357,6 +1722,11 @@ export default function KonvaDetectionCanvas({
 
   const handleDetectionSelect = useCallback(
     (id: string, addToSelection: boolean) => {
+      // Skip if paint selection just completed (prevents click from overriding paint selection)
+      if (paintSelectionJustCompletedRef.current) {
+        return;
+      }
+
       if (toolMode === 'select' || toolMode === 'verify') {
         // If multiSelectMode is enabled, always add to selection
         // (OR with modifier key check from child components)
@@ -1403,16 +1773,19 @@ export default function KonvaDetectionCanvas({
     isDrawingPolygon ||
     lineStartPoint !== null ||
     isSplitDrawing ||
+    isDraggingRegion ||
     toolMode === 'create' ||
     toolMode === 'line' ||
     toolMode === 'point' ||
     toolMode === 'calibrate' ||
-    toolMode === 'split';
+    toolMode === 'split' ||
+    toolMode === 'region_detect';
 
   const getCursor = () => {
     if (isDrawingPolygon) return 'crosshair';
     if (lineStartPoint) return 'crosshair';
     if (isSplitDrawing) return 'crosshair';
+    if (isDraggingRegion) return 'crosshair';
     switch (toolMode) {
       case 'pan':
         return 'grab';
@@ -1425,6 +1798,8 @@ export default function KonvaDetectionCanvas({
       case 'calibrate':
         return 'crosshair';
       case 'split':
+        return 'crosshair';
+      case 'region_detect':
         return 'crosshair';
       case 'verify':
         return 'pointer';
@@ -1493,6 +1868,7 @@ export default function KonvaDetectionCanvas({
         onMouseDown={handleStageMouseDown}
         onMouseMove={handleStageMouseMove}
         onMouseUp={handleStageMouseUp}
+        onMouseLeave={handleStageMouseUp}
         onDblClick={handleStageDoubleClick}
         onContextMenu={handleContextMenu}
         onTouchStart={handleStageMouseDown}
@@ -1537,6 +1913,7 @@ export default function KonvaDetectionCanvas({
                 onPolygonUpdate={handlePolygonUpdate}
                 showArea={true}
                 draggable={toolMode === 'select'}
+                dimmed={isDetectionDimmed?.(detection) ?? false}
               />
             ))}
 
@@ -1578,6 +1955,50 @@ export default function KonvaDetectionCanvas({
                 draggable={toolMode === 'select'}
               />
             ))}
+
+          {/* Pending Detections from Region Detect and SAM */}
+          {pendingDetections.map((pending) => {
+            const color = DETECTION_CLASS_COLORS[pending.class] || '#8b5cf6';
+            // Use polygon_points if available, otherwise create rectangle points from CENTER coordinates
+            // pixel_x, pixel_y are CENTER coordinates (same as Roboflow detections)
+            const halfWidth = pending.pixel_width / 2;
+            const halfHeight = pending.pixel_height / 2;
+            const points = pending.polygon_points && pending.polygon_points.length >= 3
+              ? pending.polygon_points.flatMap(p => [p.x, p.y])
+              : [
+                  pending.pixel_x - halfWidth, pending.pixel_y - halfHeight,  // top-left
+                  pending.pixel_x + halfWidth, pending.pixel_y - halfHeight,  // top-right
+                  pending.pixel_x + halfWidth, pending.pixel_y + halfHeight,  // bottom-right
+                  pending.pixel_x - halfWidth, pending.pixel_y + halfHeight,  // bottom-left
+                ];
+
+            return (
+              <Line
+                key={`pending-${pending.id}`}
+                points={points}
+                closed={true}
+                fill={`${color}15`}
+                stroke="#8b5cf6"
+                strokeWidth={2 / scale}
+                dash={[8 / scale, 4 / scale]}
+                shadowColor="#8b5cf6"
+                shadowBlur={8 / scale}
+                shadowOpacity={0.5}
+                listening={false}
+              />
+            );
+          })}
+
+          {/* SAM Magic Select Overlay */}
+          {toolMode === 'sam_select' && (samResult || isSAMSegmenting || samClickPoints.length > 0) && (
+            <SAMSelectOverlay
+              result={samResult}
+              clickPoints={samClickPoints}
+              isSegmenting={isSAMSegmenting}
+              scale={1}
+              offset={{ x: 0, y: 0 }}
+            />
+          )}
 
           {/* Point-by-Point Polygon Drawing Preview */}
           {isDrawingPolygon && drawingPoints.length > 0 && (
@@ -1852,6 +2273,54 @@ export default function KonvaDetectionCanvas({
               strokeWidth={2 / scale}
               dash={[8 / scale, 4 / scale]}
               fill="rgba(239, 68, 68, 0.15)"
+              listening={false}
+            />
+          )}
+
+          {/* Region Detect Rectangle Preview (when dragging) */}
+          {isDraggingRegion && regionRectStart && regionRectEnd && (
+            <>
+              <Rect
+                x={Math.min(regionRectStart.x, regionRectEnd.x)}
+                y={Math.min(regionRectStart.y, regionRectEnd.y)}
+                width={Math.abs(regionRectEnd.x - regionRectStart.x)}
+                height={Math.abs(regionRectEnd.y - regionRectStart.y)}
+                stroke="#3b82f6"
+                strokeWidth={2 / scale}
+                dash={[8 / scale, 4 / scale]}
+                fill="rgba(59, 130, 246, 0.15)"
+                listening={false}
+              />
+              {/* Corner markers */}
+              <Circle
+                x={regionRectStart.x}
+                y={regionRectStart.y}
+                radius={4 / scale}
+                fill="#3b82f6"
+                stroke="#ffffff"
+                strokeWidth={1.5 / scale}
+                listening={false}
+              />
+              <Circle
+                x={regionRectEnd.x}
+                y={regionRectEnd.y}
+                radius={4 / scale}
+                fill="#3b82f6"
+                stroke="#ffffff"
+                strokeWidth={1.5 / scale}
+                listening={false}
+              />
+            </>
+          )}
+
+          {/* Loading indicator during region detection */}
+          {isRegionDetecting && (
+            <Rect
+              x={0}
+              y={0}
+              width={effectiveWidth}
+              height={effectiveHeight}
+              fill="rgba(0, 0, 0, 0.3)"
               listening={false}
             />
           )}

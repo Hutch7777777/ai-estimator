@@ -10,13 +10,16 @@ import polygonClipping from 'polygon-clipping';
 import {
   useExtractionData,
   useDetectionSync,
+  useResizable,
   validateDetections,
   createOptimisticMove,
   createOptimisticMoveAndResize,
   createOptimisticDelete,
   createOptimisticVerify,
   createOptimisticReclassify,
+  createOptimisticColorChange,
 } from '@/lib/hooks';
+import { ResizeHandle } from '@/components/ui/ResizeHandle';
 import { calculateRealWorldMeasurements } from '@/lib/utils/coordinates';
 import {
   getClassDerivedMeasurements,
@@ -52,6 +55,14 @@ import KonvaDetectionCanvas, { type CalibrationData } from './KonvaDetectionCanv
 import type { PolygonUpdatePayload } from './KonvaDetectionPolygon';
 import DetectionSidebar from './DetectionSidebar';
 import CalibrationModal from './CalibrationModal';
+import DetectionContextMenu, { type ContextMenuPosition } from './DetectionContextMenu';
+import ConfidenceFilter from './ConfidenceFilter';
+import { PlanReaderChatbot, type PlanReaderChatbotRef } from './PlanReaderChatbot';
+import type { PageInput } from '@/lib/utils/pageTypeMapping';
+import { useConfidenceFilter } from '@/lib/hooks/useConfidenceFilter';
+import { useRegionDetect, type RegionDetectionResult, type DetectionRegion } from '@/lib/hooks/useRegionDetect';
+import { useSAMSegment, type SAMPendingDetection, type SAMSegmentResult } from '@/lib/hooks/useSAMSegment';
+import SAMClassPicker from './SAMClassPicker';
 import { exportTakeoffToExcel, type TakeoffData } from '@/lib/utils/exportTakeoffExcel';
 import { useOrganization } from '@/lib/hooks/useOrganization';
 import { createClient } from '@supabase/supabase-js';
@@ -297,6 +308,22 @@ export default function DetectionEditor({
   const draftCheckDoneRef = useRef(false);
 
   // ============================================================================
+  // Sidebar Resize
+  // ============================================================================
+
+  const {
+    width: sidebarWidth,
+    isResizing: isSidebarResizing,
+    handleMouseDown: handleSidebarResizeStart,
+  } = useResizable({
+    initialWidth: 320,
+    minWidth: 280,
+    maxWidth: 500,
+    storageKey: 'detection-editor-sidebar-width',
+    direction: 'left', // Handle on left edge of sidebar (since sidebar is on right)
+  });
+
+  // ============================================================================
   // Local UI State
   // ============================================================================
 
@@ -319,6 +346,83 @@ export default function DetectionEditor({
   const [takeoffDetails, setTakeoffDetails] = useState<TakeoffData | null>(null);
   const [isLoadingDetails, setIsLoadingDetails] = useState(false);
   const [isDownloadingMarkup, setIsDownloadingMarkup] = useState(false);
+
+  // Track when canvas is actively drawing (for point-level undo coordination)
+  const [isCanvasDrawing, setIsCanvasDrawing] = useState(false);
+
+  // Context menu state (for right-click on detections)
+  const [contextMenu, setContextMenu] = useState<{
+    position: ContextMenuPosition;
+    detectionId: string;
+  } | null>(null);
+
+  // Confidence filter state
+  const {
+    minConfidence,
+    setMinConfidence,
+    showLowConfidence,
+    setShowLowConfidence,
+    getConfidenceLevel,
+    isActive: isConfidenceFilterActive,
+  } = useConfidenceFilter();
+
+  // Re-detection state
+  const [isRedetecting, setIsRedetecting] = useState(false);
+
+  // Plan Reader chatbot ref (for keyboard shortcut toggle)
+  const planReaderRef = useRef<PlanReaderChatbotRef>(null);
+
+  // Region detect pending detections
+  const [regionPendingDetections, setRegionPendingDetections] = useState<RegionDetectionResult[]>([]);
+
+  // Region detect hook - for drawing rectangle and running Roboflow on selected area
+  const regionDetect = useRegionDetect({
+    pageId: currentPageId || undefined,
+    imageUrl: currentPage?.original_image_url || currentPage?.image_url || undefined,
+    confidenceThreshold: minConfidence,
+    onDetectionsFound: (detections) => {
+      console.log('[DetectionEditor] Region detect found', detections.length, 'detections');
+      setRegionPendingDetections(prev => [...prev, ...detections]);
+      // Switch back to select mode after detection
+      setToolMode('select');
+    },
+    onError: (error) => {
+      toast.error(`Region detection failed: ${error}`);
+      setToolMode('select');
+    },
+  });
+
+  // SAM Magic Select pending detections
+  const [samPendingDetections, setSamPendingDetections] = useState<SAMPendingDetection[]>([]);
+  // Position for SAM class picker popup
+  const [samClassPickerPosition, setSamClassPickerPosition] = useState<{ x: number; y: number } | null>(null);
+
+  // SAM Magic Select hook - for click-to-segment precise boundary detection
+  const samSegment = useSAMSegment({
+    imageUrl: currentPage?.original_image_url || currentPage?.image_url || undefined,
+    imageWidth: currentPage?.original_width || DEFAULT_IMAGE_WIDTH,
+    imageHeight: currentPage?.original_height || DEFAULT_IMAGE_HEIGHT,
+    onSegmentComplete: (result) => {
+      console.log('[DetectionEditor] SAM segment complete:', result.id);
+      // Show class picker near center of canvas
+      if (canvasContainerRef.current) {
+        const rect = canvasContainerRef.current.getBoundingClientRect();
+        setSamClassPickerPosition({
+          x: rect.width / 2 - 140, // Center the picker (280px width / 2)
+          y: 60, // Near top
+        });
+      }
+    },
+    onDetectionConfirmed: (detection) => {
+      console.log('[DetectionEditor] SAM detection confirmed:', detection);
+      setSamPendingDetections(prev => [...prev, detection]);
+      setSamClassPickerPosition(null);
+    },
+    onError: (error) => {
+      toast.error(`SAM segmentation failed: ${error}`);
+      setSamClassPickerPosition(null);
+    },
+  });
 
   // V2 response data (Mike Skjei methodology)
   const [laborSection, setLaborSection] = useState<LaborSection | undefined>();
@@ -607,6 +711,15 @@ export default function DetectionEditor({
     setSelectedIds(new Set(detectionIds));
   }, []);
 
+  // Handler for marquee multi-selection from canvas
+  const handleMultiSelect = useCallback((detectionIds: string[]) => {
+    setSelectedIds(new Set(detectionIds));
+    // Update the primary selected detection to the first one
+    if (detectionIds.length > 0) {
+      setSelectedDetectionId(detectionIds[0]);
+    }
+  }, []);
+
   // ============================================================================
   // Detection Edit Handlers (Konva-compatible)
   // ============================================================================
@@ -881,6 +994,125 @@ export default function DetectionEditor({
     // Clear selection after delete
     setSelectedIds(new Set());
   }, [selectedIds, currentPageDetections, updateDetectionLocally]);
+
+  // ============================================================================
+  // Context Menu Handlers
+  // ============================================================================
+
+  // Handle right-click on a detection to show context menu
+  const handleDetectionContextMenu = useCallback(
+    (detection: ExtractionDetection, screenPosition: { x: number; y: number }) => {
+      setContextMenu({
+        position: screenPosition,
+        detectionId: detection.id,
+      });
+    },
+    []
+  );
+
+  // Close context menu
+  const handleCloseContextMenu = useCallback(() => {
+    setContextMenu(null);
+  }, []);
+
+  // Duplicate a detection from context menu
+  const handleDuplicateDetection = useCallback(
+    (detectionId: string) => {
+      const detection = currentPageDetections.find((d) => d.id === detectionId);
+      if (!detection || !currentPage) return;
+
+      // Create a new detection with same properties but offset position
+      const offsetPixels = 20; // Offset duplicated detection by 20 pixels
+      const newDetection: Partial<ExtractionDetection> = {
+        ...detection,
+        id: crypto.randomUUID(),
+        pixel_x: detection.pixel_x + offsetPixels,
+        pixel_y: detection.pixel_y + offsetPixels,
+        // Offset polygon points if they exist
+        polygon_points: detection.polygon_points
+          ? (Array.isArray(detection.polygon_points)
+              ? detection.polygon_points.map((pt: PolygonPoint) => ({
+                  x: pt.x + offsetPixels,
+                  y: pt.y + offsetPixels,
+                }))
+              : {
+                  outer: (detection.polygon_points as { outer: PolygonPoint[]; holes?: PolygonPoint[][] }).outer.map((pt) => ({
+                    x: pt.x + offsetPixels,
+                    y: pt.y + offsetPixels,
+                  })),
+                  holes: (detection.polygon_points as { outer: PolygonPoint[]; holes?: PolygonPoint[][] }).holes?.map((hole) =>
+                    hole.map((pt) => ({
+                      x: pt.x + offsetPixels,
+                      y: pt.y + offsetPixels,
+                    }))
+                  ),
+                })
+          : undefined,
+        status: 'auto', // New detection starts as auto (unverified)
+        created_at: new Date().toISOString(),
+      };
+
+      // Add the duplicated detection
+      addDetectionLocally(newDetection as ExtractionDetection);
+
+      // Select the new detection
+      setSelectedIds(new Set([newDetection.id!]));
+
+      toast.success('Detection duplicated');
+    },
+    [currentPageDetections, currentPage, addDetectionLocally]
+  );
+
+  // Delete a single detection from context menu
+  const handleDeleteDetectionFromMenu = useCallback(
+    (detectionId: string) => {
+      const detection = currentPageDetections.find((d) => d.id === detectionId);
+      if (!detection) return;
+
+      const optimistic = createOptimisticDelete(detection);
+      updateDetectionLocally(optimistic);
+
+      // Clear selection if this detection was selected
+      if (selectedIds.has(detectionId)) {
+        setSelectedIds((prev) => {
+          const next = new Set(prev);
+          next.delete(detectionId);
+          return next;
+        });
+      }
+
+      toast.success('Detection deleted');
+    },
+    [currentPageDetections, updateDetectionLocally, selectedIds]
+  );
+
+  // Change class of a single detection from context menu
+  const handleChangeClassFromMenu = useCallback(
+    (detectionId: string, newClass: DetectionClass) => {
+      const detection = currentPageDetections.find((d) => d.id === detectionId);
+      if (!detection) return;
+
+      const optimistic = createOptimisticReclassify(detection, newClass);
+      updateDetectionLocally(optimistic);
+
+      toast.success(`Class changed to ${newClass}`);
+    },
+    [currentPageDetections, updateDetectionLocally]
+  );
+
+  // Change color of a single detection from context menu
+  const handleChangeColorFromMenu = useCallback(
+    (detectionId: string, newColor: string | null) => {
+      const detection = currentPageDetections.find((d) => d.id === detectionId);
+      if (!detection) return;
+
+      const optimistic = createOptimisticColorChange(detection, newColor);
+      updateDetectionLocally(optimistic);
+
+      toast.success(newColor ? `Color changed to ${newColor}` : 'Color reset to default');
+    },
+    [currentPageDetections, updateDetectionLocally]
+  );
 
   // Handle split detection - creates carved piece + remaining pieces using TRUE polygon subtraction
   const handleSplitDetection = useCallback(
@@ -1660,7 +1892,12 @@ export default function DetectionEditor({
       // Undo/Redo/Save shortcuts (Ctrl/Cmd + key)
       if (isMeta) {
         // Ctrl/Cmd + Z = Undo (or Ctrl/Cmd + Shift + Z = Redo)
+        // Skip global undo/redo when canvas is actively drawing - KonvaDetectionCanvas handles point-level undo
         if (key === 'z') {
+          if (isCanvasDrawing) {
+            // Let KonvaDetectionCanvas handle point-level undo during drawing
+            return;
+          }
           e.preventDefault();
           if (e.shiftKey) {
             // Redo
@@ -1678,6 +1915,13 @@ export default function DetectionEditor({
           if (hasUnsavedChanges && !isValidating) {
             handleValidate();
           }
+          return;
+        }
+
+        // Ctrl/Cmd + K = Toggle Plan Reader chatbot
+        if (key === 'k') {
+          e.preventDefault();
+          planReaderRef.current?.toggle();
           return;
         }
       }
@@ -1718,6 +1962,18 @@ export default function DetectionEditor({
         }
         return;
       }
+      // Region AI Detect shortcut
+      if (key === 'r') {
+        e.preventDefault();
+        setToolMode('region_detect');
+        return;
+      }
+      // SAM Magic Select shortcut
+      if (key === 'm') {
+        e.preventDefault();
+        setToolMode('sam_select');
+        return;
+      }
 
       // Delete selected detections
       if (key === 'delete' || key === 'backspace') {
@@ -1726,11 +1982,15 @@ export default function DetectionEditor({
         return;
       }
 
-      // Escape key: exit point/line mode, or clear selection
+      // Escape key: exit drawing/special modes, or clear selection
       if (key === 'escape') {
         e.preventDefault();
-        // If in point or line mode, exit to select mode
-        if (toolMode === 'point' || toolMode === 'line') {
+        // If in point, line, region detect, or SAM mode, exit to select mode
+        if (toolMode === 'point' || toolMode === 'line' || toolMode === 'region_detect' || toolMode === 'sam_select') {
+          // Cancel SAM if active
+          if (toolMode === 'sam_select') {
+            handleSAMCancel();
+          }
           setToolMode('select');
           return;
         }
@@ -1771,7 +2031,7 @@ export default function DetectionEditor({
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [selectedIds, canUndo, canRedo, undo, redo, hasUnsavedChanges, isValidating, handleValidate, handleVerifySelected, handleDeleteSelected, handleZoomIn, handleZoomOut, handleZoomReset, toolMode]);
+  }, [selectedIds, canUndo, canRedo, undo, redo, hasUnsavedChanges, isValidating, handleValidate, handleVerifySelected, handleDeleteSelected, handleZoomIn, handleZoomOut, handleZoomReset, toolMode, isCanvasDrawing]);
 
   // Toggle between markup view and editor view
   const handleToggleMarkup = useCallback(() => {
@@ -1798,12 +2058,68 @@ export default function DetectionEditor({
     if (showOriginalOnly) {
       return [];
     }
-    // Filter out roof detections - they belong on roof plans, not elevations
-    if (showDeleted) {
-      return currentPageDetections.filter((d) => d.class !== 'roof');
+
+    // Start with base filtering (deleted status and roof exclusion)
+    let filtered = showDeleted
+      ? currentPageDetections.filter((d) => d.class !== 'roof')
+      : currentPageDetections.filter((d) => d.status !== 'deleted' && d.class !== 'roof');
+
+    // Apply confidence filtering if active
+    if (minConfidence > 0 && !showLowConfidence) {
+      // Hide low confidence detections entirely
+      filtered = filtered.filter((d) => {
+        const confidence = d.confidence ?? 1.0;
+        return confidence >= minConfidence;
+      });
     }
-    return currentPageDetections.filter((d) => d.status !== 'deleted' && d.class !== 'roof');
-  }, [currentPageDetections, showDeleted, showOriginalOnly]);
+
+    return filtered;
+  }, [currentPageDetections, showDeleted, showOriginalOnly, minConfidence, showLowConfidence]);
+
+  // Compute detection counts for confidence filter UI
+  const confidenceFilterCounts = useMemo(() => {
+    const baseDetections = showDeleted
+      ? currentPageDetections.filter((d) => d.class !== 'roof')
+      : currentPageDetections.filter((d) => d.status !== 'deleted' && d.class !== 'roof');
+
+    const aboveThreshold = baseDetections.filter((d) => {
+      const confidence = d.confidence ?? 1.0;
+      return confidence >= minConfidence;
+    });
+
+    return {
+      total: baseDetections.length,
+      aboveThreshold: aboveThreshold.length,
+    };
+  }, [currentPageDetections, showDeleted, minConfidence]);
+
+  // Combine pending detections from region detect and SAM for canvas display
+  // (Claude assistant is now text-only, no longer produces pending detections)
+  const combinedPendingDetections = useMemo(() => {
+    const regionPending = regionPendingDetections.map(d => ({
+      id: d.id,
+      class: d.class,
+      pixel_x: d.pixel_x,
+      pixel_y: d.pixel_y,
+      pixel_width: d.pixel_width,
+      pixel_height: d.pixel_height,
+      polygon_points: d.polygon_points as PolygonPoint[] | undefined,
+      confidence: d.confidence,
+    }));
+
+    const samPending = samPendingDetections.map(d => ({
+      id: d.id,
+      class: d.class,
+      pixel_x: d.pixel_x,
+      pixel_y: d.pixel_y,
+      pixel_width: d.pixel_width,
+      pixel_height: d.pixel_height,
+      polygon_points: d.polygon_points as PolygonPoint[] | undefined,
+      confidence: d.confidence,
+    }));
+
+    return [...regionPending, ...samPending];
+  }, [regionPendingDetections, samPendingDetections]);
 
   // Compute selected detections from both selection systems (Set-based and single-ID)
   const selectedDetections = useMemo(() => {
@@ -2747,6 +3063,217 @@ export default function DetectionEditor({
     [jobId, projectId, job?.project_name, getAllDetections, organization?.id]
   );
 
+  // Re-detect page handler
+  const handleRedetect = useCallback(async () => {
+    if (!currentPageId) {
+      toast.error('No page selected');
+      return;
+    }
+
+    setIsRedetecting(true);
+    toast.info('Re-running AI detection...', { duration: 3000 });
+
+    try {
+      const response = await fetch('/api/redetect-page', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          page_id: currentPageId,
+          min_confidence: minConfidence,
+        }),
+      });
+
+      const result = await response.json();
+
+      if (!response.ok) {
+        if (response.status === 501) {
+          toast.error('Re-detection feature pending backend implementation');
+        } else {
+          toast.error(result.error || 'Failed to re-detect page');
+        }
+        return;
+      }
+
+      if (result.success) {
+        toast.success(`Re-detected ${result.detection_count} objects`);
+        // Refresh data to show new detections
+        await refresh();
+      } else {
+        toast.error(result.error || 'Re-detection failed');
+      }
+    } catch (error) {
+      console.error('[ReDetect] Error:', error);
+      toast.error('Failed to re-detect page');
+    } finally {
+      setIsRedetecting(false);
+    }
+  }, [currentPageId, minConfidence, refresh]);
+
+  // Region Detect: Handle region selection from canvas
+  const handleRegionSelected = useCallback(async (region: DetectionRegion) => {
+    console.log('[DetectionEditor] Region selected:', region);
+    await regionDetect.detectRegion(region);
+  }, [regionDetect]);
+
+  // Region Detect: Accept a single pending detection
+  const handleRegionDetectionAccepted = useCallback((detection: RegionDetectionResult) => {
+    const scaleRatio = currentPage?.scale_ratio || 64;
+
+    // Calculate area and perimeter from pixel dimensions
+    const widthFt = detection.pixel_width / scaleRatio;
+    const heightFt = detection.pixel_height / scaleRatio;
+    const area_sf = widthFt * heightFt;
+    const perimeter_lf = 2 * (widthFt + heightFt);
+
+    // Create polygon points from bounds if not provided
+    // NOTE: pixel_x, pixel_y are CENTER coordinates (same as Roboflow detections)
+    const halfWidth = detection.pixel_width / 2;
+    const halfHeight = detection.pixel_height / 2;
+    const polygon_points = detection.polygon_points || [
+      { x: detection.pixel_x - halfWidth, y: detection.pixel_y - halfHeight },  // top-left
+      { x: detection.pixel_x + halfWidth, y: detection.pixel_y - halfHeight },  // top-right
+      { x: detection.pixel_x + halfWidth, y: detection.pixel_y + halfHeight },  // bottom-right
+      { x: detection.pixel_x - halfWidth, y: detection.pixel_y + halfHeight },  // bottom-left
+    ];
+
+    // Generate UUID for new detection
+    const tempId = crypto.randomUUID();
+
+    // Create full ExtractionDetection object
+    const newDetection: ExtractionDetection = {
+      id: tempId,
+      job_id: job?.id || '',
+      page_id: currentPage?.id || '',
+      class: detection.class,
+      detection_index: currentPageDetections.length,
+      confidence: detection.confidence,
+      pixel_x: detection.pixel_x,
+      pixel_y: detection.pixel_y,
+      pixel_width: detection.pixel_width,
+      pixel_height: detection.pixel_height,
+      real_width_ft: widthFt,
+      real_height_ft: heightFt,
+      real_width_in: widthFt * 12,
+      real_height_in: heightFt * 12,
+      area_sf,
+      perimeter_lf,
+      is_triangle: false,
+      matched_tag: null,
+      created_at: new Date().toISOString(),
+      status: 'auto',
+      edited_by: null,
+      edited_at: new Date().toISOString(),
+      original_bbox: null,
+      polygon_points,
+      markup_type: 'polygon',
+    };
+
+    addDetectionLocally(newDetection);
+
+    // Remove from pending
+    setRegionPendingDetections(prev => prev.filter(d => d.id !== detection.id));
+    toast.success(`Added ${detection.class} detection`);
+  }, [currentPage?.scale_ratio, currentPage?.id, job?.id, currentPageDetections.length, addDetectionLocally]);
+
+  // Region Detect: Reject a single pending detection
+  const handleRegionDetectionRejected = useCallback((detectionId: string) => {
+    setRegionPendingDetections(prev => prev.filter(d => d.id !== detectionId));
+  }, []);
+
+  // Region Detect: Accept all pending detections
+  const handleRegionAllDetectionsAccepted = useCallback(() => {
+    regionPendingDetections.forEach(detection => handleRegionDetectionAccepted(detection));
+    toast.success(`Added ${regionPendingDetections.length} detections`);
+  }, [regionPendingDetections, handleRegionDetectionAccepted]);
+
+  // Region Detect: Clear all pending detections
+  const handleRegionClearPending = useCallback(() => {
+    setRegionPendingDetections([]);
+  }, []);
+
+  // SAM Magic Select: Handle click on canvas
+  const handleSAMClick = useCallback(async (point: { x: number; y: number }) => {
+    console.log('[DetectionEditor] SAM click at:', point);
+    await samSegment.segment(point);
+  }, [samSegment]);
+
+  // SAM Magic Select: Handle class selection from picker
+  const handleSAMClassSelect = useCallback((cls: DetectionClass) => {
+    console.log('[DetectionEditor] SAM class selected:', cls);
+    samSegment.confirmWithClass(cls);
+  }, [samSegment]);
+
+  // SAM Magic Select: Cancel current segmentation
+  const handleSAMCancel = useCallback(() => {
+    samSegment.cancel();
+    setSamClassPickerPosition(null);
+  }, [samSegment]);
+
+  // SAM Magic Select: Accept a single pending detection
+  const handleSAMDetectionAccepted = useCallback((detection: SAMPendingDetection) => {
+    const scaleRatio = currentPage?.scale_ratio || 64;
+
+    // Calculate area and perimeter from polygon points
+    const { area_sf, perimeter_lf } = calculateAreaMeasurements(
+      detection.polygon_points,
+      scaleRatio
+    );
+
+    // Generate UUID for new detection
+    const tempId = crypto.randomUUID();
+
+    // Create full ExtractionDetection object
+    const newDetection: ExtractionDetection = {
+      id: tempId,
+      job_id: job?.id || '',
+      page_id: currentPage?.id || '',
+      class: detection.class,
+      detection_index: currentPageDetections.length,
+      confidence: detection.confidence,
+      pixel_x: detection.pixel_x,
+      pixel_y: detection.pixel_y,
+      pixel_width: detection.pixel_width,
+      pixel_height: detection.pixel_height,
+      real_width_ft: detection.pixel_width / scaleRatio,
+      real_height_ft: detection.pixel_height / scaleRatio,
+      real_width_in: (detection.pixel_width / scaleRatio) * 12,
+      real_height_in: (detection.pixel_height / scaleRatio) * 12,
+      area_sf,
+      perimeter_lf,
+      is_triangle: false,
+      matched_tag: null,
+      created_at: new Date().toISOString(),
+      status: 'auto',
+      edited_by: null,
+      edited_at: new Date().toISOString(),
+      original_bbox: null,
+      polygon_points: detection.polygon_points,
+      markup_type: 'polygon',
+    };
+
+    addDetectionLocally(newDetection);
+
+    // Remove from pending
+    setSamPendingDetections(prev => prev.filter(d => d.id !== detection.id));
+    toast.success(`Added ${detection.class} detection (SAM)`);
+  }, [currentPage?.scale_ratio, currentPage?.id, job?.id, currentPageDetections.length, addDetectionLocally]);
+
+  // SAM Magic Select: Reject a single pending detection
+  const handleSAMDetectionRejected = useCallback((detectionId: string) => {
+    setSamPendingDetections(prev => prev.filter(d => d.id !== detectionId));
+  }, []);
+
+  // SAM Magic Select: Accept all pending detections
+  const handleSAMAllDetectionsAccepted = useCallback(() => {
+    samPendingDetections.forEach(detection => handleSAMDetectionAccepted(detection));
+    toast.success(`Added ${samPendingDetections.length} SAM detections`);
+  }, [samPendingDetections, handleSAMDetectionAccepted]);
+
+  // SAM Magic Select: Clear all pending detections
+  const handleSAMClearPending = useCallback(() => {
+    setSamPendingDetections([]);
+  }, []);
+
   const handleApprove = useCallback(async () => {
     if (!jobId || !liveDerivedTotals) {
       console.error('[Approve] Missing job ID or calculations');
@@ -3175,6 +3702,98 @@ export default function DetectionEditor({
 
             {/* Canvas Area - flex-1 with min-h-0 allows proper flex shrinking */}
             <div ref={canvasContainerRef} className="flex-1 relative min-h-0">
+              {/* Floating Controls - Confidence Filter & Claude Assistant */}
+              {!showMarkup && !showOriginalOnly && (
+                <div className="absolute top-3 left-3 z-50 flex items-center gap-2">
+                  <ConfidenceFilter
+                    minConfidence={minConfidence}
+                    onMinConfidenceChange={setMinConfidence}
+                    showLowConfidence={showLowConfidence}
+                    onShowLowConfidenceChange={setShowLowConfidence}
+                    onRedetect={handleRedetect}
+                    isRedetecting={isRedetecting}
+                    totalCount={confidenceFilterCounts.total}
+                    aboveThresholdCount={confidenceFilterCounts.aboveThreshold}
+                    isActive={isConfidenceFilterActive}
+                  />
+                </div>
+              )}
+
+              {/* Region Detection Pending Panel - appears when there are region pending detections */}
+              {regionPendingDetections.length > 0 && (
+                <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-20 bg-white dark:bg-gray-800 rounded-lg shadow-lg border border-gray-200 dark:border-gray-700 p-3 min-w-[300px] max-w-[400px]">
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="flex items-center gap-2">
+                      <div className="w-2 h-2 rounded-full bg-blue-500 animate-pulse" />
+                      <span className="text-sm font-medium text-gray-700 dark:text-gray-200">
+                        Region Detections ({regionPendingDetections.length})
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <button
+                        type="button"
+                        onClick={handleRegionAllDetectionsAccepted}
+                        className="px-2 py-1 text-xs font-medium text-green-700 dark:text-green-300 bg-green-100 dark:bg-green-900/30 rounded hover:bg-green-200 dark:hover:bg-green-900/50 transition-colors"
+                      >
+                        Accept All
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleRegionClearPending}
+                        className="px-2 py-1 text-xs font-medium text-gray-600 dark:text-gray-400 bg-gray-100 dark:bg-gray-700 rounded hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"
+                      >
+                        Clear
+                      </button>
+                    </div>
+                  </div>
+                  <div className="space-y-1.5 max-h-[200px] overflow-y-auto">
+                    {regionPendingDetections.map((detection) => (
+                      <div
+                        key={detection.id}
+                        className="flex items-center justify-between p-2 bg-gray-50 dark:bg-gray-700/50 rounded"
+                      >
+                        <div className="flex items-center gap-2">
+                          <div
+                            className="w-3 h-3 rounded-full"
+                            style={{ backgroundColor: '#3b82f6' }}
+                          />
+                          <span className="text-sm text-gray-700 dark:text-gray-200 capitalize">
+                            {detection.class.replace('_', ' ')}
+                          </span>
+                          <span className="text-xs text-gray-500 dark:text-gray-400">
+                            {Math.round(detection.confidence * 100)}%
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-1">
+                          <button
+                            type="button"
+                            onClick={() => handleRegionDetectionAccepted(detection)}
+                            className="p-1 text-green-600 dark:text-green-400 hover:bg-green-100 dark:hover:bg-green-900/30 rounded transition-colors"
+                            title="Accept"
+                          >
+                            <CheckCircle className="w-4 h-4" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleRegionDetectionRejected(detection.id)}
+                            className="p-1 text-gray-500 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-600 rounded transition-colors"
+                            title="Reject"
+                          >
+                            <X className="w-4 h-4" />
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                  {regionDetect.isDetecting && (
+                    <div className="mt-2 flex items-center justify-center gap-2 text-sm text-blue-600 dark:text-blue-400">
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      <span>Detecting in region...</span>
+                    </div>
+                  )}
+                </div>
+              )}
+
               {/* Markup View Mode */}
               {showMarkup && markupUrl ? (
                 <div className="absolute inset-0 flex flex-col bg-gray-900">
@@ -3242,6 +3861,7 @@ export default function DetectionEditor({
               ) : currentPage ? (
                 <div className="absolute inset-0">
                   <KonvaDetectionCanvas
+                    key={currentPage.id}
                     page={currentPage}
                     detections={visibleDetections}
                     selectedDetectionId={selectedDetectionId}
@@ -3255,6 +3875,7 @@ export default function DetectionEditor({
                         : createClass
                     }
                     onSelectionChange={handleCanvasSelect}
+                    onMultiSelect={handleMultiSelect}
                     onDetectionMove={handleDetectionMove}
                     onDetectionResize={handleDetectionResize}
                     onDetectionCreate={handleDetectionCreate}
@@ -3266,7 +3887,37 @@ export default function DetectionEditor({
                     containerHeight={canvasContainerSize.height}
                     onSplitDetection={handleSplitDetection}
                     pdfUrl={job?.source_pdf_url}
+                    onDrawingStateChange={setIsCanvasDrawing}
+                    onDetectionContextMenu={handleDetectionContextMenu}
+                    isDetectionDimmed={(d) => {
+                      // Show as dimmed if below threshold AND showLowConfidence is enabled
+                      if (!showLowConfidence) return false; // Hidden, not dimmed
+                      const confidence = d.confidence ?? 1.0;
+                      return confidence < minConfidence;
+                    }}
+                    pendingDetections={combinedPendingDetections}
+                    onRegionSelected={handleRegionSelected}
+                    isRegionDetecting={regionDetect.isDetecting}
+                    onSAMClick={handleSAMClick}
+                    isSAMSegmenting={samSegment.isSegmenting}
+                    samResult={samSegment.currentResult}
+                    samClickPoints={samSegment.clickPoints}
                   />
+
+                  {/* SAM Class Picker Overlay */}
+                  {(samSegment.currentResult || samSegment.isSegmenting || samSegment.isFeatureDisabled || samSegment.error) && (
+                    <SAMClassPicker
+                      isLoading={samSegment.isSegmenting}
+                      polygonPointCount={samSegment.currentResult?.polygon_points?.length || 0}
+                      onSelectClass={handleSAMClassSelect}
+                      onCancel={handleSAMCancel}
+                      position={samClassPickerPosition || undefined}
+                      isVisible={true}
+                      isFeatureDisabled={samSegment.isFeatureDisabled}
+                      errorMessage={samSegment.error}
+                      alternatives={samSegment.alternatives}
+                    />
+                  )}
                 </div>
               ) : (
                 <div className="flex items-center justify-center h-full">
@@ -3315,28 +3966,39 @@ export default function DetectionEditor({
               )}
             </div>
 
-            {/* Sidebar - pages, properties, and totals */}
-            <DetectionSidebar
-              pages={pages}
-              currentPageId={currentPageId}
-              onPageSelect={setCurrentPageId}
-              detections={currentPageDetections}
-              selectedDetections={selectedDetections}
-              onClassChange={handleClassChange}
-              onColorChange={handleColorChange}
-              onStatusChange={handleStatusChange}
-              onMaterialAssign={handleMaterialAssign}
-              onNotesChange={handleNotesChange}
-              onPriceOverride={handlePriceOverride}
-              onMaterialAssignWithPrice={handleMaterialAssignWithPrice}
-              pixelsPerFoot={currentPage?.scale_ratio || 64}
-              multiSelectMode={multiSelectMode}
-              onMultiSelectModeChange={setMultiSelectMode}
-              liveDerivedTotals={liveDerivedTotals}
-              allPagesTotals={allPagesTotals}
-              job={job}
-              jobTotals={jobTotals}
-            />
+            {/* Sidebar - pages, properties, and totals (resizable) */}
+            <div
+              className="relative flex-shrink-0 border-l border-gray-200 dark:border-gray-700"
+              style={{ width: sidebarWidth }}
+            >
+              {/* Resize handle on left edge */}
+              <ResizeHandle
+                direction="left"
+                isResizing={isSidebarResizing}
+                onMouseDown={handleSidebarResizeStart}
+              />
+              <DetectionSidebar
+                pages={pages}
+                currentPageId={currentPageId}
+                onPageSelect={setCurrentPageId}
+                detections={currentPageDetections}
+                selectedDetections={selectedDetections}
+                onClassChange={handleClassChange}
+                onColorChange={handleColorChange}
+                onStatusChange={handleStatusChange}
+                onMaterialAssign={handleMaterialAssign}
+                onNotesChange={handleNotesChange}
+                onPriceOverride={handlePriceOverride}
+                onMaterialAssignWithPrice={handleMaterialAssignWithPrice}
+                pixelsPerFoot={currentPage?.scale_ratio || 64}
+                multiSelectMode={multiSelectMode}
+                onMultiSelectModeChange={setMultiSelectMode}
+                liveDerivedTotals={liveDerivedTotals}
+                allPagesTotals={allPagesTotals}
+                job={job}
+                jobTotals={jobTotals}
+              />
+            </div>
           </div>
         </>
       )}
@@ -3518,6 +4180,37 @@ export default function DetectionEditor({
           </div>
         </div>
       )}
+
+      {/* Context Menu for right-click on detections */}
+      {contextMenu && (
+        <DetectionContextMenu
+          position={contextMenu.position}
+          detectionId={contextMenu.detectionId}
+          currentClass={
+            currentPageDetections.find((d) => d.id === contextMenu.detectionId)?.class || 'siding'
+          }
+          currentColor={
+            currentPageDetections.find((d) => d.id === contextMenu.detectionId)?.color_override
+          }
+          onDuplicate={handleDuplicateDetection}
+          onDelete={handleDeleteDetectionFromMenu}
+          onChangeClass={handleChangeClassFromMenu}
+          onChangeColor={handleChangeColorFromMenu}
+          onClose={handleCloseContextMenu}
+        />
+      )}
+
+      {/* Plan Reader Chatbot - floating widget for reading specs and materials */}
+      <PlanReaderChatbot
+        ref={planReaderRef}
+        imageUrl={currentPage?.original_image_url || currentPage?.image_url || ''}
+        currentPageId={currentPageId || undefined}
+        allPages={pages as PageInput[]}
+        pdfUrl={job?.source_pdf_url || undefined}
+        pageContext="elevation"
+        projectName={job?.project_name || 'Project'}
+        projectAddress=""
+      />
     </div>
   );
 }

@@ -500,6 +500,18 @@ export function createOptimisticReclassify(
   };
 }
 
+export function createOptimisticColorChange(
+  detection: ExtractionDetection,
+  newColor: string | null
+): ExtractionDetection {
+  return {
+    ...detection,
+    color_override: newColor,
+    status: 'edited',
+    edited_at: new Date().toISOString(),
+  };
+}
+
 // =============================================================================
 // Batch Validation Function (for local-first editing)
 // =============================================================================

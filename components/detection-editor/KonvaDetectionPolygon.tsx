@@ -45,6 +45,8 @@ export interface KonvaDetectionPolygonProps {
   onPolygonUpdate: (detection: ExtractionDetection, updates: PolygonUpdatePayload) => void;
   showArea?: boolean;
   draggable?: boolean;
+  /** When true, detection is below confidence threshold but shown with reduced opacity */
+  dimmed?: boolean;
 }
 
 // =============================================================================
@@ -120,6 +122,7 @@ export default function KonvaDetectionPolygon({
   onPolygonUpdate,
   showArea = true,
   draggable = true,
+  dimmed = false,
 }: KonvaDetectionPolygonProps) {
   // Check if this detection has holes (polygon with hole structure)
   const hasHoles = useMemo(() => {
@@ -677,14 +680,16 @@ export default function KonvaDetectionPolygon({
 
             // Use evenodd fill rule to properly render holes (hole area is transparent)
             ctx.fillStyle = color;
-            ctx.globalAlpha = isSelected ? 0.3 : isHovered ? 0.25 : 0.2;
+            // Apply dimmed opacity if below confidence filter threshold
+            const baseOpacity = isSelected ? 0.3 : isHovered ? 0.25 : 0.2;
+            ctx.globalAlpha = dimmed ? baseOpacity * 0.4 : baseOpacity;
             ctx.fill('evenodd');
 
             // Stroke outer boundary
-            ctx.globalAlpha = 1;
+            ctx.globalAlpha = dimmed ? 0.4 : 1;
             ctx.strokeStyle = strokeColor;
             ctx.lineWidth = 1;
-            if (lowConfidence) {
+            if (lowConfidence || dimmed) {
               ctx.setLineDash([4 / scale, 2 / scale]);
             }
             ctx.stroke();
@@ -733,11 +738,11 @@ export default function KonvaDetectionPolygon({
           points={flattenPoints(localPoints)}
           closed={true}
           fill={color}
-          opacity={isSelected ? 0.3 : isHovered ? 0.25 : 0.2}
+          opacity={(isSelected ? 0.3 : isHovered ? 0.25 : 0.2) * (dimmed ? 0.4 : 1)}
           stroke={strokeColor}
           strokeWidth={1}
           strokeScaleEnabled={false}
-          dash={lowConfidence ? [4 / scale, 2 / scale] : undefined}
+          dash={(lowConfidence || dimmed) ? [4 / scale, 2 / scale] : undefined}
           shadowColor={isSelected ? strokeColor : undefined}
           shadowBlur={isSelected ? 4 : 0}
           shadowOpacity={isSelected ? 0.3 : 0}

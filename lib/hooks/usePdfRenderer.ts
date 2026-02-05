@@ -147,6 +147,10 @@ export function usePdfRenderer({
 
     let cancelled = false;
 
+    // Reset render state for new page - this ensures initial render effect triggers
+    currentRenderZoomRef.current = 0;
+    setDisplayCanvas(null);
+
     (async () => {
       try {
         console.log('[usePdfRenderer] Loading page:', pageNumber);
