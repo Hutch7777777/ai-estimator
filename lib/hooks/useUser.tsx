@@ -141,28 +141,29 @@ export function UserProvider({ children }: { children: ReactNode }) {
 
   // Global timeout to prevent infinite loading
   useEffect(() => {
-    const timeoutId = setTimeout(async () => {
+    const timeoutId = setTimeout(() => {
       if (!hasCompletedRef.current) {
-        console.warn('useUser: Loading timeout reached, checking session...');
+        console.warn('useUser: Loading timeout reached, forcing completion');
 
-        // Try to get session quickly (faster than getUser)
-        try {
-          const { data: { session } } = await supabase.auth.getSession();
-
-          if (session?.user) {
-            console.log('useUser: Found valid session on timeout, using session user');
-            setUser(session.user);
-            setHasSession(true);
-          } else {
-            console.log('useUser: No session found on timeout');
-            setHasSession(false);
-          }
-        } catch (err) {
-          console.error('useUser: Error checking session on timeout', err);
-        }
-
+        // IMMEDIATELY mark as completed - no async before this!
         hasCompletedRef.current = true;
         setIsLoading(false);
+
+        // Now try to get session in background (non-blocking)
+        supabase.auth.getSession()
+          .then(({ data: { session } }) => {
+            if (session?.user) {
+              console.log('useUser: Found valid session after timeout');
+              setUser(session.user);
+              setHasSession(true);
+            } else {
+              console.log('useUser: No session found after timeout');
+              setHasSession(false);
+            }
+          })
+          .catch((err) => {
+            console.error('useUser: Error checking session after timeout', err);
+          });
       }
     }, USER_LOADING_TIMEOUT_MS);
 
@@ -224,6 +225,7 @@ export function UserProvider({ children }: { children: ReactNode }) {
 
         const currentUser = session?.user ?? null;
         setUser(currentUser);
+        setHasSession(!!currentUser);
 
         if (currentUser) {
           const userProfile = await fetchProfile(currentUser.id);
