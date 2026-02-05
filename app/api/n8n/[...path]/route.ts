@@ -1,9 +1,21 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-const N8N_BASE_URL =
-  process.env.N8N_WEBHOOK_URL ||
-  process.env.NEXT_PUBLIC_N8N_WEBHOOK_URL ||
-  'https://n8n-production-293e.up.railway.app';
+// Strip any trailing path from the URL (e.g. /webhook/multi-trade-coordinator)
+// We only want the base origin like https://n8n-production-293e.up.railway.app
+function getN8nBaseUrl(): string {
+  const raw =
+    process.env.N8N_WEBHOOK_URL ||
+    process.env.NEXT_PUBLIC_N8N_WEBHOOK_URL ||
+    'https://n8n-production-293e.up.railway.app';
+  try {
+    const url = new URL(raw);
+    return url.origin; // Returns just https://hostname — strips any path
+  } catch {
+    return raw;
+  }
+}
+
+const N8N_BASE_URL = getN8nBaseUrl();
 
 const TIMEOUT_MS = 120_000; // 2 min — Excel generation can be slow
 
