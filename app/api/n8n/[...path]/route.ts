@@ -61,19 +61,43 @@ export async function POST(
       });
     }
 
-    // Handle JSON responses
-    if (contentType.includes('application/json')) {
-      const data = await n8nResponse.json();
-      return NextResponse.json(data, { status: n8nResponse.status });
+    // Read response as text first, then try to parse as JSON
+    const responseText = await n8nResponse.text();
+
+    console.log(`[n8n-proxy] Response status: ${n8nResponse.status}, content-type: ${contentType}, body length: ${responseText.length}`);
+
+    if (!responseText || responseText.length === 0) {
+      // Empty response — n8n webhook may not be active or returned nothing
+      if (n8nResponse.ok) {
+        return NextResponse.json({ success: true, message: 'Webhook executed (empty response)' });
+      }
+      return NextResponse.json(
+        { error: 'n8n returned empty response', status: n8nResponse.status },
+        { status: n8nResponse.status || 502 }
+      );
     }
 
-    // Pass through any other response type (HTML proposals, etc.)
-    const buffer = await n8nResponse.arrayBuffer();
-    const headers: Record<string, string> = { 'Content-Type': contentType };
-    const disposition = n8nResponse.headers.get('content-disposition');
-    if (disposition) headers['Content-Disposition'] = disposition;
+    // Try JSON parse
+    try {
+      const data = JSON.parse(responseText);
+      return NextResponse.json(data, { status: n8nResponse.status });
+    } catch {
+      // Not JSON — return as text (could be HTML error page)
+      console.error(`[n8n-proxy] Non-JSON response: ${responseText.substring(0, 500)}`);
 
-    return new NextResponse(buffer, { status: n8nResponse.status, headers });
+      // If it's an HTML error page from n8n, extract the message
+      if (contentType.includes('html')) {
+        return NextResponse.json(
+          { error: 'n8n returned HTML instead of JSON', hint: 'The webhook may not be active or the path may be incorrect', rawPreview: responseText.substring(0, 200) },
+          { status: n8nResponse.status || 502 }
+        );
+      }
+
+      return new NextResponse(responseText, {
+        status: n8nResponse.status,
+        headers: { 'Content-Type': contentType || 'text/plain' },
+      });
+    }
   } catch (error: unknown) {
     const err = error instanceof Error ? error : new Error(String(error));
     console.error(`[n8n-proxy] Error proxying /webhook/${webhookPath}:`, err);
