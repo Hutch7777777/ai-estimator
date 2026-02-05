@@ -1,23 +1,21 @@
 'use client';
 
 import { useEffect } from 'react';
-import { useRouter } from 'next/navigation';
 import { Loader2 } from 'lucide-react';
 import { useUser } from '@/lib/hooks/useUser';
 import { useOrganization } from '@/lib/hooks/useOrganization';
 import { NoOrganization } from '@/components/no-organization';
 
 export default function ProjectLayout({ children }: { children: React.ReactNode }) {
-  const router = useRouter();
   const { user, isLoading: isUserLoading, hasSession } = useUser();
   const { isLoading: isOrgLoading, hasNoOrganizations } = useOrganization();
 
   // Redirect to login if user loading is complete and no user/session
   useEffect(() => {
     if (!isUserLoading && !user && !hasSession) {
-      router.push('/login');
+      window.location.href = '/login';
     }
-  }, [isUserLoading, user, hasSession, router]);
+  }, [isUserLoading, user, hasSession]);
 
   // Step 1: Wait for user auth to complete first
   if (isUserLoading) {
