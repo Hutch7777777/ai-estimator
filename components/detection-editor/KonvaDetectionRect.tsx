@@ -92,14 +92,24 @@ export default function KonvaDetectionRect({
   });
 
   const color = getDetectionColor(detection.class);
-  // Unselected: light grey to match standard detection style
-  // Selected: use class color for prominence
-  const strokeColor = isSelected ? darkenColor(color, 20) : STROKE_COLOR_UNSELECTED;
+
+  // Material assignment visual feedback - higher opacity and colored stroke when material is assigned
+  const hasMaterial = Boolean(detection.assigned_material_id);
+
+  // Stroke color: class color when selected OR has material, grey otherwise
+  const strokeColor = isSelected
+    ? darkenColor(color, 20)
+    : hasMaterial
+      ? color
+      : STROKE_COLOR_UNSELECTED;
+
+  // Stroke width: slightly thicker when material is assigned for visual emphasis
+  const baseStrokeWidth = hasMaterial ? 2 : 1;
+
   const lowConfidence = isLowConfidence(detection.confidence);
   const isDeleted = detection.status === 'deleted';
 
   // Scale-adjusted sizes for consistent visual appearance
-  // Stroke width is constant (1px) - strokeScaleEnabled=false keeps it consistent at any zoom
   const handleSize = 8 / scale;
   const fontSize = 11 / scale;
   const labelPadding = 4 / scale;
@@ -205,9 +215,9 @@ export default function KonvaDetectionRect({
         width={canvasCoords.width}
         height={canvasCoords.height}
         fill={color}
-        opacity={isSelected ? 0.3 : isHovered ? 0.25 : 0.2}
+        opacity={(isSelected ? 0.3 : isHovered ? 0.25 : 0.2) + (hasMaterial ? 0.15 : 0)}
         stroke={strokeColor}
-        strokeWidth={1}
+        strokeWidth={baseStrokeWidth}
         strokeScaleEnabled={false}
         dash={lowConfidence ? [4 / scale, 2 / scale] : undefined}
         cornerRadius={2 / scale}

@@ -274,6 +274,43 @@ function isPointInDetection(point: PolygonPoint, detection: ExtractionDetection)
   );
 }
 
+/**
+ * Find the topmost (visually front-most) detection at a given point.
+ * Uses the same sorting logic as rendering: smaller area = on top.
+ * Returns null if no detection contains the point.
+ */
+function findTopmostDetectionAtPoint(
+  point: PolygonPoint,
+  detections: ExtractionDetection[],
+  selectedDetectionId?: string | null
+): ExtractionDetection | null {
+  // Filter to non-deleted detections that contain the point
+  const matchingDetections = detections.filter(
+    d => d.status !== 'deleted' && isPointInDetection(point, d)
+  );
+
+  if (matchingDetections.length === 0) return null;
+  if (matchingDetections.length === 1) return matchingDetections[0];
+
+  // Sort by the same criteria as rendering order:
+  // - Selected items are on top
+  // - Within same selection state, smaller areas are on top
+  // Array is sorted so topmost is LAST (same as render order)
+  matchingDetections.sort((a, b) => {
+    const aSelected = a.id === selectedDetectionId;
+    const bSelected = b.id === selectedDetectionId;
+    if (aSelected !== bSelected) {
+      return aSelected ? 1 : -1;
+    }
+    const aArea = a.pixel_width * a.pixel_height;
+    const bArea = b.pixel_width * b.pixel_height;
+    return bArea - aArea; // Larger first, smaller last (on top)
+  });
+
+  // Return the last one (topmost in render order)
+  return matchingDetections[matchingDetections.length - 1];
+}
+
 // =============================================================================
 // Component
 // =============================================================================
@@ -1263,22 +1300,31 @@ export default function KonvaDetectionCanvas({
         const imageY = (pointer.y - position.y) / scale;
         const startPoint = { x: imageX, y: imageY };
 
-        // Check if clicking on a detection using point-in-detection test
-        const clickedDetection = detections.find(d =>
-          d.status !== 'deleted' && isPointInDetection(startPoint, d)
-        );
+        // Check if clicking on a detection - find the topmost (smallest/front-most) one
+        const clickedDetection = findTopmostDetectionAtPoint(startPoint, detections, selectedDetectionId);
 
-        // Check if shift is held to add to existing selection
+        // Check if shift is held or multi-select mode is on to add to existing selection
         const isShiftHeld = e.evt.shiftKey;
+        const shouldAddToSelection = isShiftHeld || multiSelectMode;
 
         // Start paint selection
         setIsPaintSelecting(true);
 
-        if (isShiftHeld && selectedIds.size > 0) {
-          // Add to existing selection
-          const newSet = new Set(selectedIds);
-          if (clickedDetection) newSet.add(clickedDetection.id);
-          setPaintSelectedIds(newSet);
+        if (shouldAddToSelection) {
+          if (!clickedDetection) {
+            // Clicked empty space - clear selection even in multi-select mode
+            setPaintSelectedIds(new Set());
+            onSelectionChange(null, false);
+          } else {
+            // Toggle detection in/out of existing selection
+            const newSet = new Set(selectedIds);
+            if (newSet.has(clickedDetection.id)) {
+              newSet.delete(clickedDetection.id);
+            } else {
+              newSet.add(clickedDetection.id);
+            }
+            setPaintSelectedIds(newSet);
+          }
         } else {
           // Start fresh with clicked detection (if any)
           setPaintSelectedIds(clickedDetection ? new Set([clickedDetection.id]) : new Set());
@@ -1311,7 +1357,7 @@ export default function KonvaDetectionCanvas({
       // Pan mode handled by Konva's draggable property
       // Verify mode handled by detection click handlers
     },
-    [toolMode, onSelectionChange, isDrawingPolygon, drawingPoints.length, isNearStart, completePolygon, calibrationState.pointA, onCalibrationComplete, resetCalibration, position, scale, lineStartPoint, scaleRatio, activeClass, onDetectionCreate, selectedIds, splitPolygonPoints, isSplitDrawing, completeSplitPolygon, onSAMClick, detections]
+    [toolMode, onSelectionChange, isDrawingPolygon, drawingPoints.length, isNearStart, completePolygon, calibrationState.pointA, onCalibrationComplete, resetCalibration, position, scale, lineStartPoint, scaleRatio, activeClass, onDetectionCreate, selectedIds, splitPolygonPoints, isSplitDrawing, completeSplitPolygon, onSAMClick, detections, selectedDetectionId, multiSelectMode]
   );
 
   const handleStageMouseMove = useCallback(
@@ -1459,15 +1505,10 @@ export default function KonvaDetectionCanvas({
           const imageY = (pointer.y - position.y) / scale;
           const currentPoint = { x: imageX, y: imageY };
 
-          // Check if cursor is over any detection and add it to selection
-          for (const detection of detections) {
-            if (detection.status === 'deleted') continue;
-            if (paintSelectedIds.has(detection.id)) continue; // Already selected
-
-            if (isPointInDetection(currentPoint, detection)) {
-              // Add this detection to the paint selection
-              setPaintSelectedIds(prev => new Set([...prev, detection.id]));
-            }
+          // Find only the topmost detection at cursor position (not all overlapping ones)
+          const topmost = findTopmostDetectionAtPoint(currentPoint, detections, selectedDetectionId);
+          if (topmost && !paintSelectedIds.has(topmost.id)) {
+            setPaintSelectedIds(prev => new Set([...prev, topmost.id]));
           }
         }
         return;
@@ -1480,7 +1521,7 @@ export default function KonvaDetectionCanvas({
       const currentPoint = { x: pointer.x, y: pointer.y };
       setMousePosition(currentPoint);
     },
-    [toolMode, isDrawingPolygon, drawingPoints, isPointNearStart, calibrationState.pointA, position, scale, lineStartPoint, isSplitDrawing, splitPolygonPoints, splitRectStart, createRectStart, calculateAutoPan, isShiftHeld, regionRectStart, isPaintSelecting, paintSelectedIds, detections]
+    [toolMode, isDrawingPolygon, drawingPoints, isPointNearStart, calibrationState.pointA, position, scale, lineStartPoint, isSplitDrawing, splitPolygonPoints, splitRectStart, createRectStart, calculateAutoPan, isShiftHeld, regionRectStart, isPaintSelecting, paintSelectedIds, detections, selectedDetectionId]
   );
 
   const handleStageMouseUp = useCallback(
@@ -1491,6 +1532,9 @@ export default function KonvaDetectionCanvas({
         if (paintSelectedIds.size > 0 && onMultiSelect) {
           console.log('[Canvas] Paint selected:', paintSelectedIds.size, 'detections');
           onMultiSelect(Array.from(paintSelectedIds));
+        } else if (paintSelectedIds.size === 0 && multiSelectMode) {
+          // All items were toggled off - clear selection
+          onSelectionChange(null, false);
         }
         // Reset paint selection state
         setIsPaintSelecting(false);
@@ -1577,7 +1621,7 @@ export default function KonvaDetectionCanvas({
         }
       }
     },
-    [toolMode, createRectStart, createRectEnd, isDraggingCreateRect, isDrawingPolygon, completeRectangleCreate, splitRectStart, splitRectEnd, isDraggingRect, isSplitDrawing, executeSplitWithRect, isShiftHeld, drawingPoints, splitPolygonPoints, regionRectStart, regionRectEnd, isDraggingRegion, executeRegionSelection, cancelRegionDrawing, isPaintSelecting, paintSelectedIds, onMultiSelect]
+    [toolMode, createRectStart, createRectEnd, isDraggingCreateRect, isDrawingPolygon, completeRectangleCreate, splitRectStart, splitRectEnd, isDraggingRect, isSplitDrawing, executeSplitWithRect, isShiftHeld, drawingPoints, splitPolygonPoints, regionRectStart, regionRectEnd, isDraggingRegion, executeRegionSelection, cancelRegionDrawing, isPaintSelecting, paintSelectedIds, onMultiSelect, multiSelectMode, onSelectionChange]
   );
 
   const handleStageDoubleClick = useCallback(
@@ -1779,7 +1823,27 @@ export default function KonvaDetectionCanvas({
     toolMode === 'point' ||
     toolMode === 'calibrate' ||
     toolMode === 'split' ||
-    toolMode === 'region_detect';
+    toolMode === 'region_detect' ||
+    toolMode === 'sam_select';
+
+  // Enforce cursor on the Konva stage container when tool mode changes.
+  // This ensures the cursor is set directly on Konva's internal container div,
+  // not just the parent wrapper. Clears on exit so parent div cursor cascades.
+  useEffect(() => {
+    const container = stageRef.current?.container();
+    if (!container) return;
+
+    if (isDrawingMode) {
+      container.style.cursor = 'crosshair';
+    } else if (toolMode === 'pan') {
+      container.style.cursor = 'grab';
+    } else if (toolMode === 'verify') {
+      container.style.cursor = 'pointer';
+    } else {
+      // Remove inline cursor so parent div's cursor cascades through
+      container.style.cursor = '';
+    }
+  }, [isDrawingMode, toolMode]);
 
   const getCursor = () => {
     if (isDrawingPolygon) return 'crosshair';
@@ -1800,6 +1864,8 @@ export default function KonvaDetectionCanvas({
       case 'split':
         return 'crosshair';
       case 'region_detect':
+        return 'crosshair';
+      case 'sam_select':
         return 'crosshair';
       case 'verify':
         return 'pointer';

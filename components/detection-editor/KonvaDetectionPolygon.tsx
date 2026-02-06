@@ -222,9 +222,21 @@ export default function KonvaDetectionPolygon({
   }, [detection.id, detection.polygon_points, isDraggingHoleCorner]);
 
   const color = getEffectiveDetectionColor(detection);
-  // Unselected: light grey to match standard detection style
-  // Selected: use class color for prominence
-  const strokeColor = isSelected ? darkenColor(color, 20) : STROKE_COLOR_UNSELECTED;
+
+  // Material assignment visual feedback - higher opacity and colored stroke when material is assigned
+  const hasMaterial = Boolean(detection.assigned_material_id);
+
+  // Stroke color: class color when selected OR has material, grey otherwise
+  // When selected: darker shade for prominence, when just material assigned: standard class color
+  const strokeColor = isSelected
+    ? darkenColor(color, 20)
+    : hasMaterial
+      ? color
+      : STROKE_COLOR_UNSELECTED;
+
+  // Stroke width: slightly thicker when material is assigned for visual emphasis
+  const baseStrokeWidth = hasMaterial ? 2 : 1;
+
   const lowConfidence = isLowConfidence(detection.confidence);
   const isDeleted = detection.status === 'deleted';
 
@@ -681,14 +693,16 @@ export default function KonvaDetectionPolygon({
             // Use evenodd fill rule to properly render holes (hole area is transparent)
             ctx.fillStyle = color;
             // Apply dimmed opacity if below confidence filter threshold
-            const baseOpacity = isSelected ? 0.3 : isHovered ? 0.25 : 0.2;
+            // Higher opacity when material is assigned for visual feedback
+            const materialBoost = hasMaterial ? 0.15 : 0;
+            const baseOpacity = (isSelected ? 0.3 : isHovered ? 0.25 : 0.2) + materialBoost;
             ctx.globalAlpha = dimmed ? baseOpacity * 0.4 : baseOpacity;
             ctx.fill('evenodd');
 
             // Stroke outer boundary
             ctx.globalAlpha = dimmed ? 0.4 : 1;
             ctx.strokeStyle = strokeColor;
-            ctx.lineWidth = 1;
+            ctx.lineWidth = baseStrokeWidth;
             if (lowConfidence || dimmed) {
               ctx.setLineDash([4 / scale, 2 / scale]);
             }
@@ -738,9 +752,9 @@ export default function KonvaDetectionPolygon({
           points={flattenPoints(localPoints)}
           closed={true}
           fill={color}
-          opacity={(isSelected ? 0.3 : isHovered ? 0.25 : 0.2) * (dimmed ? 0.4 : 1)}
+          opacity={((isSelected ? 0.3 : isHovered ? 0.25 : 0.2) + (hasMaterial ? 0.15 : 0)) * (dimmed ? 0.4 : 1)}
           stroke={strokeColor}
-          strokeWidth={1}
+          strokeWidth={baseStrokeWidth}
           strokeScaleEnabled={false}
           dash={(lowConfidence || dimmed) ? [4 / scale, 2 / scale] : undefined}
           shadowColor={isSelected ? strokeColor : undefined}
@@ -789,13 +803,13 @@ export default function KonvaDetectionPolygon({
             draggable
             onMouseEnter={(e) => {
               const stage = e.target.getStage();
-              if (stage && isDraggingEdge === null) {
+              if (stage && isDraggingEdge === null && draggable) {
                 stage.container().style.cursor = 'pointer';
               }
             }}
             onMouseLeave={(e) => {
               const stage = e.target.getStage();
-              if (stage && isDraggingEdge === null) {
+              if (stage && isDraggingEdge === null && draggable) {
                 stage.container().style.cursor = '';
               }
             }}
@@ -889,7 +903,7 @@ export default function KonvaDetectionPolygon({
               handleEdgeDragEnd();
 
               const stage = e.target.getStage();
-              if (stage) {
+              if (stage && draggable) {
                 stage.container().style.cursor = '';
               }
             }}
@@ -928,10 +942,12 @@ export default function KonvaDetectionPolygon({
           }}
           onDblClick={() => handleRemovePoint(index)}
           onMouseEnter={(e) => {
+            if (!draggable) return;
             const container = e.target.getStage()?.container();
             if (container) container.style.cursor = 'move';
           }}
           onMouseLeave={(e) => {
+            if (!draggable) return;
             const container = e.target.getStage()?.container();
             if (container) container.style.cursor = '';
           }}

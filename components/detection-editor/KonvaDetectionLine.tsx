@@ -378,10 +378,12 @@ export default function KonvaDetectionLine({
             handleEndpointDragEnd(index as 0 | 1, e);
           }}
           onMouseEnter={(e) => {
+            if (!draggable) return;
             const container = e.target.getStage()?.container();
             if (container) container.style.cursor = isSelected ? 'move' : 'pointer';
           }}
           onMouseLeave={(e) => {
+            if (!draggable) return;
             const container = e.target.getStage()?.container();
             if (container) container.style.cursor = '';
           }}

@@ -211,11 +211,13 @@ export default function KonvaDetectionPoint({
         onTap={handleClick}
         onMouseEnter={() => {
           onHoverStart(detection.id);
+          if (!draggable) return;
           const container = document.querySelector('.konva-container');
           if (container) (container as HTMLElement).style.cursor = isSelected ? 'move' : 'pointer';
         }}
         onMouseLeave={() => {
           onHoverEnd();
+          if (!draggable) return;
           const container = document.querySelector('.konva-container');
           if (container) (container as HTMLElement).style.cursor = '';
         }}
