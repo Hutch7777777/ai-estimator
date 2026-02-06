@@ -253,6 +253,7 @@ function styleGrandTotal(cell: ExcelJS.Cell): void {
 
 export async function exportTakeoffToExcel(data: TakeoffData, filename?: string): Promise<void> {
   const workbook = new ExcelJS.Workbook();
+  workbook.calcProperties = { fullCalcOnLoad: true };
   workbook.creator = 'Exterior Finishes AI Estimator';
   workbook.created = new Date();
 
@@ -592,6 +593,7 @@ export async function exportTakeoffToExcel(data: TakeoffData, filename?: string)
 
 export async function exportVendorTakeoff(data: TakeoffData, filename?: string): Promise<void> {
   const workbook = new ExcelJS.Workbook();
+  workbook.calcProperties = { fullCalcOnLoad: true };
   workbook.creator = 'Exterior Finishes AI Estimator';
   workbook.created = new Date();
 

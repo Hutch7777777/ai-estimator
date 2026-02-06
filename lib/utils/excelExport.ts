@@ -103,6 +103,7 @@ export async function exportFullEstimate(
   projectInfo: ProjectInfo
 ) {
   const workbook = new ExcelJS.Workbook();
+  workbook.calcProperties = { fullCalcOnLoad: true };
   const worksheet = workbook.addWorksheet("Estimate");
 
   // Set column widths
@@ -333,6 +334,7 @@ export async function exportVendorTakeoff(
   projectInfo: ProjectInfo
 ) {
   const workbook = new ExcelJS.Workbook();
+  workbook.calcProperties = { fullCalcOnLoad: true };
   const worksheet = workbook.addWorksheet("Vendor Takeoff");
 
   // Set column widths

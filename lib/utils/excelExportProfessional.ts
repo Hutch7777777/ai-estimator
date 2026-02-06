@@ -1520,6 +1520,7 @@ export async function exportProfessionalEstimate(
   v2Options?: V2ExportOptions
 ): Promise<void> {
   const workbook = new ExcelJS.Workbook();
+  workbook.calcProperties = { fullCalcOnLoad: true };
   workbook.creator = 'Exterior Finishes Estimator';
   workbook.created = new Date();
 
@@ -1574,6 +1575,7 @@ export async function exportVendorTakeoff(
   projectInfo: ProjectInfo
 ): Promise<void> {
   const workbook = new ExcelJS.Workbook();
+  workbook.calcProperties = { fullCalcOnLoad: true };
   workbook.creator = 'Exterior Finishes Estimator';
   workbook.created = new Date();
 

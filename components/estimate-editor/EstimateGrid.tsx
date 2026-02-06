@@ -722,6 +722,7 @@ export function EstimateGrid({
     try {
       const ExcelJS = (await import('exceljs')).default;
       const workbook = new ExcelJS.Workbook();
+      workbook.calcProperties = { fullCalcOnLoad: true };
       const worksheet = workbook.addWorksheet('Estimate');
 
       // Set column widths

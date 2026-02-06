@@ -159,6 +159,7 @@ export function exportToCSV(data: ExportData): string {
  */
 export async function exportToExcel(data: ExportData): Promise<Blob> {
   const workbook = new ExcelJS.Workbook();
+  workbook.calcProperties = { fullCalcOnLoad: true };
   workbook.creator = "AI Estimator";
   workbook.created = new Date();
 

@@ -58,6 +58,7 @@ export async function generateTakeoffSpreadsheet(
   subject: string
 ): Promise<Buffer> {
   const workbook = new ExcelJS.Workbook();
+  workbook.calcProperties = { fullCalcOnLoad: true };
   workbook.creator = 'Exterior Finishes LLC';
   workbook.created = new Date();
 
@@ -182,6 +183,7 @@ export async function generateScheduleSpreadsheet(
   projectName: string
 ): Promise<Buffer> {
   const workbook = new ExcelJS.Workbook();
+  workbook.calcProperties = { fullCalcOnLoad: true };
   workbook.creator = 'Exterior Finishes LLC';
   workbook.created = new Date();
 
