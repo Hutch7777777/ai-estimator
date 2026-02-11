@@ -369,6 +369,17 @@ export default function DetectionEditor({
   // Re-detection state
   const [isRedetecting, setIsRedetecting] = useState(false);
 
+  // Unassigned filter state - show only detections without assigned materials
+  const [showUnassignedOnly, setShowUnassignedOnly] = useState(false);
+
+  // Auto-disable unassigned filter when all detections have materials assigned
+  useEffect(() => {
+    if (showUnassignedOnly && reviewProgress.pending === 0) {
+      setShowUnassignedOnly(false);
+      toast.success('All detections have materials assigned!');
+    }
+  }, [showUnassignedOnly, reviewProgress.pending]);
+
   // Plan Reader chatbot ref (for keyboard shortcut toggle)
   const planReaderRef = useRef<PlanReaderChatbotRef>(null);
 
@@ -1066,8 +1077,17 @@ export default function DetectionEditor({
   // Delete a single detection from context menu
   const handleDeleteDetectionFromMenu = useCallback(
     (detectionId: string) => {
+      console.log('[Delete] handleDeleteDetectionFromMenu called with ID:', detectionId);
+      console.log('[Delete] currentPageDetections count:', currentPageDetections.length);
+      console.log('[Delete] currentPageDetections IDs:', currentPageDetections.map(d => d.id));
+
       const detection = currentPageDetections.find((d) => d.id === detectionId);
-      if (!detection) return;
+      if (!detection) {
+        console.error('[Delete] Detection NOT FOUND in currentPageDetections! ID:', detectionId);
+        return;
+      }
+
+      console.log('[Delete] Found detection:', detection.id, 'class:', detection.class, 'markup_type:', detection.markup_type);
 
       const optimistic = createOptimisticDelete(detection);
       updateDetectionLocally(optimistic);
@@ -1752,15 +1772,28 @@ export default function DetectionEditor({
 
     try {
       const allDetections = getAllDetections();
-      console.log('[DetectionEditor] Validating', allDetections.length, 'detections');
+      // Count only changed detections (edited/created or deleted) - not unchanged 'auto'/'verified' ones
+      const changedCount = allDetections.filter(
+        d => d.status === 'edited' || d.status === 'deleted'
+      ).length;
+      console.log('[DetectionEditor] Validating', allDetections.length, 'detections,', changedCount, 'changed');
 
       const result = await validateDetections(jobId, allDetections);
 
       if (result.success) {
         // Clear undo/redo stacks and localStorage
         clearUnsavedChanges();
+
+        // Build a meaningful description from the API response counts
+        const parts: string[] = [];
+        if (result.updated_count) parts.push(`${result.updated_count} updated`);
+        if (result.created_count) parts.push(`${result.created_count} created`);
+        if (result.deleted_count) parts.push(`${result.deleted_count} deleted`);
+
         toast.success('Changes saved successfully', {
-          description: `Updated ${result.updated_count || 0} detections`,
+          description: parts.length > 0
+            ? parts.join(', ')
+            : `Saved ${changedCount} change${changedCount !== 1 ? 's' : ''}`,
         });
       } else {
         toast.error('Validation failed', {
@@ -2073,8 +2106,13 @@ export default function DetectionEditor({
       });
     }
 
+    // Apply unassigned filter - show only detections without materials
+    if (showUnassignedOnly) {
+      filtered = filtered.filter((d) => !d.assigned_material_id);
+    }
+
     return filtered;
-  }, [currentPageDetections, showDeleted, showOriginalOnly, minConfidence, showLowConfidence]);
+  }, [currentPageDetections, showDeleted, showOriginalOnly, minConfidence, showLowConfidence, showUnassignedOnly]);
 
   // Compute detection counts for confidence filter UI
   const confidenceFilterCounts = useMemo(() => {
@@ -3275,7 +3313,11 @@ export default function DetectionEditor({
   }, []);
 
   const handleApprove = useCallback(async () => {
-    if (!jobId || !liveDerivedTotals) {
+    // Use allPagesTotals (aggregated from all elevation pages) if available,
+    // otherwise fall back to liveDerivedTotals (current page only)
+    const totalsForApproval = allPagesTotals || liveDerivedTotals;
+
+    if (!jobId || !totalsForApproval) {
       console.error('[Approve] Missing job ID or calculations');
       return;
     }
@@ -3283,8 +3325,9 @@ export default function DetectionEditor({
     setIsApproving(true);
 
     try {
-      // Build the payload with all measurements
-      const payload = buildApprovePayload(liveDerivedTotals);
+      // Build the payload with all measurements (from all pages when available)
+      const payload = buildApprovePayload(totalsForApproval);
+      console.log('[Approve] Using totals from:', allPagesTotals ? 'ALL PAGES' : 'CURRENT PAGE ONLY');
       console.log('[Approve] Sending payload:', payload);
       console.log('[Approve] Material assignments:', payload.material_assignments?.length || 0);
       if (payload.material_assignments?.length) {
@@ -3347,7 +3390,11 @@ export default function DetectionEditor({
       } else {
         // It's JSON - parse response text once
         const responseText = await response.text();
+        console.log('[Approve] ========== RAW API RESPONSE ==========');
+        console.log('[Approve] Response status:', response.status);
+        console.log('[Approve] Response length:', responseText.length);
         console.log('[Approve] Raw response:', responseText);
+        console.log('[Approve] ========================================');
 
         let data: ApprovalResult;
         try {
@@ -3357,7 +3404,34 @@ export default function DetectionEditor({
           throw new Error(`Invalid JSON response: ${responseText.slice(0, 100)}`);
         }
 
-        console.log('[Approve] Parsed result:', data);
+        console.log('[Approve] ========== PARSED RESULT ==========');
+        console.log('[Approve] Parsed result:', JSON.stringify(data, null, 2));
+        console.log('[Approve] Key fields:');
+        console.log('[Approve] - success:', data.success);
+        console.log('[Approve] - takeoff_id:', data.takeoff_id);
+        console.log('[Approve] - line_items_created:', data.line_items_created);
+        console.log('[Approve] ========== TOTALS DEBUG ==========');
+        console.log('[Approve] data.totals exists:', !!data.totals);
+        console.log('[Approve] data.totals keys:', data.totals ? Object.keys(data.totals) : 'N/A');
+        console.log('[Approve] data.totals full:', JSON.stringify(data.totals, null, 2));
+        if (data.totals) {
+          console.log('[Approve] totals.material_cost:', data.totals.material_cost);
+          console.log('[Approve] totals.labor_cost:', data.totals.labor_cost);
+          console.log('[Approve] totals.overhead_cost:', data.totals.overhead_cost);
+          console.log('[Approve] totals.subtotal:', data.totals.subtotal);
+          console.log('[Approve] totals.final_price:', data.totals.final_price);
+        }
+        console.log('[Approve] ========== PROJECT_TOTALS DEBUG ==========');
+        const debugPt = (data as { project_totals?: Record<string, unknown> }).project_totals;
+        console.log('[Approve] data.project_totals exists:', !!debugPt);
+        if (debugPt) {
+          console.log('[Approve] project_totals keys:', Object.keys(debugPt));
+          console.log('[Approve] project_totals.material_cost:', debugPt.material_cost);
+          console.log('[Approve] project_totals.installation_labor_subtotal:', debugPt.installation_labor_subtotal);
+          console.log('[Approve] project_totals.overhead_total:', debugPt.overhead_total);
+          console.log('[Approve] project_totals.grand_total:', debugPt.grand_total);
+        }
+        console.log('[Approve] ========================================');
 
         if (!data.success) {
           throw new Error((data as { error?: string }).error || 'Approval failed');
@@ -3397,14 +3471,20 @@ export default function DetectionEditor({
         setShowApprovalResults(true);
 
         // Format cost for toast (with defensive checks)
-        const subtotal = data?.totals?.subtotal ?? 0;
+        // Note: takeoffDetails isn't available yet when toast fires, so use project_totals as primary
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const toastPt = (data as { project_totals?: Record<string, number> }).project_totals;
+        const toastTotals = data?.totals as Record<string, number> | undefined;
+        // Priority: project_totals.grand_total (available) > totals.final_price (usually empty)
+        const finalPrice: number = toastPt?.grand_total ?? toastTotals?.final_price ?? toastTotals?.grand_total ?? 0;
         const lineItemsCreated = data?.line_items_created ?? 0;
-        const formattedSubtotal = new Intl.NumberFormat('en-US', {
+        console.log('[Approve] Toast values:', { finalPrice, lineItemsCreated, project_totals: toastPt, totals: toastTotals });
+        const formattedTotal = new Intl.NumberFormat('en-US', {
           style: 'currency',
           currency: 'USD',
-        }).format(subtotal);
+        }).format(finalPrice);
 
-        toast.success(`Takeoff created: ${lineItemsCreated} items, ${formattedSubtotal}`, {
+        toast.success(`Takeoff created: ${lineItemsCreated} items, ${formattedTotal}`, {
           duration: 5000,
         });
 
@@ -3462,6 +3542,7 @@ export default function DetectionEditor({
     }
   }, [
     jobId,
+    allPagesTotals,
     liveDerivedTotals,
     buildApprovePayload,
     refresh,
@@ -3676,6 +3757,9 @@ export default function DetectionEditor({
             onValidate={handleValidate}
             onReset={handleReset}
             isValidating={isValidating}
+            // Unassigned filter props
+            showUnassignedOnly={showUnassignedOnly}
+            onToggleUnassignedOnly={() => setShowUnassignedOnly(prev => !prev)}
           />
 
           <div className="flex-1 flex overflow-hidden min-h-0">
@@ -4091,47 +4175,54 @@ export default function DetectionEditor({
               </div>
 
               {/* Cost Summary Card */}
-              {/* NOTE: Display BASE costs (before markup) to match Estimate page */}
-              {/* material_cost = base, material_total = with markup */}
-              {/* installation_labor_subtotal = base labor, labor_total = with markup */}
-              <div className="bg-gray-50 dark:bg-gray-800/50 rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden">
-                {/* Materials Row - Use base material_cost, not marked-up material_total */}
-                <div className="flex justify-between items-center px-4 py-3 border-b border-gray-200 dark:border-gray-700">
-                  <span className="text-sm text-gray-600 dark:text-gray-400">Materials</span>
-                  <span className="font-mono font-medium text-gray-900 dark:text-white">
-                    {new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(
-                      projectTotals?.material_cost ?? approvalResult?.totals?.material_cost ?? 0
-                    )}
-                  </span>
-                </div>
-                {/* Labor Row - Use base installation_labor_subtotal, not marked-up labor_total */}
-                <div className="flex justify-between items-center px-4 py-3 border-b border-gray-200 dark:border-gray-700">
-                  <span className="text-sm text-gray-600 dark:text-gray-400">Labor</span>
-                  <span className="font-mono font-medium text-gray-900 dark:text-white">
-                    {new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(
-                      projectTotals?.installation_labor_subtotal ?? laborSection?.installation_subtotal ?? 0
-                    )}
-                  </span>
-                </div>
-                {/* Overhead Row - Use overhead_total (includes project insurance) for display */}
-                <div className="flex justify-between items-center px-4 py-3 border-b border-gray-200 dark:border-gray-700">
-                  <span className="text-sm text-gray-600 dark:text-gray-400">Overhead</span>
-                  <span className="font-mono font-medium text-gray-900 dark:text-white">
-                    {new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(
-                      projectTotals?.overhead_total ?? projectTotals?.overhead_subtotal ?? overheadSection?.subtotal ?? approvalResult?.totals?.overhead_cost ?? 0
-                    )}
-                  </span>
-                </div>
-                {/* Grand Total Row - Keep using grand_total which includes markup + insurance */}
-                <div className="flex justify-between items-center px-4 py-4 bg-green-50 dark:bg-green-900/20">
-                  <span className="font-semibold text-gray-900 dark:text-white">Grand Total</span>
-                  <span className="font-mono font-bold text-xl text-green-600 dark:text-green-400">
-                    {new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(
-                      projectTotals?.grand_total ?? approvalResult?.totals?.final_price ?? approvalResult?.totals?.subtotal ?? 0
-                    )}
-                  </span>
-                </div>
-              </div>
+              {/* Priority: 1. takeoffDetails.takeoff (DB trigger values - BEST) */}
+              {/*           2. approvalResult.totals (Save to Tables - usually empty) */}
+              {/*           3. projectTotals (API values - fallback, has wrong material/labor split) */}
+              {(() => {
+                // DB source: takeoffDetails.takeoff has trigger-calculated totals
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                const dbTotals = takeoffDetails?.takeoff as Record<string, number> | undefined;
+                const t = approvalResult?.totals as Record<string, number> | undefined;
+                const pt = projectTotals as Record<string, number> | undefined;
+                // Priority: DB totals (correct) > approvalResult.totals > projectTotals (fallback)
+                const matCost = dbTotals?.total_material_cost ?? t?.material_cost ?? t?.total_material_cost ?? pt?.material_cost ?? 0;
+                const laborCost = dbTotals?.total_labor_cost ?? t?.labor_cost ?? t?.total_labor_cost ?? pt?.installation_labor_subtotal ?? laborSection?.installation_subtotal ?? 0;
+                const overheadCost = dbTotals?.total_overhead_cost ?? t?.overhead_cost ?? t?.total_overhead_cost ?? pt?.overhead_total ?? pt?.overhead_subtotal ?? overheadSection?.subtotal ?? 0;
+                const grandTotal = dbTotals?.final_price ?? t?.final_price ?? t?.grand_total ?? pt?.grand_total ?? 0;
+                console.log('[Modal] Displaying totals:', { matCost, laborCost, overheadCost, grandTotal, hasTakeoffDetails: !!dbTotals, dbTotals, totals: t, projectTotals: pt });
+                return (
+                  <div className="bg-gray-50 dark:bg-gray-800/50 rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden">
+                    {/* Materials Row */}
+                    <div className="flex justify-between items-center px-4 py-3 border-b border-gray-200 dark:border-gray-700">
+                      <span className="text-sm text-gray-600 dark:text-gray-400">Materials</span>
+                      <span className="font-mono font-medium text-gray-900 dark:text-white">
+                        {new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(matCost)}
+                      </span>
+                    </div>
+                    {/* Labor Row */}
+                    <div className="flex justify-between items-center px-4 py-3 border-b border-gray-200 dark:border-gray-700">
+                      <span className="text-sm text-gray-600 dark:text-gray-400">Labor</span>
+                      <span className="font-mono font-medium text-gray-900 dark:text-white">
+                        {new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(laborCost)}
+                      </span>
+                    </div>
+                    {/* Overhead Row */}
+                    <div className="flex justify-between items-center px-4 py-3 border-b border-gray-200 dark:border-gray-700">
+                      <span className="text-sm text-gray-600 dark:text-gray-400">Overhead</span>
+                      <span className="font-mono font-medium text-gray-900 dark:text-white">
+                        {new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(overheadCost)}
+                      </span>
+                    </div>
+                    {/* Grand Total Row */}
+                    <div className="flex justify-between items-center px-4 py-4 bg-green-50 dark:bg-green-900/20">
+                      <span className="font-semibold text-gray-900 dark:text-white">Grand Total</span>
+                      <span className="font-mono font-bold text-xl text-green-600 dark:text-green-400">
+                        {new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(grandTotal)}
+                      </span>
+                    </div>
+                  </div>
+                );
+              })()}
 
               {/* Action Buttons */}
               <div className="flex gap-3 pt-2">
