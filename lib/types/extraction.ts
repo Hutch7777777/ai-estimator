@@ -1215,6 +1215,29 @@ export interface ApprovePayload {
 
   // Total point markers count
   total_point_count?: number;
+
+  // V8.2: Measurements object for labor squares calculation
+  // The API reads openings from measurements.openings_area_sqft for NET area calculation
+  measurements?: {
+    facade_sqft?: number;
+    net_wall_area_sqft?: number;
+    openings_area_sqft?: number;
+    windows?: {
+      count?: number;
+      total_area_sqft?: number;
+      perimeter_lf?: number;
+    };
+    doors?: {
+      count?: number;
+      total_area_sqft?: number;
+      perimeter_lf?: number;
+    };
+    garages?: {
+      count?: number;
+      total_area_sqft?: number;
+      perimeter_lf?: number;
+    };
+  };
 }
 
 // =============================================================================

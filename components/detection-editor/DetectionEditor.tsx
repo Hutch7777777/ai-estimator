@@ -3096,6 +3096,30 @@ export default function DetectionEditor({
 
         // Total point markers count
         total_point_count: totals.totalPointCount > 0 ? totals.totalPointCount : undefined,
+
+        // V8.2: Include measurements object for labor squares calculation
+        // The API reads openings from measurements.openings_area_sqft or calculates from
+        // measurements.windows.total_area_sqft + measurements.doors.total_area_sqft + measurements.garages.total_area_sqft
+        measurements: {
+          facade_sqft: totals.buildingAreaSf,
+          net_wall_area_sqft: totals.sidingNetSf,
+          openings_area_sqft: totals.windowAreaSf + totals.doorAreaSf + totals.garageAreaSf,
+          windows: {
+            count: totals.windowCount,
+            total_area_sqft: totals.windowAreaSf,
+            perimeter_lf: totals.windowPerimeterLf,
+          },
+          doors: {
+            count: totals.doorCount,
+            total_area_sqft: totals.doorAreaSf,
+            perimeter_lf: totals.doorPerimeterLf,
+          },
+          garages: {
+            count: totals.garageCount,
+            total_area_sqft: totals.garageAreaSf,
+            perimeter_lf: totals.garagePerimeterLf,
+          },
+        },
       };
     },
     [jobId, projectId, job?.project_name, getAllDetections, organization?.id]
