@@ -3605,10 +3605,30 @@ export default function DetectionEditor({
         throw new Error(data.error || 'Export failed');
       }
 
-      // Open the download URL in a new tab
+      // Download as a file instead of opening in new tab
       if (data.download_url) {
-        window.open(data.download_url, '_blank');
-        toast.success('Bluebeam PDF exported successfully');
+        try {
+          // Fetch the PDF as a blob
+          const pdfResponse = await fetch(data.download_url);
+          const blob = await pdfResponse.blob();
+
+          // Create blob URL and trigger download
+          const blobUrl = URL.createObjectURL(blob);
+          const link = document.createElement('a');
+          link.href = blobUrl;
+          link.download = data.filename || 'bluebeam_export.pdf';
+          document.body.appendChild(link);
+          link.click();
+          document.body.removeChild(link);
+          URL.revokeObjectURL(blobUrl);
+
+          toast.success('Bluebeam PDF exported successfully');
+        } catch (downloadErr) {
+          console.error('[ExportBluebeam] Download error, falling back to window.open:', downloadErr);
+          // Fallback to opening in new tab if blob download fails
+          window.open(data.download_url, '_blank');
+          toast.success('Bluebeam PDF exported (opened in new tab)');
+        }
       } else {
         throw new Error('No download URL returned');
       }
