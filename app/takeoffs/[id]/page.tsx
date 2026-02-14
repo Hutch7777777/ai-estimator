@@ -16,6 +16,7 @@ import {
   MaterialsTable,
   LaborTable,
   OverheadTable,
+  PaintTable,
   PlanIntelligence,
 } from './components';
 import RFIEmailModal from './components/RFIEmailModal';
@@ -39,6 +40,7 @@ interface ApiResponse {
   overhead_items: OverheadItem[];
   totals: {
     material_cost: number;
+    paint_cost?: number;
     labor_cost: number;
     overhead_cost: number;
     subtotal: number;
@@ -310,9 +312,30 @@ export default function TakeoffDetailsPage() {
 
   const { takeoff, totals, labor_items, overhead_items, line_items } = data;
 
+  // Separate paint items from material items (paint items have item_type='paint')
+  const paintItems = line_items?.filter(item => (item as any).item_type === 'paint') || [];
+  const materialItems = line_items?.filter(item => (item as any).item_type !== 'paint') || [];
+
+  // Use paint_cost from API if available, otherwise calculate from items
+  const paintTotal = totals.paint_cost ?? paintItems.reduce((sum, item) => {
+    const materialExt = typeof item.material_extended === 'string'
+      ? parseFloat(item.material_extended)
+      : item.material_extended;
+    const laborExt = typeof item.labor_extended === 'string'
+      ? parseFloat(item.labor_extended)
+      : item.labor_extended;
+    return sum + (materialExt || 0) + (laborExt || 0);
+  }, 0);
+
   // Calculate labor and overhead totals for the table components
   const laborTotal = labor_items?.reduce((sum, item) => sum + (item.total || 0), 0) || 0;
   const overheadTotal = overhead_items?.reduce((sum, item) => sum + (item.amount || 0), 0) || 0;
+
+  // Totals already include paint_cost from API
+  const totalsWithPaint = {
+    ...totals,
+    paint_cost: paintTotal,
+  };
 
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-950">
@@ -370,13 +393,21 @@ export default function TakeoffDetailsPage() {
         {activeTab === 'summary' ? (
           <>
             {/* Cost Summary Card */}
-            <CostSummaryCard totals={totals} />
+            <CostSummaryCard totals={totalsWithPaint} />
 
-            {/* Materials Table */}
+            {/* Materials Table (excludes paint items) */}
             <MaterialsTable
-              items={line_items || []}
+              items={materialItems}
               totalMaterialCost={totals.material_cost}
             />
+
+            {/* Paint Table (if paint items exist) */}
+            {paintItems.length > 0 && (
+              <PaintTable
+                items={paintItems}
+                totalPaintCost={paintTotal}
+              />
+            )}
 
             {/* Labor Table */}
             <LaborTable

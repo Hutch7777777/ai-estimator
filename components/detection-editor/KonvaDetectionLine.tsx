@@ -325,7 +325,7 @@ export default function KonvaDetectionLine({
   return (
     <Group
       id={detection.id}
-      name={`detection-line-${detection.id}`}
+      name={`detection-${detection.id}`}
       draggable={draggable && isSelected && !isDraggingEndpoint}
       onDragStart={handleLineDragStart}
       onDragEnd={handleLineDragEnd}

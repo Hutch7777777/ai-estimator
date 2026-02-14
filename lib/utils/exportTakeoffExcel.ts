@@ -19,7 +19,7 @@ export interface TakeoffLineItem {
   presentation_group?: string;
   category?: string;
   item_number?: number;
-  item_type?: 'material' | 'labor' | 'overhead';
+  item_type?: 'material' | 'labor' | 'overhead' | 'paint';
   sku?: string;
   notes?: string;
   formula_used?: string;
@@ -194,6 +194,75 @@ function extractSize(item: TakeoffLineItem): string {
 }
 
 // =============================================================================
+// Paint Detection Helpers
+// =============================================================================
+
+const PAINT_HEADER_BG = 'FF8E24AA';  // Purple for paint section
+
+/**
+ * Check if an item is a paint-related item
+ * Matches: category='paint', presentation_group contains 'paint', or description contains paint keywords
+ */
+function isPaintItem(item: TakeoffLineItem): boolean {
+  const category = (item.category || '').toLowerCase();
+  const group = (item.presentation_group || '').toLowerCase();
+  const desc = (item.description || '').toLowerCase();
+  const sku = (item.sku || '').toLowerCase();
+
+  // Check category
+  if (category === 'paint' || category === 'primer') return true;
+
+  // Check presentation_group
+  if (group.includes('paint') || group.includes('primer')) return true;
+
+  // Check SKU patterns (PAINT-, PRIMER-, LABOR-PAINT-)
+  if (sku.startsWith('paint-') || sku.startsWith('primer-') || sku.includes('labor-paint')) return true;
+
+  // Check description keywords
+  const paintKeywords = [
+    'exterior paint',
+    'paint - siding',
+    'paint - trim',
+    'paint labor',
+    'paint supplies',
+    'primer -',
+    'primer for',
+    'cut ends primer',
+    'full coat primer',
+  ];
+
+  return paintKeywords.some(keyword => desc.includes(keyword));
+}
+
+/**
+ * Categorize paint items into sub-groups for organized display
+ */
+function categorizePaintItem(item: TakeoffLineItem): 'paint_material' | 'primer' | 'paint_labor' | 'paint_supplies' {
+  const desc = (item.description || '').toLowerCase();
+  const sku = (item.sku || '').toLowerCase();
+  const itemType = item.item_type || 'material';
+
+  // Check for labor items first
+  if (itemType === 'labor' || sku.includes('labor-paint') || desc.includes('paint labor')) {
+    return 'paint_labor';
+  }
+
+  // Check for primer
+  if (desc.includes('primer') || sku.includes('primer')) {
+    return 'primer';
+  }
+
+  // Check for supplies (brushes, rollers, tape, drop cloths, etc.)
+  if (desc.includes('supplies') || desc.includes('brush') || desc.includes('roller') ||
+      desc.includes('tape') || desc.includes('drop cloth') || desc.includes('tray')) {
+    return 'paint_supplies';
+  }
+
+  // Default to paint material (gallons of paint)
+  return 'paint_material';
+}
+
+// =============================================================================
 // Styling Functions
 // =============================================================================
 
@@ -248,6 +317,326 @@ function styleGrandTotal(cell: ExcelJS.Cell): void {
 }
 
 // =============================================================================
+// Paint Sheet Creation
+// =============================================================================
+
+interface PaintSheetOptions {
+  clientName: string;
+  address: string;
+  paintItems: TakeoffLineItem[];
+  paintLaborItems?: LaborItem[];
+  markupDecimal: number;
+}
+
+/**
+ * Creates a dedicated Paint worksheet with organized sections:
+ * - Paint Materials (gallons of paint)
+ * - Primer (cut ends or full coat)
+ * - Labor (paint labor by SF/LF)
+ * - Supplies (brushes, rollers, etc.)
+ */
+function createPaintSheet(
+  workbook: ExcelJS.Workbook,
+  options: PaintSheetOptions
+): void {
+  const { clientName, address, paintItems, paintLaborItems = [], markupDecimal } = options;
+
+  // Skip if no paint items
+  if (paintItems.length === 0 && paintLaborItems.length === 0) return;
+
+  const sheet = workbook.addWorksheet('Paint', { views: [{ state: 'frozen', xSplit: 0, ySplit: 5 }] });
+
+  // Set column widths
+  sheet.getColumn('A').width = 45;
+  sheet.getColumn('B').width = 10;
+  sheet.getColumn('C').width = 8;
+  sheet.getColumn('D').width = 12;
+  sheet.getColumn('E').width = 14;
+  sheet.getColumn('F').width = 30;
+
+  let row = 1;
+
+  // ==========================================================================
+  // PROJECT HEADER
+  // ==========================================================================
+  const titleCell = sheet.getCell(`A${row}`);
+  titleCell.value = clientName || 'Paint Estimate';
+  titleCell.font = { bold: true, size: 16 };
+  sheet.mergeCells(`A${row}:F${row}`);
+  row++;
+
+  sheet.getCell(`A${row}`).value = address || '';
+  sheet.getCell(`A${row}`).font = { size: 11 };
+  sheet.mergeCells(`A${row}:F${row}`);
+  row++;
+
+  sheet.getCell(`A${row}`).value = `Date: ${new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })}`;
+  sheet.getCell(`A${row}`).font = { size: 10, italic: true, color: { argb: COLORS.WARNING_TEXT } };
+  sheet.mergeCells(`A${row}:F${row}`);
+  row += 2;
+
+  // ==========================================================================
+  // SECTION HEADER - PAINT & PRIMER
+  // ==========================================================================
+  const sectionHeaderCell = sheet.getCell(`A${row}`);
+  sectionHeaderCell.value = 'PAINT & PRIMER';
+  styleSectionHeader(sectionHeaderCell, PAINT_HEADER_BG);
+  sheet.mergeCells(`A${row}:F${row}`);
+  row++;
+
+  // Column headers
+  ['Description', 'QTY', 'Unit', 'Unit Cost', 'Extended', 'Notes'].forEach((label, idx) => {
+    const cell = sheet.getCell(row, idx + 1);
+    cell.value = label;
+    styleHeader(cell);
+  });
+  row++;
+
+  // Categorize items
+  const paintMaterials: TakeoffLineItem[] = [];
+  const primerItems: TakeoffLineItem[] = [];
+  const laborItems: TakeoffLineItem[] = [];
+  const supplyItems: TakeoffLineItem[] = [];
+
+  paintItems.forEach(item => {
+    const category = categorizePaintItem(item);
+    switch (category) {
+      case 'paint_material': paintMaterials.push(item); break;
+      case 'primer': primerItems.push(item); break;
+      case 'paint_labor': laborItems.push(item); break;
+      case 'paint_supplies': supplyItems.push(item); break;
+    }
+  });
+
+  // Also include dedicated labor items
+  const allLaborItems = [...laborItems];
+
+  // Track subtotal rows for formulas
+  const subtotalRows: { type: string; row: number }[] = [];
+
+  // ==========================================================================
+  // PAINT MATERIALS SECTION
+  // ==========================================================================
+  if (paintMaterials.length > 0) {
+    const groupHeaderCell = sheet.getCell(`A${row}`);
+    groupHeaderCell.value = 'Paint Materials';
+    styleGroupHeader(groupHeaderCell, 'E1BEE7'); // Light purple
+    sheet.mergeCells(`A${row}:F${row}`);
+    row++;
+
+    const groupStartRow = row;
+
+    paintMaterials.forEach((item, idx) => {
+      const isAltRow = idx % 2 === 1;
+      sheet.getCell(`A${row}`).value = item.description; styleDataCell(sheet.getCell(`A${row}`), isAltRow);
+      sheet.getCell(`B${row}`).value = safeNum(item.quantity); sheet.getCell(`B${row}`).numFmt = '#,##0.00'; styleDataCell(sheet.getCell(`B${row}`), isAltRow); sheet.getCell(`B${row}`).alignment = { horizontal: 'right' };
+      sheet.getCell(`C${row}`).value = item.unit || 'GAL'; styleDataCell(sheet.getCell(`C${row}`), isAltRow); sheet.getCell(`C${row}`).alignment = { horizontal: 'center' };
+      sheet.getCell(`D${row}`).value = safeNum(item.material_unit_cost); sheet.getCell(`D${row}`).numFmt = '"$"#,##0.00'; styleDataCell(sheet.getCell(`D${row}`), isAltRow);
+      sheet.getCell(`E${row}`).value = { formula: `B${row}*D${row}` }; sheet.getCell(`E${row}`).numFmt = '"$"#,##0.00'; styleDataCell(sheet.getCell(`E${row}`), isAltRow);
+      sheet.getCell(`F${row}`).value = item.notes || ''; styleDataCell(sheet.getCell(`F${row}`), isAltRow); sheet.getCell(`F${row}`).font = { size: 9 };
+      row++;
+    });
+
+    // Subtotal
+    sheet.getCell(`A${row}`).value = 'Paint Materials Subtotal'; styleSubtotalRow(sheet.getCell(`A${row}`)); sheet.getCell(`A${row}`).alignment = { horizontal: 'right' };
+    sheet.mergeCells(`A${row}:D${row}`);
+    sheet.getCell(`E${row}`).value = { formula: `SUM(E${groupStartRow}:E${row - 1})` }; sheet.getCell(`E${row}`).numFmt = '"$"#,##0.00'; styleSubtotalRow(sheet.getCell(`E${row}`));
+    subtotalRows.push({ type: 'material', row });
+    row += 2;
+  }
+
+  // ==========================================================================
+  // PRIMER SECTION
+  // ==========================================================================
+  if (primerItems.length > 0) {
+    const groupHeaderCell = sheet.getCell(`A${row}`);
+    groupHeaderCell.value = 'Primer';
+    styleGroupHeader(groupHeaderCell, 'D1C4E9'); // Lighter purple
+    sheet.mergeCells(`A${row}:F${row}`);
+    row++;
+
+    const groupStartRow = row;
+
+    primerItems.forEach((item, idx) => {
+      const isAltRow = idx % 2 === 1;
+      sheet.getCell(`A${row}`).value = item.description; styleDataCell(sheet.getCell(`A${row}`), isAltRow);
+      sheet.getCell(`B${row}`).value = safeNum(item.quantity); sheet.getCell(`B${row}`).numFmt = '#,##0.00'; styleDataCell(sheet.getCell(`B${row}`), isAltRow); sheet.getCell(`B${row}`).alignment = { horizontal: 'right' };
+      sheet.getCell(`C${row}`).value = item.unit || 'GAL'; styleDataCell(sheet.getCell(`C${row}`), isAltRow); sheet.getCell(`C${row}`).alignment = { horizontal: 'center' };
+      sheet.getCell(`D${row}`).value = safeNum(item.material_unit_cost); sheet.getCell(`D${row}`).numFmt = '"$"#,##0.00'; styleDataCell(sheet.getCell(`D${row}`), isAltRow);
+      sheet.getCell(`E${row}`).value = { formula: `B${row}*D${row}` }; sheet.getCell(`E${row}`).numFmt = '"$"#,##0.00'; styleDataCell(sheet.getCell(`E${row}`), isAltRow);
+      sheet.getCell(`F${row}`).value = item.notes || ''; styleDataCell(sheet.getCell(`F${row}`), isAltRow); sheet.getCell(`F${row}`).font = { size: 9 };
+      row++;
+    });
+
+    // Subtotal
+    sheet.getCell(`A${row}`).value = 'Primer Subtotal'; styleSubtotalRow(sheet.getCell(`A${row}`)); sheet.getCell(`A${row}`).alignment = { horizontal: 'right' };
+    sheet.mergeCells(`A${row}:D${row}`);
+    sheet.getCell(`E${row}`).value = { formula: `SUM(E${groupStartRow}:E${row - 1})` }; sheet.getCell(`E${row}`).numFmt = '"$"#,##0.00'; styleSubtotalRow(sheet.getCell(`E${row}`));
+    subtotalRows.push({ type: 'material', row });
+    row += 2;
+  }
+
+  // ==========================================================================
+  // LABOR SECTION
+  // ==========================================================================
+  // Combine line item labor and dedicated labor items
+  const hasLabor = allLaborItems.length > 0 || paintLaborItems.length > 0;
+
+  if (hasLabor) {
+    const groupHeaderCell = sheet.getCell(`A${row}`);
+    groupHeaderCell.value = 'Paint Labor';
+    styleGroupHeader(groupHeaderCell, 'BBDEFB'); // Light blue
+    sheet.mergeCells(`A${row}:F${row}`);
+    row++;
+
+    const groupStartRow = row;
+
+    // Line item labor (from materials with labor costs)
+    allLaborItems.forEach((item, idx) => {
+      const isAltRow = idx % 2 === 1;
+      sheet.getCell(`A${row}`).value = item.description; styleDataCell(sheet.getCell(`A${row}`), isAltRow);
+      sheet.getCell(`B${row}`).value = safeNum(item.quantity); sheet.getCell(`B${row}`).numFmt = '#,##0.00'; styleDataCell(sheet.getCell(`B${row}`), isAltRow); sheet.getCell(`B${row}`).alignment = { horizontal: 'right' };
+      sheet.getCell(`C${row}`).value = item.unit || 'SF'; styleDataCell(sheet.getCell(`C${row}`), isAltRow); sheet.getCell(`C${row}`).alignment = { horizontal: 'center' };
+      // For labor items, use labor_unit_cost if available, otherwise material_unit_cost
+      const unitCost = safeNum(item.labor_unit_cost) || safeNum(item.material_unit_cost);
+      sheet.getCell(`D${row}`).value = unitCost; sheet.getCell(`D${row}`).numFmt = '"$"#,##0.00'; styleDataCell(sheet.getCell(`D${row}`), isAltRow);
+      sheet.getCell(`E${row}`).value = { formula: `B${row}*D${row}` }; sheet.getCell(`E${row}`).numFmt = '"$"#,##0.00'; styleDataCell(sheet.getCell(`E${row}`), isAltRow);
+      sheet.getCell(`F${row}`).value = item.notes || ''; styleDataCell(sheet.getCell(`F${row}`), isAltRow); sheet.getCell(`F${row}`).font = { size: 9 };
+      row++;
+    });
+
+    // Dedicated labor items from labor_items array
+    paintLaborItems.forEach((item, idx) => {
+      const isAltRow = (allLaborItems.length + idx) % 2 === 1;
+      sheet.getCell(`A${row}`).value = item.description; styleDataCell(sheet.getCell(`A${row}`), isAltRow);
+      sheet.getCell(`B${row}`).value = item.quantity; sheet.getCell(`B${row}`).numFmt = '#,##0.00'; styleDataCell(sheet.getCell(`B${row}`), isAltRow); sheet.getCell(`B${row}`).alignment = { horizontal: 'right' };
+      sheet.getCell(`C${row}`).value = item.unit || 'SF'; styleDataCell(sheet.getCell(`C${row}`), isAltRow); sheet.getCell(`C${row}`).alignment = { horizontal: 'center' };
+      sheet.getCell(`D${row}`).value = item.rate; sheet.getCell(`D${row}`).numFmt = '"$"#,##0.00'; styleDataCell(sheet.getCell(`D${row}`), isAltRow);
+      sheet.getCell(`E${row}`).value = { formula: `B${row}*D${row}` }; sheet.getCell(`E${row}`).numFmt = '"$"#,##0.00'; styleDataCell(sheet.getCell(`E${row}`), isAltRow);
+      sheet.getCell(`F${row}`).value = item.notes || ''; styleDataCell(sheet.getCell(`F${row}`), isAltRow); sheet.getCell(`F${row}`).font = { size: 9 };
+      row++;
+    });
+
+    // Subtotal
+    sheet.getCell(`A${row}`).value = 'Paint Labor Subtotal'; styleSubtotalRow(sheet.getCell(`A${row}`)); sheet.getCell(`A${row}`).alignment = { horizontal: 'right' };
+    sheet.mergeCells(`A${row}:D${row}`);
+    sheet.getCell(`E${row}`).value = { formula: `SUM(E${groupStartRow}:E${row - 1})` }; sheet.getCell(`E${row}`).numFmt = '"$"#,##0.00'; styleSubtotalRow(sheet.getCell(`E${row}`));
+    subtotalRows.push({ type: 'labor', row });
+    row += 2;
+  }
+
+  // ==========================================================================
+  // SUPPLIES SECTION
+  // ==========================================================================
+  if (supplyItems.length > 0) {
+    const groupHeaderCell = sheet.getCell(`A${row}`);
+    groupHeaderCell.value = 'Paint Supplies';
+    styleGroupHeader(groupHeaderCell, 'F5F5F5'); // Light gray
+    sheet.mergeCells(`A${row}:F${row}`);
+    row++;
+
+    const groupStartRow = row;
+
+    supplyItems.forEach((item, idx) => {
+      const isAltRow = idx % 2 === 1;
+      sheet.getCell(`A${row}`).value = item.description; styleDataCell(sheet.getCell(`A${row}`), isAltRow);
+      sheet.getCell(`B${row}`).value = safeNum(item.quantity); sheet.getCell(`B${row}`).numFmt = '#,##0.00'; styleDataCell(sheet.getCell(`B${row}`), isAltRow); sheet.getCell(`B${row}`).alignment = { horizontal: 'right' };
+      sheet.getCell(`C${row}`).value = item.unit || 'EA'; styleDataCell(sheet.getCell(`C${row}`), isAltRow); sheet.getCell(`C${row}`).alignment = { horizontal: 'center' };
+      sheet.getCell(`D${row}`).value = safeNum(item.material_unit_cost); sheet.getCell(`D${row}`).numFmt = '"$"#,##0.00'; styleDataCell(sheet.getCell(`D${row}`), isAltRow);
+      sheet.getCell(`E${row}`).value = { formula: `B${row}*D${row}` }; sheet.getCell(`E${row}`).numFmt = '"$"#,##0.00'; styleDataCell(sheet.getCell(`E${row}`), isAltRow);
+      sheet.getCell(`F${row}`).value = item.notes || ''; styleDataCell(sheet.getCell(`F${row}`), isAltRow); sheet.getCell(`F${row}`).font = { size: 9 };
+      row++;
+    });
+
+    // Subtotal
+    sheet.getCell(`A${row}`).value = 'Supplies Subtotal'; styleSubtotalRow(sheet.getCell(`A${row}`)); sheet.getCell(`A${row}`).alignment = { horizontal: 'right' };
+    sheet.mergeCells(`A${row}:D${row}`);
+    sheet.getCell(`E${row}`).value = { formula: `SUM(E${groupStartRow}:E${row - 1})` }; sheet.getCell(`E${row}`).numFmt = '"$"#,##0.00'; styleSubtotalRow(sheet.getCell(`E${row}`));
+    subtotalRows.push({ type: 'material', row });
+    row += 2;
+  }
+
+  // ==========================================================================
+  // TOTALS SECTION
+  // ==========================================================================
+  // Materials subtotal (paint + primer + supplies)
+  const materialSubtotals = subtotalRows.filter(s => s.type === 'material').map(s => `E${s.row}`);
+  const laborSubtotals = subtotalRows.filter(s => s.type === 'labor').map(s => `E${s.row}`);
+
+  if (materialSubtotals.length > 0) {
+    const matTotalBeforeRow = row;
+    sheet.getCell(`A${matTotalBeforeRow}`).value = 'Material Cost (Before Markup)';
+    styleSubtotalRow(sheet.getCell(`A${matTotalBeforeRow}`));
+    sheet.getCell(`A${matTotalBeforeRow}`).alignment = { horizontal: 'right' };
+    sheet.mergeCells(`A${matTotalBeforeRow}:D${matTotalBeforeRow}`);
+    sheet.getCell(`E${matTotalBeforeRow}`).value = { formula: materialSubtotals.join('+') };
+    sheet.getCell(`E${matTotalBeforeRow}`).numFmt = '"$"#,##0.00';
+    styleSubtotalRow(sheet.getCell(`E${matTotalBeforeRow}`));
+    row++;
+  }
+
+  if (laborSubtotals.length > 0) {
+    const laborTotalBeforeRow = row;
+    sheet.getCell(`A${laborTotalBeforeRow}`).value = 'Labor Cost (Before Markup)';
+    styleSubtotalRow(sheet.getCell(`A${laborTotalBeforeRow}`));
+    sheet.getCell(`A${laborTotalBeforeRow}`).alignment = { horizontal: 'right' };
+    sheet.mergeCells(`A${laborTotalBeforeRow}:D${laborTotalBeforeRow}`);
+    sheet.getCell(`E${laborTotalBeforeRow}`).value = { formula: laborSubtotals.join('+') };
+    sheet.getCell(`E${laborTotalBeforeRow}`).numFmt = '"$"#,##0.00';
+    styleSubtotalRow(sheet.getCell(`E${laborTotalBeforeRow}`));
+    row++;
+  }
+
+  // Grand Total for Paint section
+  row++;
+  const allSubtotals = subtotalRows.map(s => `E${s.row}`);
+  const grandTotalBeforeRow = row;
+  sheet.getCell(`A${grandTotalBeforeRow}`).value = 'PAINT SUBTOTAL (Before Markup)';
+  styleTotalWithMarkup(sheet.getCell(`A${grandTotalBeforeRow}`));
+  sheet.getCell(`A${grandTotalBeforeRow}`).alignment = { horizontal: 'right' };
+  sheet.mergeCells(`A${grandTotalBeforeRow}:D${grandTotalBeforeRow}`);
+  sheet.getCell(`E${grandTotalBeforeRow}`).value = { formula: allSubtotals.length > 0 ? allSubtotals.join('+') : '0' };
+  sheet.getCell(`E${grandTotalBeforeRow}`).numFmt = '"$"#,##0.00';
+  styleTotalWithMarkup(sheet.getCell(`E${grandTotalBeforeRow}`));
+  row++;
+
+  // Markup row
+  const markupRow = row;
+  sheet.getCell(`A${markupRow}`).value = 'Markup';
+  styleMarkupRow(sheet.getCell(`A${markupRow}`));
+  sheet.getCell(`A${markupRow}`).alignment = { horizontal: 'right' };
+  sheet.mergeCells(`A${markupRow}:C${markupRow}`);
+  sheet.getCell(`D${markupRow}`).value = markupDecimal;
+  sheet.getCell(`D${markupRow}`).numFmt = '0%';
+  styleMarkupRow(sheet.getCell(`D${markupRow}`));
+  sheet.getCell(`E${markupRow}`).value = { formula: `E${grandTotalBeforeRow}*D${markupRow}` };
+  sheet.getCell(`E${markupRow}`).numFmt = '"$"#,##0.00';
+  styleMarkupRow(sheet.getCell(`E${markupRow}`));
+  row++;
+
+  // Grand Total with Markup
+  const grandTotalRow = row;
+  sheet.getCell(`A${grandTotalRow}`).value = 'PAINT GRAND TOTAL';
+  styleGrandTotal(sheet.getCell(`A${grandTotalRow}`));
+  sheet.getCell(`A${grandTotalRow}`).alignment = { horizontal: 'right' };
+  sheet.mergeCells(`A${grandTotalRow}:D${grandTotalRow}`);
+  sheet.getCell(`E${grandTotalRow}`).value = { formula: `E${grandTotalBeforeRow}+E${markupRow}` };
+  sheet.getCell(`E${grandTotalRow}`).numFmt = '"$"#,##0.00';
+  styleGrandTotal(sheet.getCell(`E${grandTotalRow}`));
+  row += 2;
+
+  // Notes
+  sheet.getCell(`A${row}`).value = 'Notes:';
+  sheet.getCell(`A${row}`).font = { bold: true };
+  row++;
+  sheet.getCell(`A${row}`).value = '• Paint costs include all paint materials, primer, labor, and supplies';
+  sheet.getCell(`A${row}`).font = { size: 10 };
+  row++;
+  sheet.getCell(`A${row}`).value = '• Pricing based on 2-coat application unless otherwise specified';
+  sheet.getCell(`A${row}`).font = { size: 10 };
+}
+
+// =============================================================================
 // Main Export Function - Mike Skjei Format
 // =============================================================================
 
@@ -266,7 +655,34 @@ export async function exportTakeoffToExcel(data: TakeoffData, filename?: string)
   const markupDecimal = markupPercent / 100;
   const squares = safeNum(takeoff.squares) || 0;
 
+  // Separate items by item_type
+  // Paint items have item_type === 'paint' (set by API)
+  // Material items have item_type === 'material' or undefined
+  const paintItems = lineItems.filter(item => item.item_type === 'paint');
   const materialItems = lineItems.filter(item => !item.item_type || item.item_type === 'material');
+
+  // Filter paint-related labor items from the labor array
+  const paintLaborItems = laborItems.filter(item => {
+    const desc = (item.description || '').toLowerCase();
+    return desc.includes('paint');
+  });
+  const nonPaintLaborItems = laborItems.filter(item => {
+    const desc = (item.description || '').toLowerCase();
+    return !desc.includes('paint');
+  });
+
+  // ==========================================================================
+  // PAINT SHEET (created first if paint items exist)
+  // ==========================================================================
+  if (paintItems.length > 0 || paintLaborItems.length > 0) {
+    createPaintSheet(workbook, {
+      clientName: takeoff.client_name || takeoff.project_name || takeoff.takeoff_name || 'Estimate',
+      address: takeoff.address || '',
+      paintItems,
+      paintLaborItems,
+      markupDecimal,
+    });
+  }
 
   // ==========================================================================
   // SUMMARY SHEET
@@ -305,6 +721,11 @@ export async function exportTakeoffToExcel(data: TakeoffData, filename?: string)
 
   const summaryDataStartRow = row;
 
+  // Calculate paint cost from paint items (material_extended + labor_extended)
+  const paintCost = paintItems.reduce((sum, item) => {
+    return sum + safeNum(item.material_extended) + safeNum(item.labor_extended);
+  }, 0);
+
   // Materials Row
   summarySheet.getCell(`A${row}`).value = 'Materials'; styleDataCell(summarySheet.getCell(`A${row}`));
   summarySheet.getCell(`B${row}`).value = safeNum(takeoff.total_material_cost); summarySheet.getCell(`B${row}`).numFmt = '"$"#,##0.00'; styleDataCell(summarySheet.getCell(`B${row}`));
@@ -312,18 +733,29 @@ export async function exportTakeoffToExcel(data: TakeoffData, filename?: string)
   summarySheet.getCell(`D${row}`).value = { formula: `B${row}+C${row}` }; summarySheet.getCell(`D${row}`).numFmt = '"$"#,##0.00'; styleDataCell(summarySheet.getCell(`D${row}`));
   row++;
 
+  // Paint Row (if paint items exist)
+  if (paintItems.length > 0) {
+    summarySheet.getCell(`A${row}`).value = 'Paint & Primer'; styleDataCell(summarySheet.getCell(`A${row}`), true);
+    summarySheet.getCell(`B${row}`).value = paintCost; summarySheet.getCell(`B${row}`).numFmt = '"$"#,##0.00'; styleDataCell(summarySheet.getCell(`B${row}`), true);
+    summarySheet.getCell(`C${row}`).value = { formula: `B${row}*${markupDecimal}` }; summarySheet.getCell(`C${row}`).numFmt = '"$"#,##0.00'; styleDataCell(summarySheet.getCell(`C${row}`), true);
+    summarySheet.getCell(`D${row}`).value = { formula: `B${row}+C${row}` }; summarySheet.getCell(`D${row}`).numFmt = '"$"#,##0.00'; styleDataCell(summarySheet.getCell(`D${row}`), true);
+    row++;
+  }
+
   // Labor Row
-  summarySheet.getCell(`A${row}`).value = 'Labor'; styleDataCell(summarySheet.getCell(`A${row}`), true);
-  summarySheet.getCell(`B${row}`).value = safeNum(takeoff.total_labor_cost); summarySheet.getCell(`B${row}`).numFmt = '"$"#,##0.00'; styleDataCell(summarySheet.getCell(`B${row}`), true);
-  summarySheet.getCell(`C${row}`).value = { formula: `B${row}*${markupDecimal}` }; summarySheet.getCell(`C${row}`).numFmt = '"$"#,##0.00'; styleDataCell(summarySheet.getCell(`C${row}`), true);
-  summarySheet.getCell(`D${row}`).value = { formula: `B${row}+C${row}` }; summarySheet.getCell(`D${row}`).numFmt = '"$"#,##0.00'; styleDataCell(summarySheet.getCell(`D${row}`), true);
+  const laborAltRow = paintItems.length > 0 ? false : true;
+  summarySheet.getCell(`A${row}`).value = 'Labor'; styleDataCell(summarySheet.getCell(`A${row}`), laborAltRow);
+  summarySheet.getCell(`B${row}`).value = safeNum(takeoff.total_labor_cost); summarySheet.getCell(`B${row}`).numFmt = '"$"#,##0.00'; styleDataCell(summarySheet.getCell(`B${row}`), laborAltRow);
+  summarySheet.getCell(`C${row}`).value = { formula: `B${row}*${markupDecimal}` }; summarySheet.getCell(`C${row}`).numFmt = '"$"#,##0.00'; styleDataCell(summarySheet.getCell(`C${row}`), laborAltRow);
+  summarySheet.getCell(`D${row}`).value = { formula: `B${row}+C${row}` }; summarySheet.getCell(`D${row}`).numFmt = '"$"#,##0.00'; styleDataCell(summarySheet.getCell(`D${row}`), laborAltRow);
   row++;
 
   // Overhead Row
-  summarySheet.getCell(`A${row}`).value = 'Overhead'; styleDataCell(summarySheet.getCell(`A${row}`));
-  summarySheet.getCell(`B${row}`).value = safeNum(takeoff.total_overhead_cost); summarySheet.getCell(`B${row}`).numFmt = '"$"#,##0.00'; styleDataCell(summarySheet.getCell(`B${row}`));
-  summarySheet.getCell(`C${row}`).value = { formula: `B${row}*${markupDecimal}` }; summarySheet.getCell(`C${row}`).numFmt = '"$"#,##0.00'; styleDataCell(summarySheet.getCell(`C${row}`));
-  summarySheet.getCell(`D${row}`).value = { formula: `B${row}+C${row}` }; summarySheet.getCell(`D${row}`).numFmt = '"$"#,##0.00'; styleDataCell(summarySheet.getCell(`D${row}`));
+  const overheadAltRow = paintItems.length > 0 ? true : false;
+  summarySheet.getCell(`A${row}`).value = 'Overhead'; styleDataCell(summarySheet.getCell(`A${row}`), overheadAltRow);
+  summarySheet.getCell(`B${row}`).value = safeNum(takeoff.total_overhead_cost); summarySheet.getCell(`B${row}`).numFmt = '"$"#,##0.00'; styleDataCell(summarySheet.getCell(`B${row}`), overheadAltRow);
+  summarySheet.getCell(`C${row}`).value = { formula: `B${row}*${markupDecimal}` }; summarySheet.getCell(`C${row}`).numFmt = '"$"#,##0.00'; styleDataCell(summarySheet.getCell(`C${row}`), overheadAltRow);
+  summarySheet.getCell(`D${row}`).value = { formula: `B${row}+C${row}` }; summarySheet.getCell(`D${row}`).numFmt = '"$"#,##0.00'; styleDataCell(summarySheet.getCell(`D${row}`), overheadAltRow);
   row++;
 
   // Subtotal Row
@@ -475,9 +907,11 @@ export async function exportTakeoffToExcel(data: TakeoffData, filename?: string)
   takeoffSheet.getCell(`F${matTotalRowNum}`).value = { formula: `F${matCostBeforeRow}+F${matMarkupRowNum}` }; takeoffSheet.getCell(`F${matTotalRowNum}`).numFmt = '"$"#,##0.00'; styleTotalWithMarkup(takeoffSheet.getCell(`F${matTotalRowNum}`));
   row += 2;
 
+  // NOTE: Paint items are displayed on a separate Paint tab, not on this Takeoff sheet
+
   // LABOR SECTION
   let laborTotalRowNum: number | null = null;
-  if (laborItems.length > 0) {
+  if (nonPaintLaborItems.length > 0) {
     const laborSectionCell = takeoffSheet.getCell(`A${row}`);
     laborSectionCell.value = 'INSTALLATION LABOR';
     styleSectionHeader(laborSectionCell, COLORS.LABOR_HEADER);
@@ -485,7 +919,7 @@ export async function exportTakeoffToExcel(data: TakeoffData, filename?: string)
     row++;
 
     const laborStartRow = row;
-    laborItems.forEach((item, idx) => {
+    nonPaintLaborItems.forEach((item, idx) => {
       const isAltRow = idx % 2 === 1;
       takeoffSheet.getCell(`A${row}`).value = item.description; styleDataCell(takeoffSheet.getCell(`A${row}`), isAltRow);
       styleDataCell(takeoffSheet.getCell(`B${row}`), isAltRow);
@@ -556,7 +990,7 @@ export async function exportTakeoffToExcel(data: TakeoffData, filename?: string)
     row += 2;
   }
 
-  // GRAND TOTAL
+  // GRAND TOTAL (Materials + Labor + Overhead on this sheet; Paint is on separate tab)
   const grandTotalRowNum = row;
   takeoffSheet.getCell(`A${grandTotalRowNum}`).value = 'PROJECT GRAND TOTAL'; styleGrandTotal(takeoffSheet.getCell(`A${grandTotalRowNum}`)); takeoffSheet.getCell(`A${grandTotalRowNum}`).alignment = { horizontal: 'right' };
   takeoffSheet.mergeCells(`A${grandTotalRowNum}:E${grandTotalRowNum}`);

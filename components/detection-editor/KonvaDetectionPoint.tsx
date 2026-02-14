@@ -176,7 +176,7 @@ export default function KonvaDetectionPoint({
   return (
     <Group
       id={detection.id}
-      name={`detection-point-${detection.id}`}
+      name={`detection-${detection.id}`}
       x={localPosition.x}
       y={localPosition.y}
       draggable={draggable && isSelected}

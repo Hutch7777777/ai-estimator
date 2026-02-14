@@ -1689,12 +1689,16 @@ export default function KonvaDetectionCanvas({
         // Check if the click target or any parent has a detection ID
         // The name attribute is on the Group, but the click target might be a child shape
         let node: Konva.Node | null = e.target;
+        console.log('[ContextMenu] Right-click on node:', e.target.getClassName(), 'name:', e.target.name());
         while (node) {
           const nodeName = node.name();
+          console.log('[ContextMenu] Checking node:', node.getClassName(), 'name:', nodeName);
           if (nodeName && nodeName.startsWith('detection-')) {
             const detectionId = nodeName.replace('detection-', '');
+            console.log('[ContextMenu] Found detection name, extracted ID:', detectionId);
             const detection = detections.find(d => d.id === detectionId);
             if (detection) {
+              console.log('[ContextMenu] Found detection:', detection.id, 'class:', detection.class, 'markup_type:', detection.markup_type);
               // Get screen position for the context menu
               const screenPosition = {
                 x: e.evt.clientX,
@@ -1702,10 +1706,13 @@ export default function KonvaDetectionCanvas({
               };
               onDetectionContextMenu(detection, screenPosition);
               return;
+            } else {
+              console.error('[ContextMenu] Detection NOT FOUND for ID:', detectionId, 'detections count:', detections.length);
             }
           }
           node = node.parent;
         }
+        console.log('[ContextMenu] No detection found in node hierarchy');
       }
     },
     [isDrawingPolygon, drawingPoints.length, completePolygon, cancelDrawing, lineStartPoint, toolMode, onExitDrawingMode, isSplitDrawing, splitPolygonPoints.length, completeSplitPolygon, cancelSplitDrawing, onDetectionContextMenu, detections]

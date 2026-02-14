@@ -10,6 +10,9 @@ export type { LaborTableProps } from './LaborTable';
 export { OverheadTable } from './OverheadTable';
 export type { OverheadTableProps } from './OverheadTable';
 
+export { PaintTable } from './PaintTable';
+export type { PaintTableProps } from './PaintTable';
+
 export { TakeoffHeader } from './TakeoffHeader';
 export type { TakeoffHeaderProps } from './TakeoffHeader';
 

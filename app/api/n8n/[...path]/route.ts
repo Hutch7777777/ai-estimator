@@ -80,6 +80,29 @@ export async function POST(
     // Try JSON parse
     try {
       const data = JSON.parse(responseText);
+
+      // Debug logging for takeoff creation
+      console.log('[n8n-proxy] ========== RESPONSE DEBUG ==========');
+      console.log('[n8n-proxy] Path:', webhookPath);
+      console.log('[n8n-proxy] Response status:', n8nResponse.status);
+      console.log('[n8n-proxy] Response body:', JSON.stringify(data, null, 2));
+
+      // Specific logging for approve-detection-editor endpoint
+      if (webhookPath.includes('approve')) {
+        console.log('[n8n-proxy] APPROVE RESPONSE DETAILS:');
+        console.log('[n8n-proxy] - success:', data.success);
+        console.log('[n8n-proxy] - takeoff_id:', data.takeoff_id);
+        console.log('[n8n-proxy] - line_items_created:', data.line_items_created);
+        console.log('[n8n-proxy] - totals:', JSON.stringify(data.totals, null, 2));
+        if (data.line_items) {
+          console.log('[n8n-proxy] - line_items array length:', data.line_items?.length);
+        }
+        if (data.material_items) {
+          console.log('[n8n-proxy] - material_items array length:', data.material_items?.length);
+        }
+      }
+      console.log('[n8n-proxy] ========== END DEBUG ==========');
+
       return NextResponse.json(data, { status: n8nResponse.status });
     } catch {
       // Not JSON — return as text (could be HTML error page)

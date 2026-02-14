@@ -1,6 +1,6 @@
 'use client';
 
-import { Package, Wrench, Receipt } from 'lucide-react';
+import { Package, Wrench, Receipt, Paintbrush } from 'lucide-react';
 
 // =============================================================================
 // Types
@@ -11,6 +11,7 @@ export interface CostSummaryCardProps {
     material_cost: number;
     labor_cost: number;
     overhead_cost: number;
+    paint_cost?: number;
     subtotal: number;
     markup_percent: number;
     final_price: number;
@@ -54,7 +55,7 @@ export function CostSummaryCard({ totals }: CostSummaryCardProps) {
         </div>
 
         {/* Cost Breakdown Cards */}
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
+        <div className={`grid grid-cols-1 gap-4 mb-6 ${totals.paint_cost && totals.paint_cost > 0 ? 'sm:grid-cols-4' : 'sm:grid-cols-3'}`}>
           {/* Materials Card */}
           <div className="bg-gray-50 dark:bg-gray-800/50 rounded-lg p-4 border border-gray-200 dark:border-gray-700">
             <div className="flex items-center gap-3 mb-2">
@@ -67,6 +68,21 @@ export function CostSummaryCard({ totals }: CostSummaryCardProps) {
               {formatCurrency(totals.material_cost)}
             </p>
           </div>
+
+          {/* Paint Card - Only show if paint_cost exists and > 0 */}
+          {totals.paint_cost !== undefined && totals.paint_cost > 0 && (
+            <div className="bg-gray-50 dark:bg-gray-800/50 rounded-lg p-4 border border-gray-200 dark:border-gray-700">
+              <div className="flex items-center gap-3 mb-2">
+                <div className="w-8 h-8 rounded-full bg-fuchsia-100 dark:bg-fuchsia-900/50 flex items-center justify-center">
+                  <Paintbrush className="w-4 h-4 text-fuchsia-600 dark:text-fuchsia-400" />
+                </div>
+                <span className="text-sm font-medium text-gray-600 dark:text-gray-400">Paint</span>
+              </div>
+              <p className="text-2xl font-semibold text-gray-900 dark:text-white">
+                {formatCurrency(totals.paint_cost)}
+              </p>
+            </div>
+          )}
 
           {/* Labor Card */}
           <div className="bg-gray-50 dark:bg-gray-800/50 rounded-lg p-4 border border-gray-200 dark:border-gray-700">

@@ -37,7 +37,7 @@ interface LineItemRecord {
   presentation_group?: string;
   category?: string;
   item_number?: number;
-  item_type?: 'material' | 'labor' | 'overhead';
+  item_type?: 'material' | 'labor' | 'overhead' | 'paint';
   sku?: string;
   notes?: string;
   formula_used?: string;
@@ -125,15 +125,19 @@ export async function GET(
     // Separate items by item_type
     // ==========================================================================
 
-    // Material items (default if no item_type specified)
+    // Material and Paint items (returned in line_items array)
+    // Paint items have item_type='paint', materials have item_type='material' or undefined
     const line_items = allItems
-      .filter(item => !item.item_type || item.item_type === 'material')
+      .filter(item => !item.item_type || item.item_type === 'material' || item.item_type === 'paint')
       .map(item => {
         const qty = Number(item.quantity) || 0;
         const materialUnitCost = Number(item.material_unit_cost) || 0;
         const laborUnitCost = Number(item.labor_unit_cost) || 0;
         const materialExtended = qty * materialUnitCost;
         const laborExtended = qty * laborUnitCost;
+
+        // Preserve the original item_type ('paint' or default to 'material')
+        const itemType = item.item_type === 'paint' ? 'paint' : 'material';
 
         return {
           id: item.id,
@@ -149,7 +153,7 @@ export async function GET(
           presentation_group: item.presentation_group,
           category: item.category,
           item_number: item.item_number,
-          item_type: 'material' as const,
+          item_type: itemType,
           sku: item.sku,
           notes: item.notes,
           formula_used: item.formula_used,
@@ -188,8 +192,18 @@ export async function GET(
     // Calculate totals from separated items
     // ==========================================================================
 
-    const calculatedMaterialCost = line_items.reduce(
+    // Separate paint items from material items for cost calculation
+    const materialOnlyItems = line_items.filter(item => item.item_type === 'material');
+    const paintOnlyItems = line_items.filter(item => item.item_type === 'paint');
+
+    const calculatedMaterialCost = materialOnlyItems.reduce(
       (sum, item) => sum + (item.material_extended || 0),
+      0
+    );
+
+    // Paint cost includes both material and labor extended costs
+    const calculatedPaintCost = paintOnlyItems.reduce(
+      (sum, item) => sum + (item.material_extended || 0) + (item.labor_extended || 0),
       0
     );
 
@@ -203,15 +217,17 @@ export async function GET(
       0
     );
 
-    // Use stored totals if available, otherwise use calculated from line items
-    // Note: Project insurance is now included as an overhead line item from the Railway API,
-    // so we just sum the overhead_items directly - no need to calculate it separately
-    const materialCost = takeoff.total_material_cost ?? calculatedMaterialCost;
-    const laborCost = takeoff.total_labor_cost ?? calculatedLaborCost;
-    const overheadCost = takeoff.total_overhead_cost ?? calculatedOverheadCost;
-    const subtotal = takeoff.subtotal ?? (materialCost + laborCost + overheadCost);
+    // Always use calculated totals from filtered line items
+    // Database stored totals may include paint items in wrong categories
+    // Paint items are now separated, so we recalculate everything from line items
+    const materialCost = calculatedMaterialCost;
+    const paintCost = calculatedPaintCost;
+    const laborCost = calculatedLaborCost;
+    const overheadCost = calculatedOverheadCost;
+    const subtotal = materialCost + paintCost + laborCost + overheadCost;
     const markupPercent = takeoff.markup_percent ?? 15;
-    const finalPrice = takeoff.final_price ?? (subtotal * (1 + markupPercent / 100));
+    // Recalculate final price from new subtotal
+    const finalPrice = subtotal * (1 + markupPercent / 100);
 
     // ==========================================================================
     // Return response
@@ -241,6 +257,7 @@ export async function GET(
       overhead_items,
       totals: {
         material_cost: materialCost,
+        paint_cost: paintCost,
         labor_cost: laborCost,
         overhead_cost: overheadCost,
         subtotal: subtotal,

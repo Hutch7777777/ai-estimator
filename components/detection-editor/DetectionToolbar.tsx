@@ -61,6 +61,9 @@ export interface DetectionToolbarProps {
   onValidate?: () => void;
   onReset?: () => void;
   isValidating?: boolean;
+  // Unassigned filter props
+  showUnassignedOnly?: boolean;
+  onToggleUnassignedOnly?: () => void;
 }
 
 // =============================================================================
@@ -156,9 +159,12 @@ const DetectionToolbar = memo(function DetectionToolbar({
   onValidate,
   onReset,
   isValidating = false,
+  // Unassigned filter props
+  showUnassignedOnly = false,
+  onToggleUnassignedOnly,
 }: DetectionToolbarProps) {
   const zoomPercentage = Math.round(scale * 100);
-  const { total, reviewed, percentComplete } = reviewProgress;
+  const { total, reviewed, pending, percentComplete } = reviewProgress;
 
   // Progress bar color
   const progressColor =
@@ -334,7 +340,7 @@ const DetectionToolbar = memo(function DetectionToolbar({
       <div className="flex items-center gap-3 border-r border-gray-200 dark:border-gray-700 pr-4">
         <div className="flex flex-col gap-1">
           <div className="text-xs text-gray-500 dark:text-gray-400">
-            {reviewed}/{total} reviewed ({percentComplete}%)
+            {reviewed}/{total} materials assigned ({percentComplete}%)
           </div>
           <div className="w-32 h-1.5 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
             <div
@@ -343,6 +349,20 @@ const DetectionToolbar = memo(function DetectionToolbar({
             />
           </div>
         </div>
+        {/* Unassigned Filter Button */}
+        {onToggleUnassignedOnly && pending > 0 && (
+          <button
+            type="button"
+            onClick={onToggleUnassignedOnly}
+            className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium transition-colors ${
+              showUnassignedOnly
+                ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400'
+                : 'text-gray-500 hover:text-gray-700 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-800'
+            }`}
+          >
+            {showUnassignedOnly ? 'Show All' : 'Show Unassigned'}
+          </button>
+        )}
       </div>
 
       {/* Approve Button */}

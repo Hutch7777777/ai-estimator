@@ -600,7 +600,7 @@ export function useExtractionData(
 
   const reviewProgress = useMemo((): ReviewProgress => {
     let total = 0;
-    let pending = 0;
+    let withMaterial = 0;
 
     detections.forEach((pageDetections) => {
       for (const detection of pageDetections) {
@@ -609,17 +609,17 @@ export function useExtractionData(
         if (cls === 'exterior_wall' || cls === 'building' || cls === 'roof') continue;
         if (detection.status !== 'deleted') {
           total++;
-          if (detection.status === 'auto') {
-            pending++;
+          if (detection.assigned_material_id) {
+            withMaterial++;
           }
         }
       }
     });
 
-    const reviewed = total - pending;
-    const percentComplete = total > 0 ? Math.round((reviewed / total) * 100) : 0;
+    const pending = total - withMaterial;
+    const percentComplete = total > 0 ? Math.round((withMaterial / total) * 100) : 0;
 
-    return { total, reviewed, pending, percentComplete };
+    return { total, reviewed: withMaterial, pending, percentComplete };
   }, [detections]);
 
   // ==========================================================================

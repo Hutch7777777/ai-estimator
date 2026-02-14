@@ -29,12 +29,13 @@ import {
 // TYPE DEFINITIONS
 // ============================================================================
 
-export type ItemType = "material" | "labor" | "overhead";
+export type ItemType = "material" | "labor" | "overhead" | "paint";
 
 export interface SeparatedItems {
   materials: LineItemWithState[];
   labor: LineItemWithState[];
   overhead: LineItemWithState[];
+  paint: LineItemWithState[];
 }
 
 export interface GroupedMaterials {
@@ -45,6 +46,7 @@ export interface SectionTotals {
   materialsTotal: number;
   laborTotal: number;
   overheadTotal: number;
+  paintTotal: number;
   grandTotal: number;
 }
 
@@ -92,6 +94,10 @@ export const PRESENTATION_GROUP_CONFIG: Record<
   installation: { title: "INSTALLATION", color: "BBDEFB", order: 1 },
   labor: { title: "INSTALLATION LABOR", color: "BBDEFB", order: 1 },
 
+  // Paint groups
+  paint: { title: "PAINT & PRIMER", color: "F3E5F5", order: 10 },
+  "paint & primer": { title: "PAINT & PRIMER", color: "F3E5F5", order: 10 },
+
   // Default
   other: { title: "OTHER MATERIALS", color: "E0E0E0", order: 99 },
   materials: { title: "MATERIALS", color: "E8F5E9", order: 1 },
@@ -115,6 +121,7 @@ export function separateItemsByType(
   const materials: LineItemWithState[] = [];
   const labor: LineItemWithState[] = [];
   const overhead: LineItemWithState[] = [];
+  const paint: LineItemWithState[] = [];
 
   lineItems.forEach((item) => {
     // Check item_type field first (if it exists)
@@ -131,22 +138,33 @@ export function separateItemsByType(
       case "overhead":
         overhead.push(item);
         break;
+      case "paint":
+        paint.push(item);
+        break;
       default:
         // Default to material if unknown
         materials.push(item);
     }
   });
 
-  return { materials, labor, overhead };
+  return { materials, labor, overhead, paint };
 }
 
 /**
- * Detect item type based on cost fields (fallback if item_type not set)
+ * Detect item type based on cost fields and description (fallback if item_type not set)
  */
 function detectItemType(item: LineItemWithState): ItemType {
   const hasMaterialCost = (item.material_unit_cost || 0) > 0;
   const hasLaborCost = (item.labor_unit_cost || 0) > 0;
   const hasEquipmentCost = (item.equipment_unit_cost || 0) > 0;
+
+  // Check for paint items by category or presentation_group
+  const category = ((item as any).category || "").toLowerCase();
+  const presentationGroup = ((item as any).presentation_group || "").toLowerCase();
+
+  if (category === "paint" || presentationGroup.includes("paint")) {
+    return "paint";
+  }
 
   // If only equipment cost, it's overhead
   if (!hasMaterialCost && !hasLaborCost && hasEquipmentCost) {
@@ -259,12 +277,24 @@ export function calculateOverheadTotal(item: LineItemWithState): number {
 }
 
 /**
+ * Calculate total for a paint item (materials + labor combined)
+ * Paint items can have both material_unit_cost (paint gallons) and labor_unit_cost (paint labor per SF)
+ */
+export function calculatePaintTotal(item: LineItemWithState): number {
+  const quantity = item.quantity || 0;
+  const materialCost = item.material_unit_cost || 0;
+  const laborCost = item.labor_unit_cost || 0;
+  return quantity * (materialCost + laborCost);
+}
+
+/**
  * Calculate totals for a section (all items combined)
  */
 export function calculateSectionTotals(
   materials: LineItemWithState[],
   labor: LineItemWithState[],
-  overhead: LineItemWithState[]
+  overhead: LineItemWithState[],
+  paint: LineItemWithState[] = []
 ): SectionTotals {
   const materialsTotal = materials.reduce(
     (sum, item) => sum + calculateMaterialTotal(item),
@@ -281,12 +311,18 @@ export function calculateSectionTotals(
     0
   );
 
-  const grandTotal = materialsTotal + laborTotal + overheadTotal;
+  const paintTotal = paint.reduce(
+    (sum, item) => sum + calculatePaintTotal(item),
+    0
+  );
+
+  const grandTotal = materialsTotal + laborTotal + overheadTotal + paintTotal;
 
   return {
     materialsTotal,
     laborTotal,
     overheadTotal,
+    paintTotal,
     grandTotal,
   };
 }
@@ -313,8 +349,8 @@ export function calculateTotalsBySections(
 
   Object.keys(itemsBySection).forEach((sectionId) => {
     const sectionItems = itemsBySection[sectionId];
-    const { materials, labor, overhead } = separateItemsByType(sectionItems);
-    totals[sectionId] = calculateSectionTotals(materials, labor, overhead);
+    const { materials, labor, overhead, paint } = separateItemsByType(sectionItems);
+    totals[sectionId] = calculateSectionTotals(materials, labor, overhead, paint);
   });
 
   return totals;

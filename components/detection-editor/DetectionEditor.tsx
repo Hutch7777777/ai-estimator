@@ -4230,10 +4230,19 @@ export default function DetectionEditor({
                 const pt = projectTotals as Record<string, number> | undefined;
                 // Priority: DB totals (correct) > approvalResult.totals > projectTotals (fallback)
                 const matCost = dbTotals?.total_material_cost ?? t?.material_cost ?? t?.total_material_cost ?? pt?.material_cost ?? 0;
+                // Calculate paint cost from line items if not in totals
+                const paintCostFromLineItems = takeoffDetails?.line_items
+                  ?.filter((item: Record<string, unknown>) => item.item_type === 'paint')
+                  .reduce((sum: number, item: Record<string, unknown>) => {
+                    const matExt = Number(item.material_extended) || 0;
+                    const laborExt = Number(item.labor_extended) || 0;
+                    return sum + matExt + laborExt;
+                  }, 0) ?? 0;
+                const paintCost = t?.paint_cost ?? pt?.paint_cost ?? paintCostFromLineItems;
                 const laborCost = dbTotals?.total_labor_cost ?? t?.labor_cost ?? t?.total_labor_cost ?? pt?.installation_labor_subtotal ?? laborSection?.installation_subtotal ?? 0;
                 const overheadCost = dbTotals?.total_overhead_cost ?? t?.overhead_cost ?? t?.total_overhead_cost ?? pt?.overhead_total ?? pt?.overhead_subtotal ?? overheadSection?.subtotal ?? 0;
                 const grandTotal = dbTotals?.final_price ?? t?.final_price ?? t?.grand_total ?? pt?.grand_total ?? 0;
-                console.log('[Modal] Displaying totals:', { matCost, laborCost, overheadCost, grandTotal, hasTakeoffDetails: !!dbTotals, dbTotals, totals: t, projectTotals: pt });
+                console.log('[Modal] Displaying totals:', { matCost, paintCost, laborCost, overheadCost, grandTotal, hasTakeoffDetails: !!dbTotals, dbTotals, totals: t, projectTotals: pt });
                 return (
                   <div className="bg-gray-50 dark:bg-gray-800/50 rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden">
                     {/* Materials Row */}
@@ -4243,6 +4252,15 @@ export default function DetectionEditor({
                         {new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(matCost)}
                       </span>
                     </div>
+                    {/* Paint Row - only show if paint cost > 0 */}
+                    {paintCost > 0 && (
+                      <div className="flex justify-between items-center px-4 py-3 border-b border-gray-200 dark:border-gray-700">
+                        <span className="text-sm text-gray-600 dark:text-gray-400">Paint & Primer</span>
+                        <span className="font-mono font-medium text-gray-900 dark:text-white">
+                          {new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(paintCost)}
+                        </span>
+                      </div>
+                    )}
                     {/* Labor Row */}
                     <div className="flex justify-between items-center px-4 py-3 border-b border-gray-200 dark:border-gray-700">
                       <span className="text-sm text-gray-600 dark:text-gray-400">Labor</span>
