@@ -25,17 +25,56 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import type { ExtractionDetection, DetectionClass } from '@/lib/types/extraction';
-import { createClient } from '@supabase/supabase-js';
 
 // =============================================================================
-// Supabase Client
+// API Endpoint (uses existing n8n proxy pattern)
 // =============================================================================
 
-const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const SUPABASE_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
+const DETECTION_EDIT_SYNC_ENDPOINT = '/api/n8n/detection-edit-sync';
 
-function getSupabaseClient() {
-  return createClient(SUPABASE_URL, SUPABASE_KEY);
+interface DetectionEditRequest {
+  job_id: string;
+  page_id: string;
+  edit_type: 'verify' | 'move' | 'resize' | 'delete' | 'reclassify' | 'create';
+  detection_id?: string;
+  changes?: {
+    pixel_x?: number;
+    pixel_y?: number;
+    pixel_width?: number;
+    pixel_height?: number;
+    class?: DetectionClass;
+    status?: string;
+  };
+}
+
+interface DetectionEditResponse {
+  success: boolean;
+  error?: string;
+  detection_id?: string;
+}
+
+/**
+ * Send a detection edit via the existing n8n sync API.
+ * This avoids creating duplicate Supabase clients.
+ */
+async function syncDetectionEdit(request: DetectionEditRequest): Promise<DetectionEditResponse> {
+  try {
+    const response = await fetch(DETECTION_EDIT_SYNC_ENDPOINT, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(request),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      return { success: false, error: `HTTP ${response.status}: ${errorText}` };
+    }
+
+    const data = await response.json();
+    return data;
+  } catch (err) {
+    return { success: false, error: err instanceof Error ? err.message : 'Unknown error' };
+  }
 }
 
 // =============================================================================
@@ -361,15 +400,11 @@ export default function BluebeamImportModal({
     setState('applying');
     setApplyProgress({ current: 0, total: applicableChanges.length });
 
-    const supabase = getSupabaseClient();
-
     try {
-      // Flatten the Map<pageId, ExtractionDetection[]> to get detection lookup
-      const allDetections: ExtractionDetection[] = [];
+      // Build lookup for existing detections
       const detectionsById = new Map<string, ExtractionDetection>();
       for (const dets of currentDetections.values()) {
         for (const det of dets) {
-          allDetections.push(det);
           detectionsById.set(det.id, det);
         }
       }
@@ -381,34 +416,34 @@ export default function BluebeamImportModal({
       const errors: string[] = [];
 
       // =======================================================================
-      // SURGICAL UPDATES: Only modify what changed, don't touch matched items
+      // SURGICAL UPDATES via existing n8n API - avoids duplicate Supabase clients
       // =======================================================================
 
       // 1. MODIFIED: Update only pixel coordinates for modified detections
       const modifiedChanges = applicableChanges.filter(
-        (c) => c.change_type === 'modified' && c.detection_id && c.imported_bbox
+        (c) => c.change_type === 'modified' && c.detection_id && c.imported_bbox && c.page_id
       );
 
       for (const change of modifiedChanges) {
-        if (!change.detection_id || !change.imported_bbox) continue;
+        if (!change.detection_id || !change.imported_bbox || !change.page_id) continue;
 
-        // Only update position fields - preserve class, material assignments, etc.
-        const { error } = await supabase
-          .from('extraction_detections_draft')
-          .update({
+        // Use 'resize' edit_type to update position (preserves class, materials, etc.)
+        const result = await syncDetectionEdit({
+          job_id: jobId,
+          page_id: change.page_id,
+          edit_type: 'resize',
+          detection_id: change.detection_id,
+          changes: {
             pixel_x: change.imported_bbox.x,
             pixel_y: change.imported_bbox.y,
             pixel_width: change.imported_bbox.w,
             pixel_height: change.imported_bbox.h,
-            // Clear polygon_points since bbox changed - it will be recalculated
-            polygon_points: null,
-            updated_at: new Date().toISOString(),
-          })
-          .eq('id', change.detection_id);
+          },
+        });
 
-        if (error) {
-          console.error(`[BluebeamImport] Failed to update detection ${change.detection_id}:`, error);
-          errors.push(`Failed to update ${change.detection_class || 'detection'}: ${error.message}`);
+        if (!result.success) {
+          console.error(`[BluebeamImport] Failed to update detection ${change.detection_id}:`, result.error);
+          errors.push(`Failed to update ${change.detection_class || 'detection'}: ${result.error}`);
         } else {
           modifiedCount++;
           console.log(`[BluebeamImport] Updated detection ${change.detection_id}`);
@@ -417,25 +452,25 @@ export default function BluebeamImportModal({
         setApplyProgress((prev) => ({ ...prev, current: prev.current + 1 }));
       }
 
-      // 2. DELETED: Soft-delete by setting is_deleted = true
+      // 2. DELETED: Use 'delete' edit_type
       const deletedChanges = applicableChanges.filter(
-        (c) => c.change_type === 'deleted' && c.detection_id
+        (c) => c.change_type === 'deleted' && c.detection_id && c.page_id
       );
 
       for (const change of deletedChanges) {
-        if (!change.detection_id) continue;
+        if (!change.detection_id || !change.page_id) continue;
 
-        const { error } = await supabase
-          .from('extraction_detections_draft')
-          .update({
-            is_deleted: true,
-            updated_at: new Date().toISOString(),
-          })
-          .eq('id', change.detection_id);
+        const result = await syncDetectionEdit({
+          job_id: jobId,
+          page_id: change.page_id,
+          edit_type: 'delete',
+          detection_id: change.detection_id,
+          changes: { status: 'deleted' },
+        });
 
-        if (error) {
-          console.error(`[BluebeamImport] Failed to delete detection ${change.detection_id}:`, error);
-          errors.push(`Failed to delete ${change.detection_class || 'detection'}: ${error.message}`);
+        if (!result.success) {
+          console.error(`[BluebeamImport] Failed to delete detection ${change.detection_id}:`, result.error);
+          errors.push(`Failed to delete ${change.detection_class || 'detection'}: ${result.error}`);
         } else {
           deletedCount++;
           console.log(`[BluebeamImport] Deleted detection ${change.detection_id}`);
@@ -444,7 +479,7 @@ export default function BluebeamImportModal({
         setApplyProgress((prev) => ({ ...prev, current: prev.current + 1 }));
       }
 
-      // 3. ADDED: Insert new detections
+      // 3. ADDED: Use 'create' edit_type
       const addedChanges = applicableChanges.filter(
         (c) => c.change_type === 'added' && c.imported_bbox && c.page_id
       );
@@ -452,33 +487,22 @@ export default function BluebeamImportModal({
       for (const change of addedChanges) {
         if (!change.imported_bbox || !change.page_id) continue;
 
-        // Find max detection_index for this page
-        const pageDetections = allDetections.filter((d) => d.page_id === change.page_id);
-        const maxIndex = pageDetections.reduce((max, d) => Math.max(max, d.detection_index || 0), 0);
-
-        const newDetection = {
+        const result = await syncDetectionEdit({
           job_id: jobId,
           page_id: change.page_id,
-          class: (change.detection_class || 'siding') as DetectionClass,
-          pixel_x: change.imported_bbox.x,
-          pixel_y: change.imported_bbox.y,
-          pixel_width: change.imported_bbox.w,
-          pixel_height: change.imported_bbox.h,
-          confidence: 0.9,
-          detection_index: maxIndex + 1,
-          is_deleted: false,
-          notes: 'Imported from Bluebeam',
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-        };
+          edit_type: 'create',
+          changes: {
+            pixel_x: change.imported_bbox.x,
+            pixel_y: change.imported_bbox.y,
+            pixel_width: change.imported_bbox.w,
+            pixel_height: change.imported_bbox.h,
+            class: (change.detection_class || 'siding') as DetectionClass,
+          },
+        });
 
-        const { error } = await supabase
-          .from('extraction_detections_draft')
-          .insert(newDetection);
-
-        if (error) {
-          console.error(`[BluebeamImport] Failed to create detection:`, error);
-          errors.push(`Failed to add ${change.detection_class || 'detection'}: ${error.message}`);
+        if (!result.success) {
+          console.error(`[BluebeamImport] Failed to create detection:`, result.error);
+          errors.push(`Failed to add ${change.detection_class || 'detection'}: ${result.error}`);
         } else {
           addedCount++;
           console.log(`[BluebeamImport] Created new detection on page ${change.page_number}`);
