@@ -23,13 +23,15 @@ export default function ExtractionReviewPage() {
   };
 
   return (
-    <div className="h-screen">
-      <DetectionEditor
-        jobId={jobId}
-        projectId={projectId}
-        onComplete={handleComplete}
-        onError={handleError}
-      />
+    <div className="h-screen flex flex-col">
+      <div className="flex-1 min-h-0">
+        <DetectionEditor
+          jobId={jobId}
+          projectId={projectId}
+          onComplete={handleComplete}
+          onError={handleError}
+        />
+      </div>
     </div>
   );
 }

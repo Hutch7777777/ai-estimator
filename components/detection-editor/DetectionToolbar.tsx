@@ -16,6 +16,7 @@ import {
   Save,
   ArrowLeft,
   FileDown,
+  Upload,
 } from 'lucide-react';
 import type { ToolMode, DetectionClass } from '@/lib/types/extraction';
 import { DETECTION_CLASS_COLORS } from '@/lib/types/extraction';
@@ -52,6 +53,10 @@ export interface DetectionToolbarProps {
   onExportBluebeam?: () => void;
   isExportingBluebeam?: boolean;
   canExportBluebeam?: boolean; // True when job is approved
+  // Bluebeam import props
+  onImportBluebeam?: () => void;
+  isImportingBluebeam?: boolean;
+  canImportBluebeam?: boolean; // True when job is approved
   // Local-first editing props
   hasUnsavedChanges?: boolean;
   canUndo?: boolean;
@@ -150,6 +155,10 @@ const DetectionToolbar = memo(function DetectionToolbar({
   onExportBluebeam,
   isExportingBluebeam = false,
   canExportBluebeam = false,
+  // Bluebeam import props
+  onImportBluebeam,
+  isImportingBluebeam = false,
+  canImportBluebeam = false,
   // Local-first editing props
   hasUnsavedChanges = false,
   canUndo = false,
@@ -434,6 +443,36 @@ const DetectionToolbar = memo(function DetectionToolbar({
             <>
               <FileDown className="w-4 h-4" />
               <span>Export to Bluebeam</span>
+            </>
+          )}
+        </button>
+      )}
+
+      {/* Import from Bluebeam Button */}
+      {onImportBluebeam && (
+        <button
+          type="button"
+          onClick={onImportBluebeam}
+          disabled={isImportingBluebeam}
+          className={`
+            flex items-center gap-2 px-4 py-2 rounded-md font-medium transition-colors
+            ${
+              isImportingBluebeam
+                ? 'bg-gray-200 dark:bg-gray-700 text-gray-400 dark:text-gray-500 cursor-not-allowed'
+                : 'bg-gray-100 hover:bg-gray-200 dark:bg-gray-700 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-200'
+            }
+          `}
+          title="Import edited PDF from Bluebeam"
+        >
+          {isImportingBluebeam ? (
+            <>
+              <Loader2 className="w-4 h-4 animate-spin" />
+              <span>Importing...</span>
+            </>
+          ) : (
+            <>
+              <Upload className="w-4 h-4" />
+              <span>Import from Bluebeam</span>
             </>
           )}
         </button>

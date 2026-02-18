@@ -63,6 +63,7 @@ import { useConfidenceFilter } from '@/lib/hooks/useConfidenceFilter';
 import { useRegionDetect, type RegionDetectionResult, type DetectionRegion } from '@/lib/hooks/useRegionDetect';
 import { useSAMSegment, type SAMPendingDetection, type SAMSegmentResult } from '@/lib/hooks/useSAMSegment';
 import SAMClassPicker from './SAMClassPicker';
+import BluebeamImportModal from './BluebeamImportModal';
 import { exportTakeoffToExcel, type TakeoffData } from '@/lib/utils/exportTakeoffExcel';
 import { useOrganization } from '@/lib/hooks/useOrganization';
 import { createClient } from '@supabase/supabase-js';
@@ -341,6 +342,7 @@ export default function DetectionEditor({
   const [showArea, setShowArea] = useState(true);
   const [isApproving, setIsApproving] = useState(false);
   const [isExportingBluebeam, setIsExportingBluebeam] = useState(false);
+  const [showImportModal, setShowImportModal] = useState(false);
   const [approvalResult, setApprovalResult] = useState<ApprovalResult | null>(null);
   const [showApprovalResults, setShowApprovalResults] = useState(false);
   const [takeoffDetails, setTakeoffDetails] = useState<TakeoffData | null>(null);
@@ -3792,6 +3794,9 @@ export default function DetectionEditor({
             onExportBluebeam={handleExportBluebeam}
             isExportingBluebeam={isExportingBluebeam}
             canExportBluebeam={!!approvalResult}
+            // Bluebeam import props
+            onImportBluebeam={() => setShowImportModal(true)}
+            canImportBluebeam={!!approvalResult}
             // Local-first editing props
             hasUnsavedChanges={hasUnsavedChanges}
             canUndo={canUndo}
@@ -4173,6 +4178,23 @@ export default function DetectionEditor({
         pixelDistance={calibrationData?.pixelDistance || 0}
         currentScaleRatio={currentPage?.scale_ratio || null}
         onApplyScale={handleApplyScale}
+      />
+
+      {/* Bluebeam Import Modal */}
+      <BluebeamImportModal
+        isOpen={showImportModal}
+        onClose={() => setShowImportModal(false)}
+        jobId={jobId}
+        currentDetections={detections}
+        pages={pages?.map(p => ({
+          id: p.id,
+          page_number: p.page_number,
+          scale_ratio: p.scale_ratio,
+        })) || []}
+        onImportComplete={() => {
+          refresh();
+          toast.success('Detections updated from Bluebeam import');
+        }}
       />
 
       {/* Approval Results Panel - Clean Summary View */}

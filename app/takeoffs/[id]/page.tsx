@@ -133,6 +133,7 @@ export default function TakeoffDetailsPage() {
   const [isDownloading, setIsDownloading] = useState(false);
   const [isDownloadingVendor, setIsDownloadingVendor] = useState(false);
   const [isDownloadingMarkup, setIsDownloadingMarkup] = useState(false);
+  const [isExportingBluebeam, setIsExportingBluebeam] = useState(false);
   const [activeTab, setActiveTab] = useState<'summary' | 'plan-intelligence'>('summary');
   const [showRFIModal, setShowRFIModal] = useState(false);
 
@@ -295,6 +296,71 @@ export default function TakeoffDetailsPage() {
     }
   };
 
+  // Handle Export to Bluebeam
+  const handleExportBluebeam = async () => {
+    if (!data?.takeoff?.extraction_job_id) {
+      toast.error('No extraction job linked to this takeoff');
+      return;
+    }
+
+    setIsExportingBluebeam(true);
+
+    try {
+      const apiUrl = process.env.NEXT_PUBLIC_EXTRACTION_API_URL || 'https://extraction-api-production.up.railway.app';
+
+      const response = await fetch(`${apiUrl}/export-bluebeam`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          job_id: data.takeoff.extraction_job_id,
+          include_materials: true,
+        }),
+      });
+
+      const result = await response.json();
+
+      if (!response.ok || !result.success) {
+        throw new Error(result.error || 'Export failed');
+      }
+
+      // Download as a file instead of opening in new tab
+      if (result.download_url) {
+        try {
+          // Fetch the PDF as a blob
+          const pdfResponse = await fetch(result.download_url);
+          const blob = await pdfResponse.blob();
+
+          // Create blob URL and trigger download
+          const blobUrl = URL.createObjectURL(blob);
+          const link = document.createElement('a');
+          link.href = blobUrl;
+          link.download = result.filename || 'bluebeam_export.pdf';
+          document.body.appendChild(link);
+          link.click();
+          document.body.removeChild(link);
+          URL.revokeObjectURL(blobUrl);
+
+          toast.success('Bluebeam PDF exported successfully');
+        } catch (downloadErr) {
+          console.error('[ExportBluebeam] Download error, falling back to window.open:', downloadErr);
+          // Fallback to opening in new tab if blob download fails
+          window.open(result.download_url, '_blank');
+          toast.success('Bluebeam PDF exported (opened in new tab)');
+        }
+      } else {
+        throw new Error('No download URL returned');
+      }
+    } catch (err) {
+      const error = err instanceof Error ? err : new Error('Export failed');
+      console.error('[ExportBluebeam] Error:', error);
+      toast.error(`Failed to export to Bluebeam: ${error.message}`);
+    } finally {
+      setIsExportingBluebeam(false);
+    }
+  };
+
   // Loading state
   if (loading) {
     return <LoadingSkeleton />;
@@ -351,9 +417,11 @@ export default function TakeoffDetailsPage() {
           onDownloadVendor={handleDownloadVendorTakeoff}
           onDownloadMarkup={handleDownloadMarkupPlans}
           onGenerateRFI={takeoff.extraction_job_id ? () => setShowRFIModal(true) : undefined}
+          onExportBluebeam={takeoff.extraction_job_id ? handleExportBluebeam : undefined}
           isDownloading={isDownloading}
           isDownloadingVendor={isDownloadingVendor}
           isDownloadingMarkup={isDownloadingMarkup}
+          isExportingBluebeam={isExportingBluebeam}
         />
 
         {/* RFI Email Modal */}

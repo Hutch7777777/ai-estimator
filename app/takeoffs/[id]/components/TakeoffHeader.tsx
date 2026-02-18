@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { ArrowLeft, Download, Loader2, Home, FileSpreadsheet, FileImage, Mail } from 'lucide-react';
+import { ArrowLeft, Download, Loader2, Home, FileSpreadsheet, FileImage, Mail, FileDown } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 
 // =============================================================================
@@ -18,9 +18,11 @@ export interface TakeoffHeaderProps {
   onDownloadVendor: () => void;
   onDownloadMarkup: () => void;
   onGenerateRFI?: () => void;
+  onExportBluebeam?: () => void;
   isDownloading: boolean;
   isDownloadingVendor: boolean;
   isDownloadingMarkup: boolean;
+  isExportingBluebeam?: boolean;
 }
 
 // =============================================================================
@@ -37,9 +39,11 @@ export function TakeoffHeader({
   onDownloadVendor,
   onDownloadMarkup,
   onGenerateRFI,
+  onExportBluebeam,
   isDownloading,
   isDownloadingVendor,
   isDownloadingMarkup,
+  isExportingBluebeam = false,
 }: TakeoffHeaderProps) {
   return (
     <div className="space-y-4">
@@ -105,6 +109,21 @@ export function TakeoffHeader({
                 <FileImage className="w-4 h-4" />
               )}
               Markup Plans
+            </button>
+          )}
+          {extractionJobId && onExportBluebeam && (
+            <button
+              onClick={onExportBluebeam}
+              disabled={isExportingBluebeam}
+              title="Export detections to Bluebeam-compatible PDF"
+              className="flex items-center gap-2 px-3 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50 transition-colors"
+            >
+              {isExportingBluebeam ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : (
+                <FileDown className="w-4 h-4" />
+              )}
+              Export to Bluebeam
             </button>
           )}
           <button
