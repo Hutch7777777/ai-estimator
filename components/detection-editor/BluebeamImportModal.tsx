@@ -342,7 +342,7 @@ export default function BluebeamImportModal({
 
     try {
       const formData = new FormData();
-      formData.append('file', selectedFile);
+      formData.append('pdf_file', selectedFile);
       formData.append('job_id', jobId);
 
       const response = await fetch(`${EXTRACTION_API_URL}/import-bluebeam`, {
