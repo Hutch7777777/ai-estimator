@@ -92,6 +92,7 @@ export type PageType =
 export type ElevationName = 'front' | 'rear' | 'left' | 'right';
 
 export type JobStatus =
+  | 'importing'   // Bluebeam fresh import in progress
   | 'converting'
   | 'classifying'
   | 'classified'  // Pages classified, ready for user review

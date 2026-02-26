@@ -37,6 +37,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { ExtractionUploadStep } from "@/components/project-form/ExtractionUploadStep";
+import { BluebeamFreshImportModal } from "@/components/dashboard/BluebeamFreshImportModal";
 import { subscribeToAllJobs } from "@/lib/supabase/extractionQueries";
 import type { JobStatus, ExtractionJob } from "@/lib/types/extraction";
 
@@ -60,6 +61,7 @@ export function ExtractionsTable() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [uploadDialogOpen, setUploadDialogOpen] = useState(false);
+  const [bluebeamImportOpen, setBluebeamImportOpen] = useState(false);
   const [tempProjectId] = useState(() => crypto.randomUUID());
 
   // Inline editing state
@@ -247,6 +249,8 @@ export function ExtractionsTable() {
   // Get status display text
   const getStatusText = (status: JobStatus): string => {
     switch (status) {
+      case "importing":
+        return "Importing";
       case "converting":
         return "Converting PDF";
       case "classifying":
@@ -275,6 +279,8 @@ export function ExtractionsTable() {
         return "bg-emerald-100 text-emerald-800 dark:bg-emerald-900 dark:text-emerald-200";
       case "failed":
         return "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200";
+      case "importing":
+        return "bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200";
       case "converting":
       case "classifying":
         return "bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200";
@@ -337,10 +343,16 @@ export function ExtractionsTable() {
               AI-powered detection jobs for construction plan PDFs
             </CardDescription>
           </div>
-          <Button onClick={() => setUploadDialogOpen(true)}>
-            <Upload className="h-4 w-4 mr-2" />
-            Upload Plans
-          </Button>
+          <div className="flex gap-2">
+            <Button variant="outline" onClick={() => setBluebeamImportOpen(true)}>
+              <Upload className="h-4 w-4 mr-2" />
+              Upload Marked Up Plans
+            </Button>
+            <Button onClick={() => setUploadDialogOpen(true)}>
+              <Upload className="h-4 w-4 mr-2" />
+              Upload Plans
+            </Button>
+          </div>
         </div>
       </CardHeader>
       <CardContent>
@@ -477,6 +489,17 @@ export function ExtractionsTable() {
           />
         </DialogContent>
       </Dialog>
+
+      {/* Bluebeam Fresh Import Modal */}
+      <BluebeamFreshImportModal
+        open={bluebeamImportOpen}
+        onOpenChange={setBluebeamImportOpen}
+        projectId={tempProjectId}
+        organizationId={organization?.id}
+        onJobCreated={() => {
+          // The realtime subscription will add the new job automatically
+        }}
+      />
     </Card>
   );
 }
