@@ -395,132 +395,52 @@ export default function BluebeamImportModal({
   }, [diffResult, selectedChanges]);
 
   const handleApplyChanges = async () => {
-    if (!diffResult || applicableChanges.length === 0) return;
+    if (!diffResult || !selectedFile || applicableChanges.length === 0) return;
 
     setState('applying');
     setApplyProgress({ current: 0, total: applicableChanges.length });
 
     try {
-      // Build lookup for existing detections
-      const detectionsById = new Map<string, ExtractionDetection>();
-      for (const dets of currentDetections.values()) {
-        for (const det of dets) {
-          detectionsById.set(det.id, det);
-        }
+      // Build list of selected change keys for the backend to filter
+      const selectedIds = Array.from(selectedChanges);
+
+      // Send to backend with apply_changes=true
+      // The backend will apply only the changes matching selectedIds
+      const formData = new FormData();
+      formData.append('pdf_file', selectedFile);
+      formData.append('job_id', jobId);
+      formData.append('apply_changes', 'true');
+      formData.append('selected_changes', JSON.stringify(selectedIds));
+
+      console.log(`[BluebeamImport] Applying ${applicableChanges.length} changes via backend...`);
+
+      const response = await fetch(`${EXTRACTION_API_URL}/import-bluebeam`, {
+        method: 'POST',
+        body: formData,
+      });
+
+      const data = await response.json();
+
+      if (!response.ok || !data.success) {
+        throw new Error(data.error || 'Failed to apply changes');
       }
 
-      // Track results
-      let modifiedCount = 0;
-      let deletedCount = 0;
-      let addedCount = 0;
-      const errors: string[] = [];
+      // Extract results from backend response
+      const applied = data.summary?.applied || {};
+      const modifiedCount = applied.modified || 0;
+      const deletedCount = applied.deleted || 0;
+      const addedCount = applied.added || 0;
+      const readdedCount = applied.readded || 0;
+      const errorCount = applied.errors || 0;
 
-      // =======================================================================
-      // SURGICAL UPDATES via existing n8n API - avoids duplicate Supabase clients
-      // =======================================================================
+      const successCount = modifiedCount + deletedCount + addedCount + readdedCount;
+      console.log(`[BluebeamImport] Backend applied: ${modifiedCount} modified, ${deletedCount} deleted, ${addedCount} added, ${readdedCount} readded, ${errorCount} errors`);
 
-      // 1. MODIFIED: Update only pixel coordinates for modified detections
-      const modifiedChanges = applicableChanges.filter(
-        (c) => c.change_type === 'modified' && c.detection_id && c.imported_bbox && c.page_id
-      );
-
-      for (const change of modifiedChanges) {
-        if (!change.detection_id || !change.imported_bbox || !change.page_id) continue;
-
-        // Use 'resize' edit_type to update position (preserves class, materials, etc.)
-        const result = await syncDetectionEdit({
-          job_id: jobId,
-          page_id: change.page_id,
-          edit_type: 'resize',
-          detection_id: change.detection_id,
-          changes: {
-            pixel_x: change.imported_bbox.x,
-            pixel_y: change.imported_bbox.y,
-            pixel_width: change.imported_bbox.w,
-            pixel_height: change.imported_bbox.h,
-          },
-        });
-
-        if (!result.success) {
-          console.error(`[BluebeamImport] Failed to update detection ${change.detection_id}:`, result.error);
-          errors.push(`Failed to update ${change.detection_class || 'detection'}: ${result.error}`);
-        } else {
-          modifiedCount++;
-          console.log(`[BluebeamImport] Updated detection ${change.detection_id}`);
-        }
-
-        setApplyProgress((prev) => ({ ...prev, current: prev.current + 1 }));
-      }
-
-      // 2. DELETED: Use 'delete' edit_type
-      const deletedChanges = applicableChanges.filter(
-        (c) => c.change_type === 'deleted' && c.detection_id && c.page_id
-      );
-
-      for (const change of deletedChanges) {
-        if (!change.detection_id || !change.page_id) continue;
-
-        const result = await syncDetectionEdit({
-          job_id: jobId,
-          page_id: change.page_id,
-          edit_type: 'delete',
-          detection_id: change.detection_id,
-          changes: { status: 'deleted' },
-        });
-
-        if (!result.success) {
-          console.error(`[BluebeamImport] Failed to delete detection ${change.detection_id}:`, result.error);
-          errors.push(`Failed to delete ${change.detection_class || 'detection'}: ${result.error}`);
-        } else {
-          deletedCount++;
-          console.log(`[BluebeamImport] Deleted detection ${change.detection_id}`);
-        }
-
-        setApplyProgress((prev) => ({ ...prev, current: prev.current + 1 }));
-      }
-
-      // 3. ADDED: Use 'create' edit_type
-      const addedChanges = applicableChanges.filter(
-        (c) => c.change_type === 'added' && c.imported_bbox && c.page_id
-      );
-
-      for (const change of addedChanges) {
-        if (!change.imported_bbox || !change.page_id) continue;
-
-        const result = await syncDetectionEdit({
-          job_id: jobId,
-          page_id: change.page_id,
-          edit_type: 'create',
-          changes: {
-            pixel_x: change.imported_bbox.x,
-            pixel_y: change.imported_bbox.y,
-            pixel_width: change.imported_bbox.w,
-            pixel_height: change.imported_bbox.h,
-            class: (change.detection_class || 'siding') as DetectionClass,
-          },
-        });
-
-        if (!result.success) {
-          console.error(`[BluebeamImport] Failed to create detection:`, result.error);
-          errors.push(`Failed to add ${change.detection_class || 'detection'}: ${result.error}`);
-        } else {
-          addedCount++;
-          console.log(`[BluebeamImport] Created new detection on page ${change.page_number}`);
-        }
-
-        setApplyProgress((prev) => ({ ...prev, current: prev.current + 1 }));
-      }
-
-      // Report results
-      const successCount = modifiedCount + deletedCount + addedCount;
-      console.log(`[BluebeamImport] Complete: ${modifiedCount} modified, ${deletedCount} deleted, ${addedCount} added`);
-
-      if (errors.length > 0) {
-        console.error(`[BluebeamImport] ${errors.length} errors occurred:`, errors);
+      if (errorCount > 0) {
         if (successCount > 0) {
-          toast.warning(`Applied ${successCount} changes with ${errors.length} errors`);
+          toast.warning(`Applied ${successCount} changes with ${errorCount} errors`);
         } else {
-          throw new Error(`All operations failed. First error: ${errors[0]}`);
+          throw new Error(`All operations failed (${errorCount} errors)`);
         }
       } else {
         toast.success(`Successfully applied ${successCount} changes`);
