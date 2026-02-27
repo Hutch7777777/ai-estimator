@@ -10,13 +10,8 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+// Note: Using native <select> elements instead of Radix Select
+// to avoid dropdown clipping issues in the scrollable table container
 import {
   Table,
   TableBody,
@@ -365,7 +360,7 @@ export function BluebeamFreshImportModal({
             </div>
 
             {/* Mapping table */}
-            <div className="border rounded-lg max-h-96 overflow-y-auto pb-48">
+            <div className="border rounded-lg max-h-96 overflow-y-auto">
               <Table>
                 <TableHeader className="sticky top-0 bg-white">
                   <TableRow>
@@ -400,21 +395,18 @@ export function BluebeamFreshImportModal({
                           {subject.annotation_type}
                         </TableCell>
                         <TableCell>
-                          <Select
+                          {/* Native select renders in OS-level layer, not clipped by overflow */}
+                          <select
                             value={currentClass}
-                            onValueChange={(value) => handleClassChange(subject.subject, value)}
+                            onChange={(e) => handleClassChange(subject.subject, e.target.value)}
+                            className="h-8 w-full text-sm border border-gray-200 rounded-md px-2 bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
                           >
-                            <SelectTrigger className="h-8 text-sm">
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {DETECTION_CLASSES.map((cls) => (
-                                <SelectItem key={cls.value} value={cls.value}>
-                                  {cls.label}
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
+                            {DETECTION_CLASSES.map((cls) => (
+                              <option key={cls.value} value={cls.value}>
+                                {cls.label}
+                              </option>
+                            ))}
+                          </select>
                         </TableCell>
                       </TableRow>
                     );
