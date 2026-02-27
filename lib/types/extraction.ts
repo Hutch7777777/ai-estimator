@@ -280,6 +280,10 @@ export interface ExtractionDetection {
   markup_type?: MarkupType;
   marker_label?: string | null;
 
+  // Bluebeam import fields - real measurement values from Content field
+  bluebeam_content?: string | null;
+  item_count?: number | null;
+
   // Product assignment (for Properties Panel)
   assigned_material_id?: string | null;
 

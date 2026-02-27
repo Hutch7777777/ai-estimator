@@ -26,32 +26,94 @@ function formatValue(value: number | null | undefined, suffix: string = ''): str
 
 /**
  * Calculate real-world measurements from detection data.
- * ALWAYS calculates live from polygon_points when available to ensure
- * measurements match the canvas display exactly.
+ * PREFERS database values (area_sf, perimeter_lf, item_count) when available
+ * from Bluebeam imports. Falls back to calculating from polygon_points.
  * Supports polygons with holes for split detections.
  */
 function calculateMeasurementsFromPixels(
   detection: ExtractionDetection,
   pixelsPerFoot: number
-): { widthFt: number; heightFt: number; areaSf: number; perimeterLf: number; lengthLf?: number; isLine: boolean; isPoint: boolean; hasHole: boolean } {
+): { widthFt: number; heightFt: number; areaSf: number; perimeterLf: number; lengthLf?: number; isLine: boolean; isPoint: boolean; hasHole: boolean; itemCount?: number; markerLabel?: string } {
   const isLine = detection.markup_type === 'line';
   const isPoint = detection.markup_type === 'point';
 
-  // For points, return zeroes (count markers only)
+  // For points, return stored item_count if available
   if (isPoint) {
-    return { widthFt: 0, heightFt: 0, areaSf: 0, perimeterLf: 0, isLine: false, isPoint: true, hasHole: false };
+    return {
+      widthFt: 0,
+      heightFt: 0,
+      areaSf: 0,
+      perimeterLf: 0,
+      isLine: false,
+      isPoint: true,
+      hasHole: false,
+      itemCount: detection.item_count ?? 1,
+      markerLabel: detection.marker_label ?? undefined,
+    };
   }
 
-  // For lines, calculate length from polygon_points
-  if (isLine && detection.polygon_points && !isPolygonWithHoles(detection.polygon_points)) {
-    const points = detection.polygon_points as PolygonPoint[];
-    if (points.length >= 2) {
-      const p1 = points[0];
-      const p2 = points[1];
-      const pixelLength = Math.sqrt(Math.pow(p2.x - p1.x, 2) + Math.pow(p2.y - p1.y, 2));
-      const lengthLf = pixelLength / pixelsPerFoot;
-      return { widthFt: 0, heightFt: 0, areaSf: 0, perimeterLf: 0, lengthLf, isLine: true, isPoint: false, hasHole: false };
+  // For lines, prefer DB perimeter_lf if available, else calculate from polygon_points
+  if (isLine) {
+    // Use stored perimeter_lf from Bluebeam if available
+    if (detection.perimeter_lf != null && detection.perimeter_lf > 0) {
+      return {
+        widthFt: 0,
+        heightFt: 0,
+        areaSf: 0,
+        perimeterLf: 0,
+        lengthLf: detection.perimeter_lf,
+        isLine: true,
+        isPoint: false,
+        hasHole: false,
+        markerLabel: detection.marker_label ?? undefined,
+      };
     }
+    // Fallback: calculate from polygon_points
+    if (detection.polygon_points && !isPolygonWithHoles(detection.polygon_points)) {
+      const points = detection.polygon_points as PolygonPoint[];
+      if (points.length >= 2) {
+        const p1 = points[0];
+        const p2 = points[1];
+        const pixelLength = Math.sqrt(Math.pow(p2.x - p1.x, 2) + Math.pow(p2.y - p1.y, 2));
+        const lengthLf = pixelLength / pixelsPerFoot;
+        return { widthFt: 0, heightFt: 0, areaSf: 0, perimeterLf: 0, lengthLf, isLine: true, isPoint: false, hasHole: false };
+      }
+    }
+  }
+
+  // Check for stored Bluebeam values first - these take priority
+  const hasDbAreaSf = detection.area_sf != null && detection.area_sf > 0;
+  const hasDbPerimeterLf = detection.perimeter_lf != null && detection.perimeter_lf > 0;
+
+  // If we have stored area_sf from Bluebeam, use it
+  if (hasDbAreaSf) {
+    // Calculate width/height from geometry for display, but use DB area
+    let widthFt = 0;
+    let heightFt = 0;
+
+    if (detection.polygon_points && !isPolygonWithHoles(detection.polygon_points)) {
+      const points = detection.polygon_points as PolygonPoint[];
+      if (points.length >= 3 && pixelsPerFoot > 0) {
+        const xs = points.map(p => p.x);
+        const ys = points.map(p => p.y);
+        widthFt = (Math.max(...xs) - Math.min(...xs)) / pixelsPerFoot;
+        heightFt = (Math.max(...ys) - Math.min(...ys)) / pixelsPerFoot;
+      }
+    } else {
+      widthFt = (detection.pixel_width || 0) / pixelsPerFoot;
+      heightFt = (detection.pixel_height || 0) / pixelsPerFoot;
+    }
+
+    return {
+      widthFt,
+      heightFt,
+      areaSf: detection.area_sf!,
+      perimeterLf: hasDbPerimeterLf ? detection.perimeter_lf! : 0,
+      isLine: false,
+      isPoint: false,
+      hasHole: false,
+      markerLabel: detection.marker_label ?? undefined,
+    };
   }
 
   // Handle polygon with holes (from split operation)
@@ -184,8 +246,8 @@ const SelectionProperties = memo(function SelectionProperties({
 
     if (selectedDetections.length === 1) {
       const detection = selectedDetections[0];
-      // Calculate measurements dynamically from pixel dimensions
-      const { widthFt, heightFt, areaSf, perimeterLf, lengthLf, isLine, isPoint } = calculateMeasurementsFromPixels(
+      // Calculate measurements dynamically from pixel dimensions (or use DB values)
+      const { widthFt, heightFt, areaSf, perimeterLf, lengthLf, isLine, isPoint, itemCount, markerLabel } = calculateMeasurementsFromPixels(
         detection,
         pixelsPerFoot
       );
@@ -200,6 +262,8 @@ const SelectionProperties = memo(function SelectionProperties({
         isLine,
         isPoint,
         count: 1,
+        itemCount,
+        markerLabel,
         pointCount: isPoint ? 1 : 0,
       };
     }
@@ -209,15 +273,17 @@ const SelectionProperties = memo(function SelectionProperties({
     let totalPerimeter = 0;
     let totalLength = 0;
     let pointCount = 0;
+    let totalItemCount = 0;
     let hasLines = false;
     let hasPolygons = false;
     let hasPoints = false;
 
     for (const detection of selectedDetections) {
-      const { areaSf, perimeterLf, lengthLf, isLine, isPoint } = calculateMeasurementsFromPixels(detection, pixelsPerFoot);
+      const { areaSf, perimeterLf, lengthLf, isLine, isPoint, itemCount } = calculateMeasurementsFromPixels(detection, pixelsPerFoot);
       if (isPoint) {
         hasPoints = true;
         pointCount += 1;
+        totalItemCount += itemCount ?? 1;
       } else if (isLine) {
         hasLines = true;
         totalLength += lengthLf || 0;
@@ -241,6 +307,7 @@ const SelectionProperties = memo(function SelectionProperties({
       hasMixed: (hasLines && hasPolygons) || (hasPoints && (hasLines || hasPolygons)),
       count: selectedDetections.length,
       pointCount,
+      itemCount: totalItemCount > 0 ? totalItemCount : undefined,
     };
   }, [selectedDetections, pixelsPerFoot]);
 
@@ -264,6 +331,18 @@ const SelectionProperties = memo(function SelectionProperties({
         </div>
       )}
 
+      {/* Source Label - show Bluebeam subject if available */}
+      {measurements.isSingle && measurements.markerLabel && (
+        <div className="space-y-1">
+          <span className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+            Source
+          </span>
+          <div className="text-sm text-gray-700 dark:text-gray-300 bg-gray-50 dark:bg-gray-800/50 rounded-md px-2 py-1">
+            {measurements.markerLabel}
+          </div>
+        </div>
+      )}
+
       {/* Measurements */}
       <div className="space-y-1">
         <span className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">
@@ -276,11 +355,13 @@ const SelectionProperties = memo(function SelectionProperties({
             : `Combined (${measurements.count} items)`}
         </span>
         <div className="space-y-1.5 bg-gray-50 dark:bg-gray-800/50 rounded-md p-2">
-          {/* For points, show Count instead of dimensions */}
+          {/* For points, show Count (using item_count from Bluebeam if available) */}
           {measurements.isPoint ? (
             <PropertyRow
               label="Count"
-              value={measurements.isSingle ? '1' : String(measurements.pointCount)}
+              value={measurements.isSingle
+                ? String(measurements.itemCount ?? 1)
+                : String(measurements.itemCount ?? measurements.pointCount)}
             />
           ) : measurements.isLine ? (
             /* For lines, show Length instead of Area/Perimeter */
