@@ -7,6 +7,9 @@ import {
   SlidersHorizontal,
   RotateCcw,
   Trash2,
+  List,
+  ChevronLeft,
+  ChevronRight,
 } from 'lucide-react';
 import type {
   ExtractionPage,
@@ -25,6 +28,7 @@ import NotesField from './PropertiesPanel/NotesField';
 import { getDetectionColor } from '@/lib/types/extraction';
 import { getMaterialById, type MaterialItem } from '@/lib/hooks/useMaterialSearch';
 import { Badge } from '@/components/ui/badge';
+import MarkupsList from './MarkupsList';
 
 // =============================================================================
 // Types
@@ -35,8 +39,12 @@ export interface DetectionSidebarProps {
   currentPageId: string | null;
   onPageSelect: (pageId: string) => void;
   detections: ExtractionDetection[];
+  // All detections across all pages (for Markups List tab)
+  allDetections: ExtractionDetection[];
   // Selection properties (for Properties tab)
   selectedDetections: ExtractionDetection[];
+  // Selected detection IDs (for Markups List highlighting)
+  selectedIds: Set<string>;
   onClassChange: (detectionIds: string[], newClass: DetectionClass) => void;
   onColorChange?: (detectionIds: string[], color: string | null) => void;
   onStatusChange: (detectionIds: string[], newStatus: DetectionStatus) => void;
@@ -57,9 +65,14 @@ export interface DetectionSidebarProps {
   // Job and totals from intelligent analysis aggregation
   job?: ExtractionJob | null;
   jobTotals?: ExtractionJobTotals | null;
+  // Collapsible state
+  isCollapsed?: boolean;
+  onCollapsedChange?: (collapsed: boolean) => void;
+  // Detection selection from Markups List
+  onMarkupSelect?: (detectionId: string, pageId: string) => void;
 }
 
-type TabType = 'pages' | 'properties' | 'totals';
+type TabType = 'pages' | 'properties' | 'totals' | 'markups';
 
 // =============================================================================
 // Constants
@@ -69,6 +82,7 @@ const TABS: { id: TabType; icon: typeof FileImage; label: string }[] = [
   { id: 'pages', icon: FileImage, label: 'Pages' },
   { id: 'properties', icon: SlidersHorizontal, label: 'Properties' },
   { id: 'totals', icon: Calculator, label: 'Totals' },
+  { id: 'markups', icon: List, label: 'Markups List' },
 ];
 
 
@@ -200,7 +214,9 @@ const DetectionSidebar = memo(function DetectionSidebar({
   currentPageId,
   onPageSelect,
   detections,
+  allDetections,
   selectedDetections,
+  selectedIds,
   onClassChange,
   onColorChange,
   onStatusChange,
@@ -215,9 +231,16 @@ const DetectionSidebar = memo(function DetectionSidebar({
   allPagesTotals,
   job,
   jobTotals,
+  isCollapsed = false,
+  onCollapsedChange,
+  onMarkupSelect,
 }: DetectionSidebarProps) {
   // Default to 'pages' tab for quick page navigation
   const [activeTab, setActiveTab] = useState<TabType>('pages');
+  // Local collapsed state if not controlled externally
+  const [localCollapsed, setLocalCollapsed] = useState(false);
+  const collapsed = onCollapsedChange ? isCollapsed : localCollapsed;
+  const setCollapsed = onCollapsedChange || setLocalCollapsed;
   // Toggle between current page and all pages totals
   const [totalsScope, setTotalsScope] = useState<'current' | 'all'>('current');
   // Assigned material for display
@@ -272,10 +295,45 @@ const DetectionSidebar = memo(function DetectionSidebar({
     return counts;
   }, [detections]);
 
+  // Handler for markup selection from list
+  const handleMarkupSelect = (detectionId: string, pageId: string) => {
+    // Navigate to the page first
+    if (pageId !== currentPageId) {
+      onPageSelect(pageId);
+    }
+    // Then select the detection
+    onMarkupSelect?.(detectionId, pageId);
+  };
+
+  // Collapsed state - show only toggle button
+  if (collapsed) {
+    return (
+      <div className="h-full bg-white dark:bg-gray-900 flex flex-col items-center py-2 w-10">
+        <button
+          type="button"
+          onClick={() => setCollapsed(false)}
+          className="p-2 text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800 rounded transition-colors"
+          title="Expand sidebar"
+        >
+          <ChevronLeft className="w-5 h-5" />
+        </button>
+      </div>
+    );
+  }
+
   return (
     <div className="h-full bg-white dark:bg-gray-900 flex flex-col">
-      {/* Tab Bar */}
+      {/* Tab Bar with collapse button */}
       <div className="flex border-b border-gray-200 dark:border-gray-700">
+        {/* Collapse button */}
+        <button
+          type="button"
+          onClick={() => setCollapsed(true)}
+          className="flex items-center justify-center px-2 text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+          title="Collapse sidebar"
+        >
+          <ChevronRight className="w-4 h-4" />
+        </button>
         {TABS.map((tab) => {
           const Icon = tab.icon;
           const isActive = activeTab === tab.id;
@@ -938,6 +996,17 @@ const DetectionSidebar = memo(function DetectionSidebar({
               </div>
             )}
           </div>
+        )}
+
+        {/* Markups List Tab */}
+        {activeTab === 'markups' && (
+          <MarkupsList
+            allDetections={allDetections}
+            pages={pages}
+            selectedIds={selectedIds}
+            onDetectionSelect={handleMarkupSelect}
+            currentPageId={currentPageId}
+          />
         )}
       </div>
     </div>

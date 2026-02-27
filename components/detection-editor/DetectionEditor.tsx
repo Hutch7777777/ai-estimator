@@ -324,6 +324,9 @@ export default function DetectionEditor({
     direction: 'left', // Handle on left edge of sidebar (since sidebar is on right)
   });
 
+  // Sidebar collapsed state
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+
   // ============================================================================
   // Local UI State
   // ============================================================================
@@ -732,6 +735,17 @@ export default function DetectionEditor({
       setSelectedDetectionId(detectionIds[0]);
     }
   }, []);
+
+  // Handler for selecting a detection from the Markups List
+  const handleMarkupSelect = useCallback((detectionId: string, pageId: string) => {
+    // Navigate to page if different
+    if (pageId !== currentPageId) {
+      setCurrentPageId(pageId);
+    }
+    // Select the detection
+    setSelectedIds(new Set([detectionId]));
+    setSelectedDetectionId(detectionId);
+  }, [currentPageId, setCurrentPageId]);
 
   // ============================================================================
   // Detection Edit Handlers (Konva-compatible)
@@ -4097,23 +4111,27 @@ export default function DetectionEditor({
               )}
             </div>
 
-            {/* Sidebar - pages, properties, and totals (resizable) */}
+            {/* Sidebar - pages, properties, totals, and markups list (resizable) */}
             <div
               className="relative flex-shrink-0 border-l border-gray-200 dark:border-gray-700"
-              style={{ width: sidebarWidth }}
+              style={{ width: isSidebarCollapsed ? 40 : sidebarWidth }}
             >
-              {/* Resize handle on left edge */}
-              <ResizeHandle
-                direction="left"
-                isResizing={isSidebarResizing}
-                onMouseDown={handleSidebarResizeStart}
-              />
+              {/* Resize handle on left edge (hidden when collapsed) */}
+              {!isSidebarCollapsed && (
+                <ResizeHandle
+                  direction="left"
+                  isResizing={isSidebarResizing}
+                  onMouseDown={handleSidebarResizeStart}
+                />
+              )}
               <DetectionSidebar
                 pages={pages}
                 currentPageId={currentPageId}
                 onPageSelect={setCurrentPageId}
                 detections={currentPageDetections}
+                allDetections={getAllDetections()}
                 selectedDetections={selectedDetections}
+                selectedIds={selectedIds}
                 onClassChange={handleClassChange}
                 onColorChange={handleColorChange}
                 onStatusChange={handleStatusChange}
@@ -4128,6 +4146,9 @@ export default function DetectionEditor({
                 allPagesTotals={allPagesTotals}
                 job={job}
                 jobTotals={jobTotals}
+                isCollapsed={isSidebarCollapsed}
+                onCollapsedChange={setIsSidebarCollapsed}
+                onMarkupSelect={handleMarkupSelect}
               />
             </div>
           </div>
