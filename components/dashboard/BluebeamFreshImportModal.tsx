@@ -365,7 +365,7 @@ export function BluebeamFreshImportModal({
             </div>
 
             {/* Mapping table */}
-            <div className="border rounded-lg max-h-96 overflow-y-auto">
+            <div className="border rounded-lg max-h-96 overflow-y-auto pb-48">
               <Table>
                 <TableHeader className="sticky top-0 bg-white">
                   <TableRow>
