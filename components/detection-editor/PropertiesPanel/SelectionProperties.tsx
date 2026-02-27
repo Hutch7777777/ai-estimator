@@ -82,8 +82,25 @@ function calculateMeasurementsFromPixels(
   }
 
   // Check for stored Bluebeam values first - these take priority
+  const hasDbItemCount = detection.item_count != null && detection.item_count > 0;
   const hasDbAreaSf = detection.area_sf != null && detection.area_sf > 0;
   const hasDbPerimeterLf = detection.perimeter_lf != null && detection.perimeter_lf > 0;
+
+  // If we have item_count from Bluebeam (e.g., "Trim Count: 6"), treat as count item
+  // This handles polygon markups that represent counts, not areas
+  if (hasDbItemCount && !hasDbAreaSf) {
+    return {
+      widthFt: 0,
+      heightFt: 0,
+      areaSf: 0,
+      perimeterLf: 0,
+      isLine: false,
+      isPoint: false,  // Not a point markup, but displays like one
+      hasHole: false,
+      itemCount: detection.item_count!,
+      markerLabel: detection.marker_label ?? undefined,
+    };
+  }
 
   // If we have stored area_sf from Bluebeam, use it
   if (hasDbAreaSf) {
@@ -277,6 +294,7 @@ const SelectionProperties = memo(function SelectionProperties({
     let hasLines = false;
     let hasPolygons = false;
     let hasPoints = false;
+    let hasCountItems = false;  // Items with item_count (not point markers)
 
     for (const detection of selectedDetections) {
       const { areaSf, perimeterLf, lengthLf, isLine, isPoint, itemCount } = calculateMeasurementsFromPixels(detection, pixelsPerFoot);
@@ -284,6 +302,10 @@ const SelectionProperties = memo(function SelectionProperties({
         hasPoints = true;
         pointCount += 1;
         totalItemCount += itemCount ?? 1;
+      } else if (itemCount && itemCount > 0) {
+        // Count items from Bluebeam (e.g., "Trim Count: 6")
+        hasCountItems = true;
+        totalItemCount += itemCount;
       } else if (isLine) {
         hasLines = true;
         totalLength += lengthLf || 0;
@@ -294,6 +316,9 @@ const SelectionProperties = memo(function SelectionProperties({
       }
     }
 
+    // Determine if all selected items are count-type (points or items with itemCount)
+    const isCountOnly = (hasPoints || hasCountItems) && !hasLines && !hasPolygons;
+
     return {
       isSingle: false,
       status: null,
@@ -302,9 +327,10 @@ const SelectionProperties = memo(function SelectionProperties({
       lengthLf: totalLength > 0 ? totalLength : null,
       widthFt: null,
       heightFt: null,
-      isLine: hasLines && !hasPolygons && !hasPoints,
-      isPoint: hasPoints && !hasLines && !hasPolygons,
-      hasMixed: (hasLines && hasPolygons) || (hasPoints && (hasLines || hasPolygons)),
+      isLine: hasLines && !hasPolygons && !hasPoints && !hasCountItems,
+      isPoint: hasPoints && !hasLines && !hasPolygons && !hasCountItems,
+      isCountOnly,  // True if all selected are count-type items
+      hasMixed: (hasLines && hasPolygons) || ((hasPoints || hasCountItems) && (hasLines || hasPolygons)),
       count: selectedDetections.length,
       pointCount,
       itemCount: totalItemCount > 0 ? totalItemCount : undefined,
@@ -347,21 +373,21 @@ const SelectionProperties = memo(function SelectionProperties({
       <div className="space-y-1">
         <span className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">
           {measurements.isSingle
-            ? measurements.isPoint
-              ? 'Count Marker'
+            ? measurements.isPoint || (measurements.itemCount && measurements.itemCount > 0)
+              ? 'Count'
               : measurements.isLine
                 ? 'Line Measurement'
                 : 'Measurements'
-            : `Combined (${measurements.count} items)`}
+            : measurements.isCountOnly
+              ? `Count Total (${measurements.count} items)`
+              : `Combined (${measurements.count} items)`}
         </span>
         <div className="space-y-1.5 bg-gray-50 dark:bg-gray-800/50 rounded-md p-2">
-          {/* For points, show Count (using item_count from Bluebeam if available) */}
-          {measurements.isPoint ? (
+          {/* For count items (points or items with itemCount), show Count */}
+          {measurements.isPoint || measurements.isCountOnly || (measurements.isSingle && measurements.itemCount && measurements.itemCount > 0) ? (
             <PropertyRow
               label="Count"
-              value={measurements.isSingle
-                ? String(measurements.itemCount ?? 1)
-                : String(measurements.itemCount ?? measurements.pointCount)}
+              value={String(measurements.itemCount ?? measurements.pointCount ?? 1)}
             />
           ) : measurements.isLine ? (
             /* For lines, show Length instead of Area/Perimeter */
@@ -394,7 +420,7 @@ const SelectionProperties = memo(function SelectionProperties({
               value={formatValue(measurements.lengthLf, ' LF')}
             />
           )}
-          {measurements.isSingle && !measurements.isLine && !measurements.isPoint && (
+          {measurements.isSingle && !measurements.isLine && !measurements.isPoint && !(measurements.itemCount && measurements.itemCount > 0) && (
             <>
               <PropertyRow
                 label="Width"
