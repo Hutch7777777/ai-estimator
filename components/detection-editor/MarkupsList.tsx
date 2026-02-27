@@ -46,8 +46,22 @@ interface GroupedDetections {
   assignedCount: number;
 }
 
-type SortField = 'index' | 'class' | 'source' | 'page' | 'value' | 'material';
+type SortField = 'index' | 'class' | 'source' | 'page' | 'value' | 'material' | 'status';
 type SortDirection = 'asc' | 'desc';
+
+const STATUS_LABELS: Record<string, string> = {
+  auto: 'Auto',
+  verified: 'Verified',
+  edited: 'Edited',
+  deleted: 'Deleted',
+};
+
+const STATUS_COLORS: Record<string, string> = {
+  auto: 'text-gray-500 dark:text-gray-400',
+  verified: 'text-emerald-600 dark:text-emerald-400',
+  edited: 'text-amber-600 dark:text-amber-400',
+  deleted: 'text-red-500 dark:text-red-400',
+};
 
 // =============================================================================
 // Helper Functions
@@ -112,29 +126,29 @@ const MarkupRow = memo(function MarkupRow({
       ref={rowRef}
       onClick={onClick}
       className={`
-        h-8 cursor-pointer transition-colors text-xs
+        h-7 cursor-pointer transition-colors text-xs
         ${isSelected
-          ? 'bg-emerald-600/20 dark:bg-emerald-500/20'
+          ? 'bg-emerald-500/20'
           : hasNoMaterial
-            ? 'bg-amber-50/50 dark:bg-amber-900/10 hover:bg-amber-100/50 dark:hover:bg-amber-900/20'
-            : 'hover:bg-gray-100 dark:hover:bg-gray-800'
+            ? 'bg-amber-900/10 hover:bg-amber-900/20'
+            : 'hover:bg-gray-800'
         }
         ${detection.status === 'deleted' ? 'opacity-40 line-through' : ''}
       `}
     >
       {/* Index */}
-      <td className="px-2 py-1 text-gray-500 dark:text-gray-400 text-center w-10">
+      <td className="px-2 py-1 text-gray-500 text-center w-10">
         {index}
       </td>
 
       {/* Class with color dot */}
-      <td className="px-2 py-1 w-24">
+      <td className="px-2 py-1 w-28">
         <div className="flex items-center gap-1.5">
           <div
             className="w-2.5 h-2.5 rounded-full flex-shrink-0"
             style={{ backgroundColor: color }}
           />
-          <span className="truncate capitalize text-gray-700 dark:text-gray-300">
+          <span className="truncate capitalize text-gray-300">
             {getClassLabel(detection.class)}
           </span>
         </div>
@@ -142,30 +156,33 @@ const MarkupRow = memo(function MarkupRow({
 
       {/* Source (marker_label) */}
       <td
-        className="px-2 py-1 text-gray-600 dark:text-gray-400 max-w-[160px] truncate"
+        className="px-2 py-1 text-gray-400 truncate"
         title={detection.marker_label || '—'}
       >
         {detection.marker_label || '—'}
       </td>
 
       {/* Page */}
-      <td className="px-2 py-1 text-center text-gray-500 dark:text-gray-400 w-12">
+      <td className="px-2 py-1 text-center text-gray-500 w-12">
         {pageNumber}
       </td>
 
       {/* Value */}
-      <td className="px-2 py-1 text-right font-mono text-gray-700 dark:text-gray-300 w-20">
+      <td className="px-2 py-1 text-right font-mono text-gray-300 w-20">
         {formatValue(detection)}
       </td>
 
       {/* Material */}
       <td
-        className={`px-2 py-1 max-w-[120px] truncate ${
-          hasNoMaterial ? 'text-amber-600 dark:text-amber-400' : 'text-gray-600 dark:text-gray-400'
-        }`}
+        className={`px-2 py-1 truncate ${hasNoMaterial ? 'text-amber-400' : 'text-gray-400'}`}
         title={detection.assigned_material_id ? 'Assigned' : 'Unassigned'}
       >
         {detection.assigned_material_id ? 'Assigned' : '—'}
+      </td>
+
+      {/* Status */}
+      <td className={`px-2 py-1 w-16 ${STATUS_COLORS[detection.status] || 'text-gray-500'}`}>
+        {STATUS_LABELS[detection.status] || detection.status}
       </td>
     </tr>
   );
@@ -188,9 +205,9 @@ const GroupHeader = memo(function GroupHeader({
   return (
     <tr
       onClick={onToggle}
-      className="h-9 bg-gray-100 dark:bg-gray-800 cursor-pointer hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors"
+      className="h-8 bg-gray-800 cursor-pointer hover:bg-gray-700 transition-colors"
     >
-      <td colSpan={6} className="px-2 py-1">
+      <td colSpan={7} className="px-2 py-1">
         <div className="flex items-center gap-2">
           {isExpanded ? (
             <ChevronDown className="w-4 h-4 text-gray-500" />
@@ -201,21 +218,21 @@ const GroupHeader = memo(function GroupHeader({
             className="w-3 h-3 rounded-full"
             style={{ backgroundColor: color }}
           />
-          <span className="font-medium text-sm text-gray-800 dark:text-gray-200 capitalize">
+          <span className="font-medium text-sm text-gray-200 capitalize">
             {getClassLabel(group.class)}
           </span>
-          <span className="text-xs text-gray-500 dark:text-gray-400">
+          <span className="text-xs text-gray-400">
             ({group.detections.length})
           </span>
           {total && (
             <>
-              <span className="text-gray-400 dark:text-gray-500">—</span>
-              <span className="text-xs font-mono text-gray-600 dark:text-gray-300">
+              <span className="text-gray-500">—</span>
+              <span className="text-xs font-mono text-gray-300">
                 {total}
               </span>
             </>
           )}
-          <span className="ml-auto text-xs text-gray-500 dark:text-gray-400">
+          <span className="ml-auto text-xs text-gray-400">
             {group.assignedCount}/{group.detections.length} assigned
           </span>
         </div>
@@ -336,6 +353,9 @@ const MarkupsList = memo(function MarkupsList({
           case 'material':
             comparison = (a.assigned_material_id ? 1 : 0) - (b.assigned_material_id ? 1 : 0);
             break;
+          case 'status':
+            comparison = (a.status || '').localeCompare(b.status || '');
+            break;
           default:
             comparison = 0;
         }
@@ -439,28 +459,18 @@ const MarkupsList = memo(function MarkupsList({
   return (
     <div className="h-full flex flex-col">
       {/* Header with stats */}
-      <div className="px-3 py-2 border-b border-gray-200 dark:border-gray-700 space-y-2">
-        {/* Stats row */}
-        <div className="flex items-center justify-between text-xs">
-          <span className="text-gray-600 dark:text-gray-400">
-            {totalDetections} markups
-          </span>
-          <span className={assignedCount === totalDetections ? 'text-emerald-600 dark:text-emerald-400' : 'text-amber-600 dark:text-amber-400'}>
-            {assignedCount}/{totalDetections} assigned
-          </span>
-        </div>
-
+      <div className="px-3 py-2 border-b border-gray-700 bg-gray-900">
         {/* Search and filter row */}
-        <div className="flex gap-2">
+        <div className="flex gap-2 items-center">
           {/* Search */}
-          <div className="relative flex-1">
+          <div className="relative flex-1 max-w-xs">
             <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
             <input
               type="text"
               placeholder="Search..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full h-7 pl-7 pr-2 text-xs bg-gray-100 dark:bg-gray-800 border-0 rounded focus:ring-1 focus:ring-blue-500 text-gray-900 dark:text-gray-100 placeholder-gray-400"
+              className="w-full h-7 pl-7 pr-2 text-xs bg-gray-800 border border-gray-700 rounded focus:ring-1 focus:ring-blue-500 focus:border-blue-500 text-gray-100 placeholder-gray-500"
             />
           </div>
 
@@ -468,7 +478,7 @@ const MarkupsList = memo(function MarkupsList({
           <select
             value={classFilter}
             onChange={(e) => setClassFilter(e.target.value as DetectionClass | 'all')}
-            className="h-7 text-xs bg-gray-100 dark:bg-gray-800 border-0 rounded px-2 text-gray-700 dark:text-gray-300 focus:ring-1 focus:ring-blue-500"
+            className="h-7 text-xs bg-gray-800 border border-gray-700 rounded px-2 text-gray-300 focus:ring-1 focus:ring-blue-500"
           >
             <option value="all">All Classes</option>
             {availableClasses.map(cls => (
@@ -482,7 +492,7 @@ const MarkupsList = memo(function MarkupsList({
           <button
             type="button"
             onClick={toggleAllGroups}
-            className="h-7 px-2 text-xs bg-gray-100 dark:bg-gray-800 rounded hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-600 dark:text-gray-400 transition-colors"
+            className="h-7 px-2 text-xs bg-gray-800 border border-gray-700 rounded hover:bg-gray-700 text-gray-400 transition-colors"
             title={allExpanded ? 'Collapse all' : 'Expand all'}
           >
             {allExpanded ? (
@@ -491,14 +501,24 @@ const MarkupsList = memo(function MarkupsList({
               <ChevronRight className="w-4 h-4" />
             )}
           </button>
+
+          {/* Stats */}
+          <div className="flex items-center gap-3 ml-auto text-xs">
+            <span className="text-gray-400">
+              {totalDetections} markups
+            </span>
+            <span className={assignedCount === totalDetections ? 'text-emerald-400' : 'text-amber-400'}>
+              {assignedCount}/{totalDetections} assigned
+            </span>
+          </div>
         </div>
       </div>
 
       {/* Table */}
-      <div ref={containerRef} className="flex-1 overflow-y-auto">
+      <div ref={containerRef} className="flex-1 overflow-y-auto bg-gray-900">
         <table className="w-full text-xs">
-          <thead className="sticky top-0 bg-gray-50 dark:bg-gray-900 z-10">
-            <tr className="border-b border-gray-200 dark:border-gray-700">
+          <thead className="sticky top-0 bg-gray-900 z-10">
+            <tr className="border-b border-gray-700">
               <th
                 className="px-2 py-2 text-center font-medium text-gray-500 dark:text-gray-400 cursor-pointer hover:text-gray-700 dark:hover:text-gray-200 w-10"
                 onClick={() => handleSort('index')}
@@ -553,9 +573,18 @@ const MarkupsList = memo(function MarkupsList({
                   <SortIcon field="material" />
                 </div>
               </th>
+              <th
+                className="px-2 py-2 text-left font-medium text-gray-500 dark:text-gray-400 cursor-pointer hover:text-gray-700 dark:hover:text-gray-200 w-16"
+                onClick={() => handleSort('status')}
+              >
+                <div className="flex items-center gap-1">
+                  Status
+                  <SortIcon field="status" />
+                </div>
+              </th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
+          <tbody className="divide-y divide-gray-800">
             {groupedDetections.map(group => {
               const isExpanded = expandedGroups.has(group.class);
               return (
@@ -588,14 +617,14 @@ const MarkupsList = memo(function MarkupsList({
 
         {/* Empty state */}
         {filteredDetections.length === 0 && (
-          <div className="flex flex-col items-center justify-center py-12 text-gray-500 dark:text-gray-400">
+          <div className="flex flex-col items-center justify-center py-12 text-gray-400">
             <Search className="w-8 h-8 mb-2 opacity-50" />
             <p className="text-sm">No markups found</p>
             {searchQuery && (
               <button
                 type="button"
                 onClick={() => setSearchQuery('')}
-                className="mt-2 text-xs text-blue-500 hover:text-blue-600"
+                className="mt-2 text-xs text-blue-400 hover:text-blue-300"
               >
                 Clear search
               </button>

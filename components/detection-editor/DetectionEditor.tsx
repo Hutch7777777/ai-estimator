@@ -54,6 +54,7 @@ import MarkupToolbar from './MarkupToolbar';
 import KonvaDetectionCanvas, { type CalibrationData } from './KonvaDetectionCanvas';
 import type { PolygonUpdatePayload } from './KonvaDetectionPolygon';
 import DetectionSidebar from './DetectionSidebar';
+import MarkupsListPanel from './MarkupsListPanel';
 import CalibrationModal from './CalibrationModal';
 import DetectionContextMenu, { type ContextMenuPosition } from './DetectionContextMenu';
 import ConfidenceFilter from './ConfidenceFilter';
@@ -326,6 +327,9 @@ export default function DetectionEditor({
 
   // Sidebar collapsed state
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+
+  // Markups panel (bottom) collapsed state
+  const [isMarkupsPanelCollapsed, setIsMarkupsPanelCollapsed] = useState(false);
 
   // ============================================================================
   // Local UI State
@@ -2074,6 +2078,13 @@ export default function DetectionEditor({
       if (key === '0') {
         e.preventDefault();
         handleZoomReset();
+        return;
+      }
+
+      // M - Toggle Markups List panel
+      if (key === 'm') {
+        e.preventDefault();
+        setIsMarkupsPanelCollapsed(prev => !prev);
         return;
       }
     };
@@ -3825,7 +3836,10 @@ export default function DetectionEditor({
             onToggleUnassignedOnly={() => setShowUnassignedOnly(prev => !prev)}
           />
 
-          <div className="flex-1 flex overflow-hidden min-h-0">
+          {/* Main content area: canvas+sidebar on top, markups panel on bottom */}
+          <div className="flex-1 flex flex-col overflow-hidden min-h-0">
+            {/* Canvas and sidebar row */}
+            <div className="flex-1 flex overflow-hidden min-h-0">
             {/* Left Markup Toolbar */}
             <MarkupToolbar
               activeMode={toolMode}
@@ -4129,9 +4143,7 @@ export default function DetectionEditor({
                 currentPageId={currentPageId}
                 onPageSelect={setCurrentPageId}
                 detections={currentPageDetections}
-                allDetections={getAllDetections()}
                 selectedDetections={selectedDetections}
-                selectedIds={selectedIds}
                 onClassChange={handleClassChange}
                 onColorChange={handleColorChange}
                 onStatusChange={handleStatusChange}
@@ -4148,9 +4160,20 @@ export default function DetectionEditor({
                 jobTotals={jobTotals}
                 isCollapsed={isSidebarCollapsed}
                 onCollapsedChange={setIsSidebarCollapsed}
-                onMarkupSelect={handleMarkupSelect}
               />
             </div>
+            </div>
+
+            {/* Bottom Markups List Panel */}
+            <MarkupsListPanel
+              allDetections={getAllDetections()}
+              pages={pages}
+              selectedIds={selectedIds}
+              onDetectionSelect={handleMarkupSelect}
+              currentPageId={currentPageId}
+              isCollapsed={isMarkupsPanelCollapsed}
+              onCollapsedChange={setIsMarkupsPanelCollapsed}
+            />
           </div>
         </>
       )}

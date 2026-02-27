@@ -7,7 +7,6 @@ import {
   SlidersHorizontal,
   RotateCcw,
   Trash2,
-  List,
   ChevronLeft,
   ChevronRight,
 } from 'lucide-react';
@@ -28,7 +27,6 @@ import NotesField from './PropertiesPanel/NotesField';
 import { getDetectionColor } from '@/lib/types/extraction';
 import { getMaterialById, type MaterialItem } from '@/lib/hooks/useMaterialSearch';
 import { Badge } from '@/components/ui/badge';
-import MarkupsList from './MarkupsList';
 
 // =============================================================================
 // Types
@@ -39,12 +37,8 @@ export interface DetectionSidebarProps {
   currentPageId: string | null;
   onPageSelect: (pageId: string) => void;
   detections: ExtractionDetection[];
-  // All detections across all pages (for Markups List tab)
-  allDetections: ExtractionDetection[];
   // Selection properties (for Properties tab)
   selectedDetections: ExtractionDetection[];
-  // Selected detection IDs (for Markups List highlighting)
-  selectedIds: Set<string>;
   onClassChange: (detectionIds: string[], newClass: DetectionClass) => void;
   onColorChange?: (detectionIds: string[], color: string | null) => void;
   onStatusChange: (detectionIds: string[], newStatus: DetectionStatus) => void;
@@ -68,11 +62,9 @@ export interface DetectionSidebarProps {
   // Collapsible state
   isCollapsed?: boolean;
   onCollapsedChange?: (collapsed: boolean) => void;
-  // Detection selection from Markups List
-  onMarkupSelect?: (detectionId: string, pageId: string) => void;
 }
 
-type TabType = 'pages' | 'properties' | 'totals' | 'markups';
+type TabType = 'pages' | 'properties' | 'totals';
 
 // =============================================================================
 // Constants
@@ -82,7 +74,6 @@ const TABS: { id: TabType; icon: typeof FileImage; label: string }[] = [
   { id: 'pages', icon: FileImage, label: 'Pages' },
   { id: 'properties', icon: SlidersHorizontal, label: 'Properties' },
   { id: 'totals', icon: Calculator, label: 'Totals' },
-  { id: 'markups', icon: List, label: 'Markups List' },
 ];
 
 
@@ -214,9 +205,7 @@ const DetectionSidebar = memo(function DetectionSidebar({
   currentPageId,
   onPageSelect,
   detections,
-  allDetections,
   selectedDetections,
-  selectedIds,
   onClassChange,
   onColorChange,
   onStatusChange,
@@ -233,7 +222,6 @@ const DetectionSidebar = memo(function DetectionSidebar({
   jobTotals,
   isCollapsed = false,
   onCollapsedChange,
-  onMarkupSelect,
 }: DetectionSidebarProps) {
   // Default to 'pages' tab for quick page navigation
   const [activeTab, setActiveTab] = useState<TabType>('pages');
@@ -294,16 +282,6 @@ const DetectionSidebar = memo(function DetectionSidebar({
     }
     return counts;
   }, [detections]);
-
-  // Handler for markup selection from list
-  const handleMarkupSelect = (detectionId: string, pageId: string) => {
-    // Navigate to the page first
-    if (pageId !== currentPageId) {
-      onPageSelect(pageId);
-    }
-    // Then select the detection
-    onMarkupSelect?.(detectionId, pageId);
-  };
 
   // Collapsed state - show only toggle button
   if (collapsed) {
@@ -998,16 +976,6 @@ const DetectionSidebar = memo(function DetectionSidebar({
           </div>
         )}
 
-        {/* Markups List Tab */}
-        {activeTab === 'markups' && (
-          <MarkupsList
-            allDetections={allDetections}
-            pages={pages}
-            selectedIds={selectedIds}
-            onDetectionSelect={handleMarkupSelect}
-            currentPageId={currentPageId}
-          />
-        )}
       </div>
     </div>
   );
