@@ -1552,9 +1552,10 @@ export default function DetectionEditor({
     [currentPageDetections, updateDetectionLocally]
   );
 
-  // Handle material assignment from Properties panel
+  // Handle material assignment from Properties panel or MarkupsList panel
   // Saves directly to Supabase and updates local state
   // Auto-verifies detection when a material is assigned
+  // Works across all pages (for bulk operations from MarkupsList)
   const handleMaterialAssign = useCallback(
     async (detectionIds: string[], materialId: string | null) => {
       console.log('[DetectionEditor] handleMaterialAssign called:', { detectionIds, materialId });
@@ -1564,9 +1565,15 @@ export default function DetectionEditor({
         return;
       }
 
+      // Get all detections for cross-page support
+      const allDetections = getAllDetections();
+      const detectionsMap = new Map(allDetections.map(d => [d.id, d]));
+
       // Update local state immediately for optimistic UI
+      let updatedCount = 0;
       detectionIds.forEach((id) => {
-        const detection = currentPageDetections.find((d) => d.id === id);
+        // First try current page, then fall back to all detections
+        const detection = currentPageDetections.find((d) => d.id === id) || detectionsMap.get(id);
         console.log('[DetectionEditor] Found detection:', detection?.id, 'current assigned_material_id:', detection?.assigned_material_id);
 
         if (detection) {
@@ -1585,6 +1592,7 @@ export default function DetectionEditor({
             status: updatedDetection.status
           });
           updateDetectionLocally(updatedDetection);
+          updatedCount++;
         }
       });
 
@@ -1631,10 +1639,73 @@ export default function DetectionEditor({
       }
 
       console.log(
-        `[DetectionEditor] Assigned material '${materialId}' to ${detectionIds.length} detection(s)`
+        `[DetectionEditor] Assigned material '${materialId}' to ${updatedCount} detection(s)`
       );
+
+      // Show toast for bulk operations (more than 1 item)
+      if (updatedCount > 1 && materialId) {
+        toast.success(`Assigned material to ${updatedCount} items`);
+      }
     },
-    [currentPageDetections, updateDetectionLocally]
+    [currentPageDetections, getAllDetections, updateDetectionLocally]
+  );
+
+  // Handle bulk class change from MarkupsList panel
+  // Works across all pages, unlike handleClassChange which is current-page only
+  const handleBulkClassChange = useCallback(
+    (detectionIds: string[], newClass: DetectionClass) => {
+      if (detectionIds.length === 0) return;
+
+      const allDetections = getAllDetections();
+      const detectionsMap = new Map(allDetections.map(d => [d.id, d]));
+
+      let updatedCount = 0;
+      detectionIds.forEach((id) => {
+        const detection = detectionsMap.get(id);
+        if (detection) {
+          // Apply optimistic update with new class
+          const optimistic = createOptimisticReclassify(detection, newClass);
+          updateDetectionLocally(optimistic);
+          updatedCount++;
+        }
+      });
+
+      console.log(
+        `[DetectionEditor] Bulk changed class to '${newClass}' for ${updatedCount} detection(s)`
+      );
+      toast.success(`Changed class to "${newClass}" for ${updatedCount} item${updatedCount !== 1 ? 's' : ''}`);
+    },
+    [getAllDetections, updateDetectionLocally]
+  );
+
+  // Handle bulk delete from MarkupsList panel
+  // Works across all pages
+  const handleBulkDelete = useCallback(
+    (detectionIds: string[]) => {
+      if (detectionIds.length === 0) return;
+
+      const allDetections = getAllDetections();
+      const detectionsMap = new Map(allDetections.map(d => [d.id, d]));
+
+      let deletedCount = 0;
+      detectionIds.forEach((id) => {
+        const detection = detectionsMap.get(id);
+        if (detection) {
+          updateDetectionLocally({
+            ...detection,
+            status: 'deleted' as const,
+            edited_at: new Date().toISOString(),
+          });
+          deletedCount++;
+        }
+      });
+
+      console.log(
+        `[DetectionEditor] Bulk deleted ${deletedCount} detection(s)`
+      );
+      toast.success(`Deleted ${deletedCount} item${deletedCount !== 1 ? 's' : ''}`);
+    },
+    [getAllDetections, updateDetectionLocally]
   );
 
   // Handle notes change from Properties panel
@@ -4173,6 +4244,9 @@ export default function DetectionEditor({
               currentPageId={currentPageId}
               isCollapsed={isMarkupsPanelCollapsed}
               onCollapsedChange={setIsMarkupsPanelCollapsed}
+              onBulkMaterialAssign={handleMaterialAssign}
+              onBulkClassChange={handleBulkClassChange}
+              onBulkDelete={handleBulkDelete}
             />
           </div>
         </>

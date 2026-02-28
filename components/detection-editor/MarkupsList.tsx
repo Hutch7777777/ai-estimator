@@ -9,6 +9,11 @@ import {
   ArrowUp,
   ArrowDown,
   GripVertical,
+  Check,
+  Minus,
+  X,
+  Trash2,
+  Package,
 } from 'lucide-react';
 import type {
   ExtractionDetection,
@@ -30,12 +35,24 @@ export interface MarkupsListProps {
   allDetections: ExtractionDetection[];
   /** All pages for page number lookup */
   pages: ExtractionPage[];
-  /** Currently selected detection IDs */
+  /** Currently selected detection IDs (canvas selection) */
   selectedIds: Set<string>;
   /** Callback when a detection is clicked */
   onDetectionSelect: (detectionId: string, pageId: string) => void;
   /** Current page ID for highlighting */
   currentPageId: string | null;
+  /** Checked detection IDs (bulk selection) */
+  checkedIds: Set<string>;
+  /** Callback when checkbox state changes */
+  onCheckChange: (detectionId: string, checked: boolean) => void;
+  /** Callback to check multiple detections */
+  onCheckMultiple: (detectionIds: string[], checked: boolean) => void;
+  /** Callback for bulk material assignment */
+  onBulkMaterialAssign?: (detectionIds: string[], materialId: string | null) => void;
+  /** Callback for bulk class change */
+  onBulkClassChange?: (detectionIds: string[], newClass: DetectionClass) => void;
+  /** Callback for bulk delete */
+  onBulkDelete?: (detectionIds: string[]) => void;
 }
 
 interface GroupedDetections {
@@ -193,7 +210,9 @@ interface MarkupRowProps {
   index: number;
   pageNumber: number;
   isSelected: boolean;
+  isChecked: boolean;
   onClick: () => void;
+  onCheckChange: (checked: boolean) => void;
   rowRef?: React.RefObject<HTMLTableRowElement | null>;
   columnOrder: ColumnId[];
   columnWidths: Record<ColumnId, number>;
@@ -204,13 +223,21 @@ const MarkupRow = memo(function MarkupRow({
   index,
   pageNumber,
   isSelected,
+  isChecked,
   onClick,
+  onCheckChange,
   rowRef,
   columnOrder,
   columnWidths,
 }: MarkupRowProps) {
   const hasNoMaterial = !detection.assigned_material_id && detection.status !== 'deleted';
   const color = detection.color_override || getDetectionColor(detection.class);
+
+  // Handle checkbox click - don't propagate to row click
+  const handleCheckboxClick = useCallback((e: React.MouseEvent) => {
+    e.stopPropagation();
+    onCheckChange(!isChecked);
+  }, [isChecked, onCheckChange]);
 
   // Render cell content based on column ID
   const renderCell = (colId: ColumnId) => {
@@ -288,13 +315,29 @@ const MarkupRow = memo(function MarkupRow({
         h-7 cursor-pointer transition-colors text-xs
         ${isSelected
           ? 'bg-emerald-500/20'
-          : hasNoMaterial
-            ? 'bg-amber-900/10 hover:bg-amber-900/20'
-            : 'hover:bg-gray-800'
+          : isChecked
+            ? 'bg-blue-500/15'
+            : hasNoMaterial
+              ? 'bg-amber-900/10 hover:bg-amber-900/20'
+              : 'hover:bg-gray-800'
         }
         ${detection.status === 'deleted' ? 'opacity-40 line-through' : ''}
       `}
     >
+      {/* Checkbox cell */}
+      <td className="px-2 py-1 w-8" onClick={handleCheckboxClick}>
+        <div
+          className={`
+            w-4 h-4 rounded border flex items-center justify-center cursor-pointer transition-colors
+            ${isChecked
+              ? 'bg-blue-500 border-blue-500'
+              : 'border-gray-500 hover:border-gray-400'
+            }
+          `}
+        >
+          {isChecked && <Check className="w-3 h-3 text-white" />}
+        </div>
+      </td>
       {columnOrder.map(colId => renderCell(colId))}
     </tr>
   );
@@ -305,6 +348,9 @@ interface GroupHeaderProps {
   isExpanded: boolean;
   onToggle: () => void;
   columnCount: number;
+  checkedCount: number;
+  onCheckAll: (checked: boolean) => void;
+  onSelectUnassigned: () => void;
 }
 
 const GroupHeader = memo(function GroupHeader({
@@ -312,17 +358,53 @@ const GroupHeader = memo(function GroupHeader({
   isExpanded,
   onToggle,
   columnCount,
+  checkedCount,
+  onCheckAll,
+  onSelectUnassigned,
 }: GroupHeaderProps) {
   const color = getDetectionColor(group.class);
   const total = formatGroupTotal(group);
+  const allChecked = checkedCount === group.detections.length && checkedCount > 0;
+  const someChecked = checkedCount > 0 && checkedCount < group.detections.length;
+  const unassignedCount = group.detections.length - group.assignedCount;
+
+  const handleCheckboxClick = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    onCheckAll(!allChecked);
+  };
+
+  const handleSelectUnassigned = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    onSelectUnassigned();
+  };
 
   return (
     <tr
       onClick={onToggle}
       className="h-8 bg-gray-800 cursor-pointer hover:bg-gray-700 transition-colors"
     >
-      <td colSpan={columnCount} className="px-2 py-1">
+      {/* Checkbox cell - +1 for the checkbox column */}
+      <td colSpan={columnCount + 1} className="px-2 py-1">
         <div className="flex items-center gap-2">
+          {/* Group checkbox */}
+          <div
+            onClick={handleCheckboxClick}
+            className={`
+              w-4 h-4 rounded border flex items-center justify-center cursor-pointer transition-colors flex-shrink-0
+              ${allChecked
+                ? 'bg-blue-500 border-blue-500'
+                : someChecked
+                  ? 'bg-blue-500/50 border-blue-500'
+                  : 'border-gray-500 hover:border-gray-400'
+              }
+            `}
+          >
+            {allChecked ? (
+              <Check className="w-3 h-3 text-white" />
+            ) : someChecked ? (
+              <Minus className="w-3 h-3 text-white" />
+            ) : null}
+          </div>
           {isExpanded ? (
             <ChevronDown className="w-4 h-4 text-gray-500" />
           ) : (
@@ -346,12 +428,150 @@ const GroupHeader = memo(function GroupHeader({
               </span>
             </>
           )}
-          <span className="ml-auto text-xs text-gray-400">
-            {group.assignedCount}/{group.detections.length} assigned
-          </span>
+          <div className="ml-auto flex items-center gap-3">
+            {/* Select unassigned link */}
+            {unassignedCount > 0 && (
+              <button
+                type="button"
+                onClick={handleSelectUnassigned}
+                className="text-xs text-blue-400 hover:text-blue-300 hover:underline"
+              >
+                Select {unassignedCount} unassigned
+              </button>
+            )}
+            <span className="text-xs text-gray-400">
+              {group.assignedCount}/{group.detections.length} assigned
+            </span>
+          </div>
         </div>
       </td>
     </tr>
+  );
+});
+
+// =============================================================================
+// Main Component
+// =============================================================================
+
+// =============================================================================
+// Selection Action Bar Component
+// =============================================================================
+
+interface SelectionActionBarProps {
+  checkedCount: number;
+  onClearSelection: () => void;
+  onAssignMaterial: () => void;
+  onChangeClass: (newClass: DetectionClass) => void;
+  onDelete: () => void;
+  availableClasses: DetectionClass[];
+}
+
+const SelectionActionBar = memo(function SelectionActionBar({
+  checkedCount,
+  onClearSelection,
+  onAssignMaterial,
+  onChangeClass,
+  onDelete,
+  availableClasses,
+}: SelectionActionBarProps) {
+  const [showClassDropdown, setShowClassDropdown] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+
+  const handleClassSelect = (cls: DetectionClass) => {
+    onChangeClass(cls);
+    setShowClassDropdown(false);
+  };
+
+  const handleDelete = () => {
+    if (showDeleteConfirm) {
+      onDelete();
+      setShowDeleteConfirm(false);
+    } else {
+      setShowDeleteConfirm(true);
+      // Auto-reset after 3 seconds
+      setTimeout(() => setShowDeleteConfirm(false), 3000);
+    }
+  };
+
+  return (
+    <div className="flex items-center gap-2 px-3 py-2 bg-blue-900/30 border-b border-blue-700">
+      {/* Selection count */}
+      <span className="text-sm font-medium text-blue-300">
+        {checkedCount} item{checkedCount !== 1 ? 's' : ''} selected
+      </span>
+
+      <div className="flex-1" />
+
+      {/* Assign Material button */}
+      <button
+        type="button"
+        onClick={onAssignMaterial}
+        className="h-7 px-3 text-xs font-medium bg-emerald-600 hover:bg-emerald-500 text-white rounded transition-colors flex items-center gap-1.5"
+      >
+        <Package className="w-3.5 h-3.5" />
+        Assign Material
+      </button>
+
+      {/* Change Class dropdown */}
+      <div className="relative">
+        <button
+          type="button"
+          onClick={() => setShowClassDropdown(!showClassDropdown)}
+          className="h-7 px-3 text-xs font-medium bg-gray-700 hover:bg-gray-600 text-gray-200 rounded transition-colors flex items-center gap-1.5"
+        >
+          Change Class
+          <ChevronDown className="w-3.5 h-3.5" />
+        </button>
+        {showClassDropdown && (
+          <>
+            <div
+              className="fixed inset-0 z-40"
+              onClick={() => setShowClassDropdown(false)}
+            />
+            <div className="absolute top-full left-0 mt-1 w-48 max-h-64 overflow-y-auto bg-gray-800 border border-gray-700 rounded-md shadow-lg z-50">
+              {availableClasses.map(cls => (
+                <button
+                  key={cls}
+                  type="button"
+                  onClick={() => handleClassSelect(cls)}
+                  className="w-full text-left px-3 py-1.5 text-xs text-gray-300 hover:bg-gray-700 capitalize flex items-center gap-2"
+                >
+                  <div
+                    className="w-2.5 h-2.5 rounded-full"
+                    style={{ backgroundColor: getDetectionColor(cls) }}
+                  />
+                  {getClassLabel(cls)}
+                </button>
+              ))}
+            </div>
+          </>
+        )}
+      </div>
+
+      {/* Clear Selection button */}
+      <button
+        type="button"
+        onClick={onClearSelection}
+        className="h-7 px-3 text-xs font-medium bg-gray-700 hover:bg-gray-600 text-gray-300 rounded transition-colors flex items-center gap-1.5"
+      >
+        <X className="w-3.5 h-3.5" />
+        Clear
+      </button>
+
+      {/* Delete button */}
+      <button
+        type="button"
+        onClick={handleDelete}
+        className={`h-7 px-3 text-xs font-medium rounded transition-colors flex items-center gap-1.5 ${
+          showDeleteConfirm
+            ? 'bg-red-600 hover:bg-red-500 text-white'
+            : 'bg-gray-700 hover:bg-red-600/80 text-gray-300 hover:text-white'
+        }`}
+      >
+        <Trash2 className="w-3.5 h-3.5" />
+        {showDeleteConfirm ? 'Confirm Delete' : 'Delete'}
+      </button>
+    </div>
   );
 });
 
@@ -365,6 +585,12 @@ const MarkupsList = memo(function MarkupsList({
   selectedIds,
   onDetectionSelect,
   currentPageId,
+  checkedIds,
+  onCheckChange,
+  onCheckMultiple,
+  onBulkMaterialAssign,
+  onBulkClassChange,
+  onBulkDelete,
 }: MarkupsListProps) {
   // State
   const [searchQuery, setSearchQuery] = useState('');
@@ -658,6 +884,7 @@ const MarkupsList = memo(function MarkupsList({
   // Stats
   const totalDetections = filteredDetections.length;
   const assignedCount = filteredDetections.filter(d => d.assigned_material_id).length;
+  const checkedCount = checkedIds.size;
 
   // Get unique classes for filter dropdown
   const availableClasses = useMemo(() => {
@@ -671,6 +898,72 @@ const MarkupsList = memo(function MarkupsList({
       getClassLabel(a).localeCompare(getClassLabel(b))
     );
   }, [allDetections]);
+
+  // Compute checked counts per group
+  const groupCheckedCounts = useMemo(() => {
+    const counts = new Map<DetectionClass, number>();
+    for (const group of groupedDetections) {
+      let count = 0;
+      for (const d of group.detections) {
+        if (checkedIds.has(d.id)) {
+          count++;
+        }
+      }
+      counts.set(group.class, count);
+    }
+    return counts;
+  }, [groupedDetections, checkedIds]);
+
+  // Check if all visible detections are checked
+  const allVisibleChecked = useMemo(() => {
+    return filteredDetections.length > 0 && filteredDetections.every(d => checkedIds.has(d.id));
+  }, [filteredDetections, checkedIds]);
+
+  const someVisibleChecked = useMemo(() => {
+    return filteredDetections.some(d => checkedIds.has(d.id)) && !allVisibleChecked;
+  }, [filteredDetections, checkedIds, allVisibleChecked]);
+
+  // Selection action bar handlers
+  const handleSelectAllVisible = useCallback(() => {
+    const ids = filteredDetections.map(d => d.id);
+    onCheckMultiple(ids, !allVisibleChecked);
+  }, [filteredDetections, allVisibleChecked, onCheckMultiple]);
+
+  const handleClearSelection = useCallback(() => {
+    onCheckMultiple([...checkedIds], false);
+  }, [checkedIds, onCheckMultiple]);
+
+  const handleGroupCheckAll = useCallback((group: GroupedDetections, checked: boolean) => {
+    const ids = group.detections.map(d => d.id);
+    onCheckMultiple(ids, checked);
+  }, [onCheckMultiple]);
+
+  const handleGroupSelectUnassigned = useCallback((group: GroupedDetections) => {
+    const unassignedIds = group.detections
+      .filter(d => !d.assigned_material_id)
+      .map(d => d.id);
+    onCheckMultiple(unassignedIds, true);
+  }, [onCheckMultiple]);
+
+  // State for material picker popup
+  const [showMaterialPicker, setShowMaterialPicker] = useState(false);
+
+  const handleAssignMaterialClick = useCallback(() => {
+    setShowMaterialPicker(true);
+  }, []);
+
+  const handleBulkClassChange = useCallback((newClass: DetectionClass) => {
+    if (onBulkClassChange && checkedIds.size > 0) {
+      onBulkClassChange([...checkedIds], newClass);
+    }
+  }, [checkedIds, onBulkClassChange]);
+
+  const handleBulkDelete = useCallback(() => {
+    if (onBulkDelete && checkedIds.size > 0) {
+      onBulkDelete([...checkedIds]);
+      handleClearSelection();
+    }
+  }, [checkedIds, onBulkDelete, handleClearSelection]);
 
   // Render sort icon
   const SortIcon = ({ field }: { field: SortField }) => {
@@ -689,6 +982,18 @@ const MarkupsList = memo(function MarkupsList({
 
   return (
     <div className="h-full flex flex-col">
+      {/* Selection Action Bar - shown when items are checked */}
+      {checkedCount > 0 && (
+        <SelectionActionBar
+          checkedCount={checkedCount}
+          onClearSelection={handleClearSelection}
+          onAssignMaterial={handleAssignMaterialClick}
+          onChangeClass={handleBulkClassChange}
+          onDelete={handleBulkDelete}
+          availableClasses={USER_SELECTABLE_CLASSES}
+        />
+      )}
+
       {/* Header with stats */}
       <div className="px-3 py-2 border-b border-gray-700 bg-gray-900">
         {/* Search and filter row */}
@@ -750,6 +1055,28 @@ const MarkupsList = memo(function MarkupsList({
         <table ref={tableRef} className="w-full text-xs" style={{ tableLayout: 'fixed' }}>
           <thead className="sticky top-0 bg-gray-900 z-10">
             <tr className="border-b border-gray-700">
+              {/* Checkbox column header */}
+              <th className="px-2 py-2 w-8">
+                <div
+                  onClick={handleSelectAllVisible}
+                  className={`
+                    w-4 h-4 rounded border flex items-center justify-center cursor-pointer transition-colors mx-auto
+                    ${allVisibleChecked
+                      ? 'bg-blue-500 border-blue-500'
+                      : someVisibleChecked
+                        ? 'bg-blue-500/50 border-blue-500'
+                        : 'border-gray-500 hover:border-gray-400'
+                    }
+                  `}
+                  title={allVisibleChecked ? 'Deselect all' : 'Select all visible'}
+                >
+                  {allVisibleChecked ? (
+                    <Check className="w-3 h-3 text-white" />
+                  ) : someVisibleChecked ? (
+                    <Minus className="w-3 h-3 text-white" />
+                  ) : null}
+                </div>
+              </th>
               {columnOrder.map((colId, colIndex) => {
                 const config = COLUMN_CONFIGS[colId];
                 const width = columnWidths[colId];
@@ -803,6 +1130,7 @@ const MarkupsList = memo(function MarkupsList({
           <tbody className="divide-y divide-gray-800">
             {groupedDetections.map(group => {
               const isExpanded = expandedGroups.has(group.class);
+              const groupCheckedCount = groupCheckedCounts.get(group.class) || 0;
               return (
                 <React.Fragment key={group.class}>
                   <GroupHeader
@@ -810,10 +1138,14 @@ const MarkupsList = memo(function MarkupsList({
                     isExpanded={isExpanded}
                     onToggle={() => toggleGroup(group.class)}
                     columnCount={columnOrder.length}
+                    checkedCount={groupCheckedCount}
+                    onCheckAll={(checked) => handleGroupCheckAll(group, checked)}
+                    onSelectUnassigned={() => handleGroupSelectUnassigned(group)}
                   />
                   {isExpanded && group.detections.map(detection => {
                     globalIndex++;
                     const isSelected = selectedIds.has(detection.id);
+                    const isChecked = checkedIds.has(detection.id);
                     return (
                       <MarkupRow
                         key={detection.id}
@@ -821,7 +1153,9 @@ const MarkupsList = memo(function MarkupsList({
                         index={globalIndex}
                         pageNumber={pageNumberMap.get(detection.page_id) || 0}
                         isSelected={isSelected}
+                        isChecked={isChecked}
                         onClick={() => onDetectionSelect(detection.id, detection.page_id)}
+                        onCheckChange={(checked) => onCheckChange(detection.id, checked)}
                         rowRef={isSelected && selectedIds.size === 1 ? selectedRowRef : undefined}
                         columnOrder={columnOrder}
                         columnWidths={columnWidths}

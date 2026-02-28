@@ -2,8 +2,9 @@
 
 import React, { memo, useState, useCallback, useRef, useEffect } from 'react';
 import { ChevronUp, ChevronDown, List } from 'lucide-react';
-import type { ExtractionDetection, ExtractionPage } from '@/lib/types/extraction';
+import type { ExtractionDetection, ExtractionPage, DetectionClass } from '@/lib/types/extraction';
 import MarkupsList from './MarkupsList';
+import BulkMaterialPicker from './BulkMaterialPicker';
 
 // =============================================================================
 // Types
@@ -14,7 +15,7 @@ export interface MarkupsListPanelProps {
   allDetections: ExtractionDetection[];
   /** All pages for page number lookup */
   pages: ExtractionPage[];
-  /** Currently selected detection IDs */
+  /** Currently selected detection IDs (canvas selection) */
   selectedIds: Set<string>;
   /** Callback when a detection is clicked */
   onDetectionSelect: (detectionId: string, pageId: string) => void;
@@ -24,6 +25,12 @@ export interface MarkupsListPanelProps {
   isCollapsed?: boolean;
   /** Callback when collapsed state changes */
   onCollapsedChange?: (collapsed: boolean) => void;
+  /** Callback for bulk material assignment */
+  onBulkMaterialAssign?: (detectionIds: string[], materialId: string | null) => void;
+  /** Callback for bulk class change */
+  onBulkClassChange?: (detectionIds: string[], newClass: DetectionClass) => void;
+  /** Callback for bulk delete */
+  onBulkDelete?: (detectionIds: string[]) => void;
 }
 
 // =============================================================================
@@ -49,6 +56,9 @@ const MarkupsListPanel = memo(function MarkupsListPanel({
   currentPageId,
   isCollapsed: externalCollapsed,
   onCollapsedChange,
+  onBulkMaterialAssign,
+  onBulkClassChange,
+  onBulkDelete,
 }: MarkupsListPanelProps) {
   // Panel height state (persisted)
   const [panelHeight, setPanelHeight] = useState(() => {
@@ -58,6 +68,62 @@ const MarkupsListPanel = memo(function MarkupsListPanel({
     }
     return DEFAULT_HEIGHT;
   });
+
+  // Checked IDs state for bulk selection (separate from canvas selection)
+  const [checkedIds, setCheckedIds] = useState<Set<string>>(new Set());
+
+  // Material picker popup state
+  const [showMaterialPicker, setShowMaterialPicker] = useState(false);
+
+  // Handle individual checkbox change
+  const handleCheckChange = useCallback((detectionId: string, checked: boolean) => {
+    setCheckedIds(prev => {
+      const next = new Set(prev);
+      if (checked) {
+        next.add(detectionId);
+      } else {
+        next.delete(detectionId);
+      }
+      return next;
+    });
+  }, []);
+
+  // Handle multiple checkbox changes
+  const handleCheckMultiple = useCallback((detectionIds: string[], checked: boolean) => {
+    setCheckedIds(prev => {
+      const next = new Set(prev);
+      for (const id of detectionIds) {
+        if (checked) {
+          next.add(id);
+        } else {
+          next.delete(id);
+        }
+      }
+      return next;
+    });
+  }, []);
+
+  // Handle bulk material assignment trigger
+  const handleBulkMaterialAssign = useCallback(() => {
+    if (checkedIds.size > 0) {
+      setShowMaterialPicker(true);
+    }
+  }, [checkedIds]);
+
+  // Handle material selected from picker
+  const handleMaterialSelected = useCallback((materialId: string | null) => {
+    if (onBulkMaterialAssign && checkedIds.size > 0) {
+      onBulkMaterialAssign([...checkedIds], materialId);
+      // Clear selection after assignment
+      setCheckedIds(new Set());
+    }
+    setShowMaterialPicker(false);
+  }, [onBulkMaterialAssign, checkedIds]);
+
+  // Get selected detections for material picker
+  const checkedDetections = React.useMemo(() => {
+    return allDetections.filter(d => checkedIds.has(d.id));
+  }, [allDetections, checkedIds]);
 
   // Collapsed state (use external if provided, otherwise local)
   const [localCollapsed, setLocalCollapsed] = useState(() => {
@@ -201,8 +267,23 @@ const MarkupsListPanel = memo(function MarkupsListPanel({
             selectedIds={selectedIds}
             onDetectionSelect={onDetectionSelect}
             currentPageId={currentPageId}
+            checkedIds={checkedIds}
+            onCheckChange={handleCheckChange}
+            onCheckMultiple={handleCheckMultiple}
+            onBulkMaterialAssign={handleBulkMaterialAssign}
+            onBulkClassChange={onBulkClassChange}
+            onBulkDelete={onBulkDelete}
           />
         </div>
+      )}
+
+      {/* Bulk Material Picker Popup */}
+      {showMaterialPicker && (
+        <BulkMaterialPicker
+          selectedDetections={checkedDetections}
+          onMaterialSelect={handleMaterialSelected}
+          onClose={() => setShowMaterialPicker(false)}
+        />
       )}
     </div>
   );
