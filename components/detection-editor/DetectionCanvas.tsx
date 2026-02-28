@@ -8,8 +8,10 @@ import type {
   ViewTransform,
   ToolMode,
   ResizeHandle,
+  PolygonPoints,
+  SimplePolygonPoint,
 } from '@/lib/types/extraction';
-import { DETECTION_CLASS_COLORS } from '@/lib/types/extraction';
+import { DETECTION_CLASS_COLORS, isPolygonWithHoles } from '@/lib/types/extraction';
 import DetectionBox from './DetectionBox';
 import { getSidingPolygons, type SidingPolygonResponse } from '@/lib/api/extractionApi';
 
@@ -187,6 +189,62 @@ function formatDimension(feet: number): string {
   if (inches === 0) return `${wholeFeet}'`;
   if (inches === 12) return `${wholeFeet + 1}'`;
   return `${wholeFeet}'-${inches}"`;
+}
+
+/**
+ * Ray casting algorithm for point-in-polygon test
+ */
+function isPointInPolygon(px: number, py: number, polygon: SimplePolygonPoint[]): boolean {
+  let inside = false;
+  for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+    const xi = polygon[i].x, yi = polygon[i].y;
+    const xj = polygon[j].x, yj = polygon[j].y;
+    if ((yi > py) !== (yj > py) && px < (xj - xi) * (py - yi) / (yj - yi) + xi) {
+      inside = !inside;
+    }
+  }
+  return inside;
+}
+
+/**
+ * Check if point is inside a detection (supports both polygons and rectangles)
+ */
+function isPointInDetection(
+  px: number,
+  py: number,
+  detection: ExtractionDetection
+): boolean {
+  const { pixel_x, pixel_y, pixel_width, pixel_height, polygon_points } = detection;
+
+  // Check polygon if available
+  if (polygon_points) {
+    const points = isPolygonWithHoles(polygon_points) ? polygon_points.outer : polygon_points;
+    if (Array.isArray(points) && points.length >= 3) {
+      return isPointInPolygon(px, py, points);
+    }
+  }
+
+  // Fall back to bounding box check (center-based coordinates)
+  const x = pixel_x - pixel_width / 2;
+  const y = pixel_y - pixel_height / 2;
+  return px >= x && px <= x + pixel_width && py >= y && py <= y + pixel_height;
+}
+
+/**
+ * Convert polygon points to SVG points string
+ */
+function getPolygonPointsString(polygonPoints: PolygonPoints): string {
+  const points = isPolygonWithHoles(polygonPoints) ? polygonPoints.outer : polygonPoints;
+  return points.map((p: SimplePolygonPoint) => `${p.x},${p.y}`).join(' ');
+}
+
+/**
+ * Check if detection has valid polygon points
+ */
+function hasValidPolygon(polygonPoints: PolygonPoints | null | undefined): polygonPoints is PolygonPoints {
+  if (!polygonPoints) return false;
+  const points = isPolygonWithHoles(polygonPoints) ? polygonPoints.outer : polygonPoints;
+  return Array.isArray(points) && points.length >= 3;
 }
 
 // =============================================================================
@@ -528,13 +586,8 @@ const DetectionCanvas = memo(function DetectionCanvas({
         .reverse();
 
       for (const detection of sortedDetections) {
-        const { pixel_x, pixel_y, pixel_width, pixel_height } = detection;
-        if (
-          imageCoords.x >= pixel_x &&
-          imageCoords.x <= pixel_x + pixel_width &&
-          imageCoords.y >= pixel_y &&
-          imageCoords.y <= pixel_y + pixel_height
-        ) {
+        // Use point-in-polygon test for accurate hit detection
+        if (isPointInDetection(imageCoords.x, imageCoords.y, detection)) {
           onVerifyDetection(detection.id);
           break;
         }
@@ -792,44 +845,64 @@ const DetectionCanvas = memo(function DetectionCanvas({
           const x = detection.pixel_x - detection.pixel_width / 2;
           const y = detection.pixel_y - detection.pixel_height / 2;
 
-          // Determine if rect is large enough for SF label
+          // Check if we should render as polygon
+          const usePolygon = hasValidPolygon(detection.polygon_points);
+
+          // Determine if shape is large enough for SF label
           const showLabel = detection.pixel_width > 50 && detection.pixel_height > 30 && detection.area_sf;
 
           // Only roof needs pointer events for tooltip - openings have DetectionBox
           const hasPointerEvents = isRoof;
 
+          // Common event handlers
+          const mouseHandlers = hasPointerEvents ? {
+            onMouseEnter: (e: React.MouseEvent) => {
+              setHoveredOverlay({
+                detection,
+                mouseX: e.clientX,
+                mouseY: e.clientY,
+              });
+            },
+            onMouseMove: (e: React.MouseEvent) => {
+              if (hoveredOverlay?.detection.id === detection.id) {
+                setHoveredOverlay({
+                  detection,
+                  mouseX: e.clientX,
+                  mouseY: e.clientY,
+                });
+              }
+            },
+            onMouseLeave: () => {
+              setHoveredOverlay(null);
+            },
+          } : {};
+
           return (
             <g key={`overlay-${detection.id}`}>
-              <rect
-                x={x}
-                y={y}
-                width={detection.pixel_width}
-                height={detection.pixel_height}
-                fill={fillColor}
-                stroke={isHoveredOverlay ? 'white' : (isRoof ? 'rgba(220, 53, 69, 0.6)' : 'none')}
-                strokeWidth={isHoveredOverlay ? 3 / transform.scale : (isRoof ? 2 / transform.scale : 0)}
-                style={{ cursor: hasPointerEvents ? 'pointer' : 'default' }}
-                pointerEvents={hasPointerEvents ? 'auto' : 'none'}
-                onMouseEnter={hasPointerEvents ? (e) => {
-                  setHoveredOverlay({
-                    detection,
-                    mouseX: e.clientX,
-                    mouseY: e.clientY,
-                  });
-                } : undefined}
-                onMouseMove={hasPointerEvents ? (e) => {
-                  if (hoveredOverlay?.detection.id === detection.id) {
-                    setHoveredOverlay({
-                      detection,
-                      mouseX: e.clientX,
-                      mouseY: e.clientY,
-                    });
-                  }
-                } : undefined}
-                onMouseLeave={hasPointerEvents ? () => {
-                  setHoveredOverlay(null);
-                } : undefined}
-              />
+              {usePolygon ? (
+                <polygon
+                  points={getPolygonPointsString(detection.polygon_points!)}
+                  fill={fillColor}
+                  stroke={isHoveredOverlay ? 'white' : (isRoof ? 'rgba(220, 53, 69, 0.6)' : 'none')}
+                  strokeWidth={isHoveredOverlay ? 3 / transform.scale : (isRoof ? 2 / transform.scale : 0)}
+                  style={{ cursor: hasPointerEvents ? 'pointer' : 'default' }}
+                  pointerEvents={hasPointerEvents ? 'auto' : 'none'}
+                  {...mouseHandlers}
+                />
+              ) : (
+                <rect
+                  x={x}
+                  y={y}
+                  width={detection.pixel_width}
+                  height={detection.pixel_height}
+                  fill={fillColor}
+                  stroke={isHoveredOverlay ? 'white' : (isRoof ? 'rgba(220, 53, 69, 0.6)' : 'none')}
+                  strokeWidth={isHoveredOverlay ? 3 / transform.scale : (isRoof ? 2 / transform.scale : 0)}
+                  style={{ cursor: hasPointerEvents ? 'pointer' : 'default' }}
+                  pointerEvents={hasPointerEvents ? 'auto' : 'none'}
+                  {...mouseHandlers}
+                />
+              )}
               {/* Area label centered on rectangle - matches DetectionBox style */}
               {showLabel && detection.area_sf !== null && (
                 <text
@@ -892,13 +965,20 @@ const DetectionCanvas = memo(function DetectionCanvas({
                       />
                     </pattern>
                   </defs>
-                  <rect
-                    x={x}
-                    y={y}
-                    width={detection.pixel_width}
-                    height={detection.pixel_height}
-                    fill={`url(#crosshatch-${detection.id})`}
-                  />
+                  {usePolygon ? (
+                    <polygon
+                      points={getPolygonPointsString(detection.polygon_points!)}
+                      fill={`url(#crosshatch-${detection.id})`}
+                    />
+                  ) : (
+                    <rect
+                      x={x}
+                      y={y}
+                      width={detection.pixel_width}
+                      height={detection.pixel_height}
+                      fill={`url(#crosshatch-${detection.id})`}
+                    />
+                  )}
                 </>
               )}
             </g>

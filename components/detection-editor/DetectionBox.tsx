@@ -6,10 +6,13 @@ import type {
   ExtractionDetection,
   DetectionClass,
   ResizeHandle,
+  PolygonPoints,
+  SimplePolygonPoint,
 } from '@/lib/types/extraction';
 import {
   DETECTION_CLASS_COLORS,
   CONFIDENCE_THRESHOLDS,
+  isPolygonWithHoles,
 } from '@/lib/types/extraction';
 
 // =============================================================================
@@ -98,6 +101,23 @@ function formatClassName(detectionClass: DetectionClass): string {
     .join(' ');
 }
 
+/**
+ * Convert polygon points to SVG points string
+ */
+function getPolygonPointsString(polygonPoints: PolygonPoints): string {
+  const points = isPolygonWithHoles(polygonPoints) ? polygonPoints.outer : polygonPoints;
+  return points.map((p: SimplePolygonPoint) => `${p.x},${p.y}`).join(' ');
+}
+
+/**
+ * Check if polygon has enough points to render
+ */
+function hasValidPolygon(polygonPoints: PolygonPoints | null | undefined): polygonPoints is PolygonPoints {
+  if (!polygonPoints) return false;
+  const points = isPolygonWithHoles(polygonPoints) ? polygonPoints.outer : polygonPoints;
+  return Array.isArray(points) && points.length >= 3;
+}
+
 // =============================================================================
 // Component
 // =============================================================================
@@ -177,44 +197,74 @@ const DetectionBox = memo(function DetectionBox({
     onHoverEnd();
   }, [onHoverEnd]);
 
+  // Check if we should render as polygon
+  const usePolygon = hasValidPolygon(detection.polygon_points);
+
   // Don't render deleted detections (or render with low opacity)
   if (isDeleted) {
     return (
       <g opacity={0.3}>
-        <rect
-          x={x}
-          y={y}
-          width={pixel_width}
-          height={pixel_height}
-          fill={color}
-          fillOpacity={0.1}
-          stroke={color}
-          strokeWidth={strokeWidth}
-          strokeDasharray={`${4 / scale} ${2 / scale}`}
-        />
+        {usePolygon ? (
+          <polygon
+            points={getPolygonPointsString(detection.polygon_points!)}
+            fill={color}
+            fillOpacity={0.1}
+            stroke={color}
+            strokeWidth={strokeWidth}
+            strokeDasharray={`${4 / scale} ${2 / scale}`}
+          />
+        ) : (
+          <rect
+            x={x}
+            y={y}
+            width={pixel_width}
+            height={pixel_height}
+            fill={color}
+            fillOpacity={0.1}
+            stroke={color}
+            strokeWidth={strokeWidth}
+            strokeDasharray={`${4 / scale} ${2 / scale}`}
+          />
+        )}
       </g>
     );
   }
 
   return (
     <g>
-      {/* Main Rectangle */}
-      <rect
-        x={x}
-        y={y}
-        width={pixel_width}
-        height={pixel_height}
-        fill={color}
-        fillOpacity={isSelected ? 0.25 : 0.15}
-        stroke={color}
-        strokeWidth={strokeWidth}
-        strokeDasharray={isLowConfidence ? `${4 / scale} ${2 / scale}` : undefined}
-        cursor="move"
-        onClick={handleClick}
-        onMouseDown={handleMouseDown}
-        onMouseEnter={handleMouseEnter}
-        onMouseLeave={handleMouseLeave}
-      />
+      {/* Main Shape - Polygon or Rectangle */}
+      {usePolygon ? (
+        <polygon
+          points={getPolygonPointsString(detection.polygon_points!)}
+          fill={color}
+          fillOpacity={isSelected ? 0.25 : 0.15}
+          stroke={color}
+          strokeWidth={strokeWidth}
+          strokeDasharray={isLowConfidence ? `${4 / scale} ${2 / scale}` : undefined}
+          cursor="move"
+          onClick={handleClick}
+          onMouseDown={handleMouseDown}
+          onMouseEnter={handleMouseEnter}
+          onMouseLeave={handleMouseLeave}
+        />
+      ) : (
+        <rect
+          x={x}
+          y={y}
+          width={pixel_width}
+          height={pixel_height}
+          fill={color}
+          fillOpacity={isSelected ? 0.25 : 0.15}
+          stroke={color}
+          strokeWidth={strokeWidth}
+          strokeDasharray={isLowConfidence ? `${4 / scale} ${2 / scale}` : undefined}
+          cursor="move"
+          onClick={handleClick}
+          onMouseDown={handleMouseDown}
+          onMouseEnter={handleMouseEnter}
+          onMouseLeave={handleMouseLeave}
+        />
+      )}
 
       {/* Resize Handles (only when selected) */}
       {isSelected &&
