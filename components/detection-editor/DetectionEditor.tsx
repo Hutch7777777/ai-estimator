@@ -1747,6 +1747,49 @@ export default function DetectionEditor({
     [currentPageDetections, updateDetectionLocally]
   );
 
+  // Handle page classification change from right-click context menu
+  // Calls the backend API to update page_type and refreshes local state
+  const handlePageClassify = useCallback(
+    async (pageId: string, pageType: string) => {
+      console.log('[DetectionEditor] handlePageClassify called:', { pageId, pageType });
+
+      try {
+        // Call the backend API
+        const apiUrl = process.env.NEXT_PUBLIC_EXTRACTION_API_URL || 'http://localhost:5050';
+        const response = await fetch(`${apiUrl}/api/pages/${pageId}/classify`, {
+          method: 'PATCH',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ page_type: pageType }),
+        });
+
+        if (!response.ok) {
+          const errorData = await response.json();
+          throw new Error(errorData.error || 'Failed to update page classification');
+        }
+
+        const result = await response.json();
+        console.log('[DetectionEditor] Page classification updated:', result);
+
+        // Update local state - find and update the page
+        setPages((prevPages) =>
+          prevPages.map((p) =>
+            p.id === pageId
+              ? { ...p, page_type: pageType as ExtractionPage['page_type'] }
+              : p
+          )
+        );
+
+        toast.success(`Page classified as ${pageType.replace('_', ' ')}`);
+      } catch (error) {
+        console.error('[DetectionEditor] Failed to classify page:', error);
+        toast.error(error instanceof Error ? error.message : 'Failed to classify page');
+      }
+    },
+    []
+  );
+
   // Handle price override from Properties panel
   // Saves directly to Supabase and updates local state
   // Note: Price editing is only enabled for single detection selection in the UI
@@ -4264,6 +4307,7 @@ export default function DetectionEditor({
                 jobTotals={jobTotals}
                 isCollapsed={isSidebarCollapsed}
                 onCollapsedChange={setIsSidebarCollapsed}
+                onPageClassify={handlePageClassify}
               />
             </div>
             </div>

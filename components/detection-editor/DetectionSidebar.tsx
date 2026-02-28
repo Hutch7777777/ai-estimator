@@ -62,6 +62,8 @@ export interface DetectionSidebarProps {
   // Collapsible state
   isCollapsed?: boolean;
   onCollapsedChange?: (collapsed: boolean) => void;
+  /** Callback when page classification is changed via context menu */
+  onPageClassify?: (pageId: string, pageType: string) => void;
 }
 
 type TabType = 'pages' | 'properties' | 'totals';
@@ -142,6 +144,7 @@ interface PageThumbnailProps {
   isSelected: boolean;
   detectionCount: number;
   onClick: () => void;
+  onContextMenu: (e: React.MouseEvent) => void;
 }
 
 const PageThumbnail = memo(function PageThumbnail({
@@ -149,11 +152,13 @@ const PageThumbnail = memo(function PageThumbnail({
   isSelected,
   detectionCount,
   onClick,
+  onContextMenu,
 }: PageThumbnailProps) {
   return (
     <button
       type="button"
       onClick={onClick}
+      onContextMenu={onContextMenu}
       className={`
         relative w-full aspect-[4/3] rounded-lg overflow-hidden border-2 transition-all
         ${isSelected ? 'border-blue-500 ring-2 ring-blue-200' : 'border-gray-200 dark:border-gray-700'}
@@ -195,6 +200,88 @@ const PageThumbnail = memo(function PageThumbnail({
   );
 });
 
+// Page type options for context menu
+const PAGE_TYPE_OPTIONS = [
+  { value: 'elevation', label: 'Elevation', color: 'bg-green-600' },
+  { value: 'floor_plan', label: 'Floor Plan', color: 'bg-blue-600' },
+  { value: 'roof_plan', label: 'Roof Plan', color: 'bg-purple-600' },
+  { value: 'detail', label: 'Detail', color: 'bg-amber-600' },
+  { value: 'cover', label: 'Cover Sheet', color: 'bg-gray-600' },
+  { value: 'section', label: 'Section', color: 'bg-teal-600' },
+  { value: 'schedule', label: 'Schedule', color: 'bg-indigo-600' },
+  { value: 'notes', label: 'Notes', color: 'bg-pink-600' },
+] as const;
+
+interface PageTypeContextMenuProps {
+  page: ExtractionPage;
+  position: { x: number; y: number };
+  onSelect: (pageType: string) => void;
+  onClose: () => void;
+}
+
+const PageTypeContextMenu = memo(function PageTypeContextMenu({
+  page,
+  position,
+  onSelect,
+  onClose,
+}: PageTypeContextMenuProps) {
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  // Close on click outside or Escape
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        onClose();
+      }
+    };
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        onClose();
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    document.addEventListener('keydown', handleKeyDown);
+
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [onClose]);
+
+  return (
+    <div
+      ref={menuRef}
+      className="fixed z-[100] bg-gray-800 border border-gray-700 rounded-lg shadow-xl py-1 min-w-[160px]"
+      style={{
+        left: position.x,
+        top: position.y,
+      }}
+    >
+      <div className="px-3 py-1.5 text-xs text-gray-400 border-b border-gray-700">
+        Page {page.page_number} Type
+      </div>
+      {PAGE_TYPE_OPTIONS.map((option) => (
+        <button
+          key={option.value}
+          type="button"
+          onClick={() => onSelect(option.value)}
+          className={`w-full flex items-center gap-2 px-3 py-1.5 text-sm text-left hover:bg-gray-700 transition-colors ${
+            page.page_type === option.value ? 'bg-gray-700/50' : ''
+          }`}
+        >
+          <span className={`w-2 h-2 rounded-full ${option.color}`} />
+          <span className="text-gray-200">{option.label}</span>
+          {page.page_type === option.value && (
+            <span className="ml-auto text-green-400">✓</span>
+          )}
+        </button>
+      ))}
+    </div>
+  );
+});
+
 
 // =============================================================================
 // Main Component
@@ -222,11 +309,18 @@ const DetectionSidebar = memo(function DetectionSidebar({
   jobTotals,
   isCollapsed = false,
   onCollapsedChange,
+  onPageClassify,
 }: DetectionSidebarProps) {
   // Default to 'pages' tab for quick page navigation
   const [activeTab, setActiveTab] = useState<TabType>('pages');
   // Local collapsed state if not controlled externally
   const [localCollapsed, setLocalCollapsed] = useState(false);
+
+  // Context menu state for page type classification
+  const [contextMenu, setContextMenu] = useState<{
+    page: ExtractionPage;
+    position: { x: number; y: number };
+  } | null>(null);
   const collapsed = onCollapsedChange ? isCollapsed : localCollapsed;
   const setCollapsed = onCollapsedChange || setLocalCollapsed;
   // Toggle between current page and all pages totals
@@ -355,6 +449,13 @@ const DetectionSidebar = memo(function DetectionSidebar({
                   isSelected={page.id === currentPageId}
                   detectionCount={detectionCountsByPage.get(page.id) || 0}
                   onClick={() => onPageSelect(page.id)}
+                  onContextMenu={(e) => {
+                    e.preventDefault();
+                    setContextMenu({
+                      page,
+                      position: { x: e.clientX, y: e.clientY },
+                    });
+                  }}
                 />
               ))}
             </div>
@@ -977,6 +1078,21 @@ const DetectionSidebar = memo(function DetectionSidebar({
         )}
 
       </div>
+
+      {/* Page Type Context Menu */}
+      {contextMenu && (
+        <PageTypeContextMenu
+          page={contextMenu.page}
+          position={contextMenu.position}
+          onSelect={(pageType) => {
+            if (onPageClassify) {
+              onPageClassify(contextMenu.page.id, pageType);
+            }
+            setContextMenu(null);
+          }}
+          onClose={() => setContextMenu(null)}
+        />
+      )}
     </div>
   );
 });
