@@ -47,8 +47,8 @@ export interface MarkupsListProps {
   onCheckChange: (detectionId: string, checked: boolean) => void;
   /** Callback to check multiple detections */
   onCheckMultiple: (detectionIds: string[], checked: boolean) => void;
-  /** Callback for bulk material assignment */
-  onBulkMaterialAssign?: (detectionIds: string[], materialId: string | null) => void;
+  /** Callback to trigger bulk material assignment (shows picker) */
+  onBulkMaterialAssign?: () => void;
   /** Callback for bulk class change */
   onBulkClassChange?: (detectionIds: string[], newClass: DetectionClass) => void;
   /** Callback for bulk delete */
@@ -945,12 +945,10 @@ const MarkupsList = memo(function MarkupsList({
     onCheckMultiple(unassignedIds, true);
   }, [onCheckMultiple]);
 
-  // State for material picker popup
-  const [showMaterialPicker, setShowMaterialPicker] = useState(false);
-
+  // Handle assign material click - triggers the parent's material picker
   const handleAssignMaterialClick = useCallback(() => {
-    setShowMaterialPicker(true);
-  }, []);
+    onBulkMaterialAssign?.();
+  }, [onBulkMaterialAssign]);
 
   const handleBulkClassChange = useCallback((newClass: DetectionClass) => {
     if (onBulkClassChange && checkedIds.size > 0) {
