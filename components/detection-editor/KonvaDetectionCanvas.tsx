@@ -53,6 +53,8 @@ interface CalibrationState {
 
 export interface KonvaDetectionCanvasProps {
   page: ExtractionPage;
+  /** Override the page image URL (for Show Bluebeam Markups toggle) */
+  imageUrlOverride?: string | null;
   detections: ExtractionDetection[];
   selectedDetectionId: string | null;
   selectedIds: Set<string>;
@@ -317,6 +319,7 @@ function findTopmostDetectionAtPoint(
 
 export default function KonvaDetectionCanvas({
   page,
+  imageUrlOverride,
   detections,
   selectedDetectionId,
   selectedIds,
@@ -527,7 +530,8 @@ export default function KonvaDetectionCanvas({
   // Get image dimensions
   const imageWidth = page.original_width || 1920;
   const imageHeight = page.original_height || 1080;
-  const imageUrl = page.original_image_url || page.image_url;
+  // Use imageUrlOverride if provided (for Show Bluebeam Markups toggle), otherwise default
+  const imageUrl = imageUrlOverride || page.original_image_url || page.image_url;
 
   // Debug: Log detections by markup_type
   React.useEffect(() => {

@@ -4108,6 +4108,7 @@ export default function DetectionEditor({
                   <KonvaDetectionCanvas
                     key={currentPage.id}
                     page={currentPage}
+                    imageUrlOverride={canvasImageUrl}
                     detections={visibleDetections}
                     selectedDetectionId={selectedDetectionId}
                     selectedIds={selectedIds}
