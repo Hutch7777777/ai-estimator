@@ -358,6 +358,8 @@ export interface ExtractionPage {
   original_image_url: string | null;
   original_width: number | null;
   original_height: number | null;
+  // Annotated image with Bluebeam markups visible (for "Show Bluebeam Markups" toggle)
+  annotated_image_url?: string | null;
 }
 
 /**

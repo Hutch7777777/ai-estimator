@@ -470,6 +470,9 @@ export default function DetectionEditor({
   // Show original/unmarked plans (hides all detections)
   const [showOriginalOnly, setShowOriginalOnly] = useState(false);
 
+  // Show Bluebeam markups (annotated image with original markups baked in)
+  const [showBluebeamMarkups, setShowBluebeamMarkups] = useState(false);
+
   // Calibration state (for scale calibration modal)
   const [calibrationData, setCalibrationData] = useState<CalibrationData | null>(null);
   const [showCalibrationModal, setShowCalibrationModal] = useState(false);
@@ -577,8 +580,20 @@ export default function DetectionEditor({
   // Computed Image URL and Dimensions
   // ============================================================================
 
-  // Prefer original_image_url (unmarked) since detection coordinates are in that space
-  const canvasImageUrl = currentPage?.original_image_url || currentPage?.image_url;
+  // Check if any page has Bluebeam annotated images available
+  const hasBluebeamMarkups = useMemo(() => {
+    return pages.some(p => p.annotated_image_url);
+  }, [pages]);
+
+  // Image URL selection priority:
+  // 1. If showBluebeamMarkups is on and annotated image exists, use annotated_image_url
+  // 2. Otherwise, prefer original_image_url (unmarked) since detection coordinates are in that space
+  const canvasImageUrl = useMemo(() => {
+    if (showBluebeamMarkups && currentPage?.annotated_image_url) {
+      return currentPage.annotated_image_url;
+    }
+    return currentPage?.original_image_url || currentPage?.image_url;
+  }, [showBluebeamMarkups, currentPage]);
 
   // Use stored dimensions if available, otherwise load from image
   useEffect(() => {
@@ -4192,6 +4207,23 @@ export default function DetectionEditor({
                       Show Original
                     </>
                   )}
+                </button>
+              )}
+
+              {/* Show Bluebeam Markups Toggle Button - only visible for Bluebeam imports */}
+              {!showMarkup && hasBluebeamMarkups && (
+                <button
+                  type="button"
+                  onClick={() => setShowBluebeamMarkups(!showBluebeamMarkups)}
+                  className={`absolute top-4 ${markupUrl ? 'right-[280px]' : 'right-[175px]'} flex items-center gap-2 px-3 py-2 text-sm font-medium rounded-lg shadow-lg transition-colors z-10 ${
+                    showBluebeamMarkups
+                      ? 'bg-purple-600 hover:bg-purple-700 text-white'
+                      : 'bg-gray-700 hover:bg-gray-600 text-white'
+                  }`}
+                  title="Toggle Bluebeam annotation overlay"
+                >
+                  <Layers className="w-4 h-4" />
+                  {showBluebeamMarkups ? 'Hide Bluebeam' : 'Show Bluebeam'}
                 </button>
               )}
             </div>
