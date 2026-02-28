@@ -8,6 +8,7 @@ import {
   ArrowUpDown,
   ArrowUp,
   ArrowDown,
+  GripVertical,
 } from 'lucide-react';
 import type {
   ExtractionDetection,
@@ -49,6 +50,33 @@ interface GroupedDetections {
 type SortField = 'index' | 'class' | 'source' | 'page' | 'value' | 'material' | 'status';
 type SortDirection = 'asc' | 'desc';
 
+// Column configuration type
+type ColumnId = 'index' | 'class' | 'source' | 'page' | 'value' | 'material' | 'status';
+
+interface ColumnConfig {
+  id: ColumnId;
+  label: string;
+  shortLabel?: string;
+  defaultWidth: number;
+  minWidth: number;
+  align: 'left' | 'center' | 'right';
+}
+
+// Default column configuration
+const COLUMN_CONFIGS: Record<ColumnId, ColumnConfig> = {
+  index: { id: 'index', label: '#', defaultWidth: 40, minWidth: 30, align: 'center' },
+  class: { id: 'class', label: 'Class', defaultWidth: 100, minWidth: 60, align: 'left' },
+  source: { id: 'source', label: 'Source', defaultWidth: 120, minWidth: 60, align: 'left' },
+  page: { id: 'page', label: 'Pg', shortLabel: 'Page', defaultWidth: 48, minWidth: 36, align: 'center' },
+  value: { id: 'value', label: 'Value', defaultWidth: 80, minWidth: 50, align: 'right' },
+  material: { id: 'material', label: 'Material', defaultWidth: 96, minWidth: 60, align: 'left' },
+  status: { id: 'status', label: 'Status', defaultWidth: 64, minWidth: 50, align: 'left' },
+};
+
+const DEFAULT_COLUMN_ORDER: ColumnId[] = ['index', 'class', 'source', 'page', 'value', 'material', 'status'];
+const COLUMN_ORDER_STORAGE_KEY = 'markups-list-column-order';
+const COLUMN_WIDTHS_STORAGE_KEY = 'markups-list-column-widths';
+
 const STATUS_LABELS: Record<string, string> = {
   auto: 'Auto',
   verified: 'Verified',
@@ -62,6 +90,65 @@ const STATUS_COLORS: Record<string, string> = {
   edited: 'text-amber-600 dark:text-amber-400',
   deleted: 'text-red-500 dark:text-red-400',
 };
+
+// =============================================================================
+// Column State Helpers
+// =============================================================================
+
+function loadColumnOrder(): ColumnId[] {
+  if (typeof window === 'undefined') return DEFAULT_COLUMN_ORDER;
+  try {
+    const stored = localStorage.getItem(COLUMN_ORDER_STORAGE_KEY);
+    if (stored) {
+      const parsed = JSON.parse(stored) as ColumnId[];
+      // Validate that all columns are present
+      if (parsed.length === DEFAULT_COLUMN_ORDER.length &&
+          DEFAULT_COLUMN_ORDER.every(col => parsed.includes(col))) {
+        return parsed;
+      }
+    }
+  } catch {
+    // Ignore parse errors
+  }
+  return DEFAULT_COLUMN_ORDER;
+}
+
+function saveColumnOrder(order: ColumnId[]): void {
+  if (typeof window === 'undefined') return;
+  localStorage.setItem(COLUMN_ORDER_STORAGE_KEY, JSON.stringify(order));
+}
+
+function loadColumnWidths(): Record<ColumnId, number> {
+  if (typeof window === 'undefined') {
+    return Object.fromEntries(
+      Object.entries(COLUMN_CONFIGS).map(([id, config]) => [id, config.defaultWidth])
+    ) as Record<ColumnId, number>;
+  }
+  try {
+    const stored = localStorage.getItem(COLUMN_WIDTHS_STORAGE_KEY);
+    if (stored) {
+      const parsed = JSON.parse(stored) as Record<ColumnId, number>;
+      // Fill in any missing columns with defaults
+      const result = { ...parsed };
+      for (const [id, config] of Object.entries(COLUMN_CONFIGS)) {
+        if (!(id in result)) {
+          result[id as ColumnId] = config.defaultWidth;
+        }
+      }
+      return result as Record<ColumnId, number>;
+    }
+  } catch {
+    // Ignore parse errors
+  }
+  return Object.fromEntries(
+    Object.entries(COLUMN_CONFIGS).map(([id, config]) => [id, config.defaultWidth])
+  ) as Record<ColumnId, number>;
+}
+
+function saveColumnWidths(widths: Record<ColumnId, number>): void {
+  if (typeof window === 'undefined') return;
+  localStorage.setItem(COLUMN_WIDTHS_STORAGE_KEY, JSON.stringify(widths));
+}
 
 // =============================================================================
 // Helper Functions
@@ -108,6 +195,8 @@ interface MarkupRowProps {
   isSelected: boolean;
   onClick: () => void;
   rowRef?: React.RefObject<HTMLTableRowElement | null>;
+  columnOrder: ColumnId[];
+  columnWidths: Record<ColumnId, number>;
 }
 
 const MarkupRow = memo(function MarkupRow({
@@ -117,9 +206,79 @@ const MarkupRow = memo(function MarkupRow({
   isSelected,
   onClick,
   rowRef,
+  columnOrder,
+  columnWidths,
 }: MarkupRowProps) {
   const hasNoMaterial = !detection.assigned_material_id && detection.status !== 'deleted';
   const color = detection.color_override || getDetectionColor(detection.class);
+
+  // Render cell content based on column ID
+  const renderCell = (colId: ColumnId) => {
+    const config = COLUMN_CONFIGS[colId];
+    const width = columnWidths[colId];
+    const baseClass = `px-2 py-1 truncate`;
+    const alignClass = config.align === 'center' ? 'text-center' : config.align === 'right' ? 'text-right' : 'text-left';
+
+    switch (colId) {
+      case 'index':
+        return (
+          <td key={colId} className={`${baseClass} ${alignClass} text-gray-500`} style={{ width }}>
+            {index}
+          </td>
+        );
+      case 'class':
+        return (
+          <td key={colId} className={`${baseClass}`} style={{ width }}>
+            <div className="flex items-center gap-1.5">
+              <div
+                className="w-2.5 h-2.5 rounded-full flex-shrink-0"
+                style={{ backgroundColor: color }}
+              />
+              <span className="truncate capitalize text-gray-300">
+                {getClassLabel(detection.class)}
+              </span>
+            </div>
+          </td>
+        );
+      case 'source':
+        return (
+          <td key={colId} className={`${baseClass} ${alignClass} text-gray-400`} style={{ width }} title={detection.marker_label || '—'}>
+            {detection.marker_label || '—'}
+          </td>
+        );
+      case 'page':
+        return (
+          <td key={colId} className={`${baseClass} ${alignClass} text-gray-500`} style={{ width }}>
+            {pageNumber}
+          </td>
+        );
+      case 'value':
+        return (
+          <td key={colId} className={`${baseClass} ${alignClass} font-mono text-gray-300`} style={{ width }}>
+            {formatValue(detection)}
+          </td>
+        );
+      case 'material':
+        return (
+          <td
+            key={colId}
+            className={`${baseClass} ${alignClass} ${hasNoMaterial ? 'text-amber-400' : 'text-gray-400'}`}
+            style={{ width }}
+            title={detection.assigned_material_id ? 'Assigned' : 'Unassigned'}
+          >
+            {detection.assigned_material_id ? 'Assigned' : '—'}
+          </td>
+        );
+      case 'status':
+        return (
+          <td key={colId} className={`${baseClass} ${alignClass} ${STATUS_COLORS[detection.status] || 'text-gray-500'}`} style={{ width }}>
+            {STATUS_LABELS[detection.status] || detection.status}
+          </td>
+        );
+      default:
+        return null;
+    }
+  };
 
   return (
     <tr
@@ -136,54 +295,7 @@ const MarkupRow = memo(function MarkupRow({
         ${detection.status === 'deleted' ? 'opacity-40 line-through' : ''}
       `}
     >
-      {/* Index */}
-      <td className="px-2 py-1 text-gray-500 text-center w-10">
-        {index}
-      </td>
-
-      {/* Class with color dot */}
-      <td className="px-2 py-1 w-28">
-        <div className="flex items-center gap-1.5">
-          <div
-            className="w-2.5 h-2.5 rounded-full flex-shrink-0"
-            style={{ backgroundColor: color }}
-          />
-          <span className="truncate capitalize text-gray-300">
-            {getClassLabel(detection.class)}
-          </span>
-        </div>
-      </td>
-
-      {/* Source (marker_label) */}
-      <td
-        className="px-2 py-1 text-gray-400 truncate"
-        title={detection.marker_label || '—'}
-      >
-        {detection.marker_label || '—'}
-      </td>
-
-      {/* Page */}
-      <td className="px-2 py-1 text-center text-gray-500 w-12">
-        {pageNumber}
-      </td>
-
-      {/* Value */}
-      <td className="px-2 py-1 text-right font-mono text-gray-300 w-20">
-        {formatValue(detection)}
-      </td>
-
-      {/* Material */}
-      <td
-        className={`px-2 py-1 truncate ${hasNoMaterial ? 'text-amber-400' : 'text-gray-400'}`}
-        title={detection.assigned_material_id ? 'Assigned' : 'Unassigned'}
-      >
-        {detection.assigned_material_id ? 'Assigned' : '—'}
-      </td>
-
-      {/* Status */}
-      <td className={`px-2 py-1 w-16 ${STATUS_COLORS[detection.status] || 'text-gray-500'}`}>
-        {STATUS_LABELS[detection.status] || detection.status}
-      </td>
+      {columnOrder.map(colId => renderCell(colId))}
     </tr>
   );
 });
@@ -192,12 +304,14 @@ interface GroupHeaderProps {
   group: GroupedDetections;
   isExpanded: boolean;
   onToggle: () => void;
+  columnCount: number;
 }
 
 const GroupHeader = memo(function GroupHeader({
   group,
   isExpanded,
   onToggle,
+  columnCount,
 }: GroupHeaderProps) {
   const color = getDetectionColor(group.class);
   const total = formatGroupTotal(group);
@@ -207,7 +321,7 @@ const GroupHeader = memo(function GroupHeader({
       onClick={onToggle}
       className="h-8 bg-gray-800 cursor-pointer hover:bg-gray-700 transition-colors"
     >
-      <td colSpan={7} className="px-2 py-1">
+      <td colSpan={columnCount} className="px-2 py-1">
         <div className="flex items-center gap-2">
           {isExpanded ? (
             <ChevronDown className="w-4 h-4 text-gray-500" />
@@ -260,9 +374,24 @@ const MarkupsList = memo(function MarkupsList({
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
   const [allExpanded, setAllExpanded] = useState(true);
 
+  // Column order and width state
+  const [columnOrder, setColumnOrder] = useState<ColumnId[]>(loadColumnOrder);
+  const [columnWidths, setColumnWidths] = useState<Record<ColumnId, number>>(loadColumnWidths);
+
+  // Drag state for column reordering
+  const [draggedColumn, setDraggedColumn] = useState<ColumnId | null>(null);
+  const [dragOverColumn, setDragOverColumn] = useState<ColumnId | null>(null);
+  const [dropPosition, setDropPosition] = useState<'left' | 'right' | null>(null);
+
+  // Resize state for column widths
+  const [resizingColumn, setResizingColumn] = useState<ColumnId | null>(null);
+  const resizeStartX = useRef(0);
+  const resizeStartWidth = useRef(0);
+
   // Refs for scrolling to selected row
   const selectedRowRef = useRef<HTMLTableRowElement | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const tableRef = useRef<HTMLTableElement>(null);
 
   // Create page number lookup
   const pageNumberMap = useMemo(() => {
@@ -424,6 +553,108 @@ const MarkupsList = memo(function MarkupsList({
     }
   }, [allExpanded, groupedDetections]);
 
+  // Column drag handlers
+  const handleDragStart = useCallback((e: React.DragEvent, colId: ColumnId) => {
+    setDraggedColumn(colId);
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/plain', colId);
+    // Add a custom drag image (optional)
+    const target = e.target as HTMLElement;
+    if (target) {
+      e.dataTransfer.setDragImage(target, target.offsetWidth / 2, target.offsetHeight / 2);
+    }
+  }, []);
+
+  const handleDragOver = useCallback((e: React.DragEvent, colId: ColumnId) => {
+    e.preventDefault();
+    if (draggedColumn && draggedColumn !== colId) {
+      setDragOverColumn(colId);
+      // Determine if drop should be on left or right side
+      const rect = (e.target as HTMLElement).getBoundingClientRect();
+      const midpoint = rect.left + rect.width / 2;
+      setDropPosition(e.clientX < midpoint ? 'left' : 'right');
+    }
+  }, [draggedColumn]);
+
+  const handleDragLeave = useCallback(() => {
+    setDragOverColumn(null);
+    setDropPosition(null);
+  }, []);
+
+  const handleDrop = useCallback((e: React.DragEvent, targetColId: ColumnId) => {
+    e.preventDefault();
+    if (draggedColumn && draggedColumn !== targetColId) {
+      const newOrder = [...columnOrder];
+      const draggedIndex = newOrder.indexOf(draggedColumn);
+      const targetIndex = newOrder.indexOf(targetColId);
+
+      // Remove dragged column
+      newOrder.splice(draggedIndex, 1);
+
+      // Calculate new insert position
+      let insertIndex = targetIndex;
+      if (dropPosition === 'right') {
+        insertIndex = draggedIndex < targetIndex ? targetIndex : targetIndex + 1;
+      } else {
+        insertIndex = draggedIndex < targetIndex ? targetIndex - 1 : targetIndex;
+      }
+
+      // Insert at new position
+      newOrder.splice(insertIndex, 0, draggedColumn);
+
+      setColumnOrder(newOrder);
+      saveColumnOrder(newOrder);
+    }
+    setDraggedColumn(null);
+    setDragOverColumn(null);
+    setDropPosition(null);
+  }, [draggedColumn, columnOrder, dropPosition]);
+
+  const handleDragEnd = useCallback(() => {
+    setDraggedColumn(null);
+    setDragOverColumn(null);
+    setDropPosition(null);
+  }, []);
+
+  // Column resize handlers
+  const handleResizeStart = useCallback((e: React.MouseEvent, colId: ColumnId) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setResizingColumn(colId);
+    resizeStartX.current = e.clientX;
+    resizeStartWidth.current = columnWidths[colId];
+  }, [columnWidths]);
+
+  // Handle resize move and end with useEffect
+  useEffect(() => {
+    if (!resizingColumn) return;
+
+    const handleMouseMove = (e: MouseEvent) => {
+      const delta = e.clientX - resizeStartX.current;
+      const minWidth = COLUMN_CONFIGS[resizingColumn].minWidth;
+      const newWidth = Math.max(minWidth, resizeStartWidth.current + delta);
+      setColumnWidths(prev => ({
+        ...prev,
+        [resizingColumn]: newWidth,
+      }));
+    };
+
+    const handleMouseUp = () => {
+      if (resizingColumn) {
+        saveColumnWidths(columnWidths);
+      }
+      setResizingColumn(null);
+    };
+
+    window.addEventListener('mousemove', handleMouseMove);
+    window.addEventListener('mouseup', handleMouseUp);
+
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, [resizingColumn, columnWidths]);
+
   // Stats
   const totalDetections = filteredDetections.length;
   const assignedCount = filteredDetections.filter(d => d.assigned_material_id).length;
@@ -515,73 +746,58 @@ const MarkupsList = memo(function MarkupsList({
       </div>
 
       {/* Table */}
-      <div ref={containerRef} className="flex-1 overflow-y-auto bg-gray-900">
-        <table className="w-full text-xs">
+      <div ref={containerRef} className={`flex-1 overflow-y-auto bg-gray-900 ${resizingColumn ? 'select-none' : ''}`}>
+        <table ref={tableRef} className="w-full text-xs" style={{ tableLayout: 'fixed' }}>
           <thead className="sticky top-0 bg-gray-900 z-10">
             <tr className="border-b border-gray-700">
-              <th
-                className="px-2 py-2 text-center font-medium text-gray-500 dark:text-gray-400 cursor-pointer hover:text-gray-700 dark:hover:text-gray-200 w-10"
-                onClick={() => handleSort('index')}
-              >
-                <div className="flex items-center justify-center gap-1">
-                  #
-                  <SortIcon field="index" />
-                </div>
-              </th>
-              <th
-                className="px-2 py-2 text-left font-medium text-gray-500 dark:text-gray-400 cursor-pointer hover:text-gray-700 dark:hover:text-gray-200 w-24"
-                onClick={() => handleSort('class')}
-              >
-                <div className="flex items-center gap-1">
-                  Class
-                  <SortIcon field="class" />
-                </div>
-              </th>
-              <th
-                className="px-2 py-2 text-left font-medium text-gray-500 dark:text-gray-400 cursor-pointer hover:text-gray-700 dark:hover:text-gray-200"
-                onClick={() => handleSort('source')}
-              >
-                <div className="flex items-center gap-1">
-                  Source
-                  <SortIcon field="source" />
-                </div>
-              </th>
-              <th
-                className="px-2 py-2 text-center font-medium text-gray-500 dark:text-gray-400 cursor-pointer hover:text-gray-700 dark:hover:text-gray-200 w-12"
-                onClick={() => handleSort('page')}
-              >
-                <div className="flex items-center justify-center gap-1">
-                  Pg
-                  <SortIcon field="page" />
-                </div>
-              </th>
-              <th
-                className="px-2 py-2 text-right font-medium text-gray-500 dark:text-gray-400 cursor-pointer hover:text-gray-700 dark:hover:text-gray-200 w-20"
-                onClick={() => handleSort('value')}
-              >
-                <div className="flex items-center justify-end gap-1">
-                  Value
-                  <SortIcon field="value" />
-                </div>
-              </th>
-              <th
-                className="px-2 py-2 text-left font-medium text-gray-500 dark:text-gray-400 cursor-pointer hover:text-gray-700 dark:hover:text-gray-200 w-24"
-                onClick={() => handleSort('material')}
-              >
-                <div className="flex items-center gap-1">
-                  Material
-                  <SortIcon field="material" />
-                </div>
-              </th>
-              <th
-                className="px-2 py-2 text-left font-medium text-gray-500 dark:text-gray-400 cursor-pointer hover:text-gray-700 dark:hover:text-gray-200 w-16"
-                onClick={() => handleSort('status')}
-              >
-                <div className="flex items-center gap-1">
-                  Status
-                  <SortIcon field="status" />
-                </div>
-              </th>
+              {columnOrder.map((colId, colIndex) => {
+                const config = COLUMN_CONFIGS[colId];
+                const width = columnWidths[colId];
+                const alignClass = config.align === 'center' ? 'justify-center' : config.align === 'right' ? 'justify-end' : 'justify-start';
+                const isBeingDragged = draggedColumn === colId;
+                const isDropTarget = dragOverColumn === colId;
+                const isLast = colIndex === columnOrder.length - 1;
+
+                return (
+                  <th
+                    key={colId}
+                    draggable
+                    onDragStart={(e) => handleDragStart(e, colId)}
+                    onDragOver={(e) => handleDragOver(e, colId)}
+                    onDragLeave={handleDragLeave}
+                    onDrop={(e) => handleDrop(e, colId)}
+                    onDragEnd={handleDragEnd}
+                    onClick={() => handleSort(colId as SortField)}
+                    className={`
+                      relative px-2 py-2 font-medium cursor-grab select-none
+                      text-gray-500 hover:text-gray-200 transition-colors
+                      ${isBeingDragged ? 'opacity-50 bg-gray-800' : ''}
+                      ${isDropTarget && dropPosition === 'left' ? 'border-l-2 border-blue-500' : ''}
+                      ${isDropTarget && dropPosition === 'right' ? 'border-r-2 border-blue-500' : ''}
+                    `}
+                    style={{ width }}
+                  >
+                    <div className={`flex items-center gap-1 ${alignClass}`}>
+                      <GripVertical className="w-3 h-3 opacity-30 flex-shrink-0" />
+                      <span>{config.label}</span>
+                      <SortIcon field={colId as SortField} />
+                    </div>
+
+                    {/* Resize handle */}
+                    {!isLast && (
+                      <div
+                        onMouseDown={(e) => handleResizeStart(e, colId)}
+                        onClick={(e) => e.stopPropagation()}
+                        className={`
+                          absolute top-0 right-0 w-1 h-full cursor-col-resize
+                          hover:bg-blue-500 transition-colors z-20
+                          ${resizingColumn === colId ? 'bg-blue-500' : 'bg-transparent'}
+                        `}
+                      />
+                    )}
+                  </th>
+                );
+              })}
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-800">
@@ -593,6 +809,7 @@ const MarkupsList = memo(function MarkupsList({
                     group={group}
                     isExpanded={isExpanded}
                     onToggle={() => toggleGroup(group.class)}
+                    columnCount={columnOrder.length}
                   />
                   {isExpanded && group.detections.map(detection => {
                     globalIndex++;
@@ -606,6 +823,8 @@ const MarkupsList = memo(function MarkupsList({
                         isSelected={isSelected}
                         onClick={() => onDetectionSelect(detection.id, detection.page_id)}
                         rowRef={isSelected && selectedIds.size === 1 ? selectedRowRef : undefined}
+                        columnOrder={columnOrder}
+                        columnWidths={columnWidths}
                       />
                     );
                   })}
