@@ -2989,6 +2989,30 @@ export default function DetectionEditor({
   }, [detections, pages]);
 
   // ============================================================================
+  // Bluebeam Data Detection (for skipping scale calibration requirement)
+  // ============================================================================
+
+  /**
+   * Check if detections have pre-calculated Bluebeam measurements.
+   * Bluebeam imports already have real-world values (area_sf, perimeter_lf, item_count)
+   * so they don't require scale calibration like AI-detected geometry does.
+   */
+  const hasBluebeamData = useMemo(() => {
+    let hasPreCalculated = false;
+    detections.forEach((pageDetections) => {
+      pageDetections.forEach((d) => {
+        if (d.status !== 'deleted') {
+          // Check for pre-calculated values that indicate Bluebeam import
+          if (d.bluebeam_content || d.item_count || (d.area_sf && d.area_sf > 0) || (d.perimeter_lf && d.perimeter_lf > 0)) {
+            hasPreCalculated = true;
+          }
+        }
+      });
+    });
+    return hasPreCalculated;
+  }, [detections]);
+
+  // ============================================================================
   // Material Assignment Helpers (for ID-based pricing) - V2 FIXED
   // ============================================================================
 
@@ -4082,7 +4106,7 @@ export default function DetectionEditor({
             reviewProgress={reviewProgress}
             onApprove={handleApprove}
             isApproving={isApproving}
-            canApprove={!!liveDerivedTotals}
+            canApprove={!!liveDerivedTotals || hasBluebeamData}
             isApproved={!!approvalResult}
             // Bluebeam export props
             onExportBluebeam={handleExportBluebeam}

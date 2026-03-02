@@ -1222,8 +1222,8 @@ const DetectionSidebar = memo(function DetectionSidebar({
               </div>
             )}
 
-            {/* Show message if no scale is set */}
-            {!liveDerivedTotals && currentPageId && (
+            {/* Show message if no scale is set (only for non-Bluebeam projects) */}
+            {!liveDerivedTotals && !dynamicClassTotals && currentPageId && (
               <div className="text-xs text-yellow-600 dark:text-yellow-500 bg-yellow-50 dark:bg-yellow-900/20 rounded-lg p-3">
                 ⚠️ Calibrate scale to see live measurements
               </div>
