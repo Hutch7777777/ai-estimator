@@ -1117,6 +1117,92 @@ export interface LiveDerivedTotals {
 }
 
 // =============================================================================
+// Dynamic Class Totals (for all detection classes, including Bluebeam imports)
+// =============================================================================
+
+/** Measurement type for detection classes */
+export type MeasurementType = 'area' | 'linear' | 'count';
+
+/** Class measurement type lookup - determines how each class is measured */
+export const CLASS_MEASUREMENT_TYPE: Record<string, MeasurementType> = {
+  // Area (SF) - exterior surfaces
+  siding: 'area',
+  exterior_wall: 'area',
+  building: 'area',
+  roof: 'area',
+  gable: 'area',
+  soffit: 'area',
+  wrb: 'area',
+  stone: 'area',
+  stucco: 'area',
+  brick: 'area',
+  // Linear (LF) - edges and trim
+  fascia: 'linear',
+  gutter: 'linear',
+  eave: 'linear',
+  rake: 'linear',
+  ridge: 'linear',
+  valley: 'linear',
+  belly_band: 'linear',
+  trim: 'linear',
+  // Count (EA/ct) - discrete items
+  window: 'count',
+  door: 'count',
+  garage: 'count',
+  corbel: 'count',
+  bracket: 'count',
+  shutter: 'count',
+  post: 'count',
+  column: 'count',
+  vent: 'count',
+  gable_vent: 'count',
+  flashing: 'count',
+  downspout: 'count',
+  outlet: 'count',
+  hose_bib: 'count',
+  light_fixture: 'count',
+  corner_inside: 'count',
+  corner_outside: 'count',
+  inside_corner: 'count',
+  outside_corner: 'count',
+  unknown: 'count',
+};
+
+/** Get measurement type for a detection class, defaults to 'count' */
+export function getClassMeasurementType(cls: string): MeasurementType {
+  return CLASS_MEASUREMENT_TYPE[cls.toLowerCase()] || 'count';
+}
+
+/** Totals for a single detection class */
+export interface ClassTotal {
+  className: string;
+  displayName: string;
+  measurementType: MeasurementType;
+  count: number;
+  totalSf: number;    // For area classes
+  totalLf: number;    // For linear classes
+  totalCount: number; // For count classes (item_count sum)
+  // Opening details (for window/door/garage)
+  headLf?: number;
+  jambLf?: number;
+  sillLf?: number;
+  perimeterLf?: number;
+}
+
+/** Grouped class totals by measurement type */
+export interface DynamicClassTotals {
+  area: ClassTotal[];     // Siding, Gable, Soffit, etc.
+  openings: ClassTotal[]; // Windows, Doors, Garage (with head/jamb/sill details)
+  linear: ClassTotal[];   // Fascia, Trim, Gutter, etc.
+  counts: ClassTotal[];   // Flashing, Corbel, Corner, etc.
+  // Grand totals
+  totalAreaSf: number;
+  totalLinearLf: number;
+  totalCountItems: number;
+  totalOpeningsSf: number;
+}
+
+// =============================================================================
 // Material Assignment (for ID-based pricing lookup)
 // =============================================================================
 

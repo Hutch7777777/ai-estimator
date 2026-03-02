@@ -18,6 +18,8 @@ import type {
   LiveDerivedTotals,
   ExtractionJob,
   ExtractionJobTotals,
+  DynamicClassTotals,
+  ClassTotal,
 } from '@/lib/types/extraction';
 import ClassSelector from './PropertiesPanel/ClassSelector';
 import { ColorPicker } from './PropertiesPanel/ColorPicker';
@@ -56,6 +58,8 @@ export interface DetectionSidebarProps {
   liveDerivedTotals: LiveDerivedTotals | null;
   // All pages totals (aggregated across all elevation pages)
   allPagesTotals?: LiveDerivedTotals | null;
+  // Dynamic class totals (aggregates ALL detection classes including Bluebeam imports)
+  dynamicClassTotals?: DynamicClassTotals | null;
   // Job and totals from intelligent analysis aggregation
   job?: ExtractionJob | null;
   jobTotals?: ExtractionJobTotals | null;
@@ -305,6 +309,7 @@ const DetectionSidebar = memo(function DetectionSidebar({
   onMultiSelectModeChange,
   liveDerivedTotals,
   allPagesTotals,
+  dynamicClassTotals,
   job,
   jobTotals,
   isCollapsed = false,
@@ -1059,6 +1064,163 @@ const DetectionSidebar = memo(function DetectionSidebar({
               </div>
               );
             })()}
+
+            {/* Dynamic Class Totals - Shows ALL detection classes including Bluebeam imports */}
+            {dynamicClassTotals && (
+              <div className="space-y-3 mt-4 border-t border-gray-200 dark:border-gray-700 pt-4">
+                <div className="text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase">
+                  All Detection Classes
+                </div>
+
+                {/* Area Measurements */}
+                {dynamicClassTotals.area.length > 0 && (
+                  <div className="bg-green-50 dark:bg-green-900/20 rounded-lg p-3 space-y-2">
+                    <div className="text-xs font-semibold text-green-700 dark:text-green-300 uppercase">
+                      Area Measurements
+                    </div>
+                    <div className="space-y-1">
+                      {dynamicClassTotals.area.map((cls) => (
+                        <div key={cls.className} className="flex justify-between text-xs">
+                          <span className="text-gray-600 dark:text-gray-400">
+                            {cls.displayName} ({cls.count})
+                          </span>
+                          <span className="font-mono font-medium text-green-600 dark:text-green-400">
+                            {cls.totalSf.toFixed(1)} SF
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Openings */}
+                {dynamicClassTotals.openings.length > 0 && (
+                  <div className="bg-blue-50 dark:bg-blue-900/20 rounded-lg p-3 space-y-2">
+                    <div className="text-xs font-semibold text-blue-700 dark:text-blue-300 uppercase">
+                      Openings
+                    </div>
+                    <div className="space-y-2">
+                      {dynamicClassTotals.openings.map((cls) => (
+                        <div key={cls.className} className="space-y-1">
+                          <div className="flex justify-between text-xs">
+                            <span className="font-medium text-blue-600 dark:text-blue-400">
+                              {cls.displayName} ({cls.count})
+                            </span>
+                            <span className="font-mono font-medium">
+                              {cls.totalSf.toFixed(1)} SF
+                            </span>
+                          </div>
+                          {(cls.headLf || cls.jambLf || cls.sillLf) && (
+                            <div className="grid grid-cols-2 gap-x-4 text-xs text-gray-500 dark:text-gray-400 pl-2">
+                              {cls.perimeterLf && (
+                                <>
+                                  <span>Perimeter:</span>
+                                  <span className="text-right font-mono">{cls.perimeterLf.toFixed(1)} LF</span>
+                                </>
+                              )}
+                              {cls.headLf && (
+                                <>
+                                  <span>Head:</span>
+                                  <span className="text-right font-mono">{cls.headLf.toFixed(1)} LF</span>
+                                </>
+                              )}
+                              {cls.jambLf && (
+                                <>
+                                  <span>Jamb:</span>
+                                  <span className="text-right font-mono">{cls.jambLf.toFixed(1)} LF</span>
+                                </>
+                              )}
+                              {cls.sillLf && (
+                                <>
+                                  <span>Sill:</span>
+                                  <span className="text-right font-mono">{cls.sillLf.toFixed(1)} LF</span>
+                                </>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                    {/* Opening Totals */}
+                    <div className="border-t border-blue-200 dark:border-blue-800 pt-2 mt-2">
+                      <div className="flex justify-between text-xs">
+                        <span className="text-gray-500 dark:text-gray-400">Total Opening Area:</span>
+                        <span className="font-mono font-medium">{dynamicClassTotals.totalOpeningsSf.toFixed(1)} SF</span>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Linear Measurements */}
+                {dynamicClassTotals.linear.length > 0 && (
+                  <div className="bg-amber-50 dark:bg-amber-900/20 rounded-lg p-3 space-y-2">
+                    <div className="text-xs font-semibold text-amber-700 dark:text-amber-300 uppercase">
+                      Linear Measurements
+                    </div>
+                    <div className="space-y-1">
+                      {dynamicClassTotals.linear.map((cls) => (
+                        <div key={cls.className} className="flex justify-between text-xs">
+                          <span className="text-gray-600 dark:text-gray-400">
+                            {cls.displayName} ({cls.count})
+                          </span>
+                          <span className="font-mono font-medium text-amber-600 dark:text-amber-400">
+                            {cls.totalLf.toFixed(1)} LF
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Count Items */}
+                {dynamicClassTotals.counts.length > 0 && (
+                  <div className="bg-pink-50 dark:bg-pink-900/20 rounded-lg p-3 space-y-2">
+                    <div className="text-xs font-semibold text-pink-700 dark:text-pink-300 uppercase">
+                      Count Items
+                    </div>
+                    <div className="space-y-1">
+                      {dynamicClassTotals.counts.map((cls) => (
+                        <div key={cls.className} className="flex justify-between text-xs">
+                          <span className="text-gray-600 dark:text-gray-400">
+                            {cls.displayName} ({cls.count})
+                          </span>
+                          <span className="font-mono font-medium text-pink-600 dark:text-pink-400">
+                            {(cls.totalCount || cls.count)} ct
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Grand Totals */}
+                <div className="bg-gray-100 dark:bg-gray-800 rounded-lg p-3 space-y-2">
+                  <div className="text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase">
+                    Totals
+                  </div>
+                  <div className="grid grid-cols-2 gap-x-4 text-xs">
+                    {dynamicClassTotals.totalAreaSf > 0 && (
+                      <>
+                        <span className="text-gray-500 dark:text-gray-400">Total Area:</span>
+                        <span className="text-right font-mono font-medium">{dynamicClassTotals.totalAreaSf.toFixed(1)} SF</span>
+                      </>
+                    )}
+                    {dynamicClassTotals.totalLinearLf > 0 && (
+                      <>
+                        <span className="text-gray-500 dark:text-gray-400">Total Linear:</span>
+                        <span className="text-right font-mono font-medium">{dynamicClassTotals.totalLinearLf.toFixed(1)} LF</span>
+                      </>
+                    )}
+                    {dynamicClassTotals.totalCountItems > 0 && (
+                      <>
+                        <span className="text-gray-500 dark:text-gray-400">Total Count Items:</span>
+                        <span className="text-right font-mono font-medium">{dynamicClassTotals.totalCountItems}</span>
+                      </>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
 
             {/* Show message if no scale is set */}
             {!liveDerivedTotals && currentPageId && (

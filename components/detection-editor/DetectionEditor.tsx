@@ -47,8 +47,10 @@ import type {
   LaborSection,
   OverheadSection,
   ProjectTotals,
+  DynamicClassTotals,
+  ClassTotal,
 } from '@/lib/types/extraction';
-import { isPolygonWithHoles } from '@/lib/types/extraction';
+import { isPolygonWithHoles, getClassMeasurementType, getClassDisplayLabel } from '@/lib/types/extraction';
 import DetectionToolbar from './DetectionToolbar';
 import MarkupToolbar from './MarkupToolbar';
 import KonvaDetectionCanvas, { type CalibrationData } from './KonvaDetectionCanvas';
@@ -2849,6 +2851,144 @@ export default function DetectionEditor({
   }, [pages, detections]);
 
   // ============================================================================
+  // Dynamic Class Totals (aggregates ALL detection classes including Bluebeam imports)
+  // ============================================================================
+
+  /**
+   * Calculate dynamic class totals from detections.
+   * Uses pre-calculated values (area_sf, perimeter_lf, item_count) when available,
+   * which is how Bluebeam imports store their measurement data.
+   */
+  const dynamicClassTotals = useMemo((): DynamicClassTotals | null => {
+    // Determine which detections to use based on scope
+    // For now, we'll calculate for all pages similar to MarkupsList
+    const allDets: ExtractionDetection[] = [];
+    detections.forEach((pageDetections) => {
+      pageDetections.forEach((d) => {
+        if (d.status !== 'deleted') {
+          allDets.push(d);
+        }
+      });
+    });
+
+    if (allDets.length === 0) return null;
+
+    // Group detections by class
+    const classGroups = new Map<string, ExtractionDetection[]>();
+    for (const det of allDets) {
+      const cls = det.class || 'unknown';
+      if (!classGroups.has(cls)) {
+        classGroups.set(cls, []);
+      }
+      classGroups.get(cls)!.push(det);
+    }
+
+    // Build ClassTotal for each class
+    const classTotals: ClassTotal[] = [];
+
+    for (const [className, dets] of classGroups) {
+      const measurementType = getClassMeasurementType(className);
+      const displayName = getClassDisplayLabel(className);
+
+      let totalSf = 0;
+      let totalLf = 0;
+      let totalCount = 0;
+      let headLf = 0;
+      let jambLf = 0;
+      let sillLf = 0;
+      let perimeterLf = 0;
+
+      for (const det of dets) {
+        // Use pre-calculated values from Bluebeam imports first
+        if (det.item_count && det.item_count > 0) {
+          totalCount += det.item_count;
+        } else if (measurementType === 'count') {
+          totalCount += 1; // Fallback: count each detection as 1
+        }
+
+        if (det.area_sf && det.area_sf > 0) {
+          totalSf += det.area_sf;
+        }
+
+        if (det.perimeter_lf && det.perimeter_lf > 0) {
+          totalLf += det.perimeter_lf;
+          perimeterLf += det.perimeter_lf;
+        }
+
+        // For openings, calculate head/jamb/sill from dimensions if available
+        if (className === 'window' || className === 'door' || className === 'garage') {
+          // Try to get scale ratio for geometry calculations
+          const page = pages.find(p => p.id === det.page_id);
+          const scaleRatio = page?.scale_ratio || 48;
+
+          // If we have pixel dimensions, calculate derived measurements
+          if (det.pixel_width && det.pixel_height && scaleRatio > 0) {
+            const widthFt = det.pixel_width / scaleRatio;
+            const heightFt = det.pixel_height / scaleRatio;
+            headLf += widthFt;
+            jambLf += heightFt * 2; // Both sides
+            if (className === 'window') {
+              sillLf += widthFt;
+            }
+            if (!det.perimeter_lf) {
+              perimeterLf += (widthFt + heightFt) * 2;
+            }
+            if (!det.area_sf) {
+              totalSf += widthFt * heightFt;
+            }
+          }
+        }
+      }
+
+      classTotals.push({
+        className,
+        displayName,
+        measurementType,
+        count: dets.length,
+        totalSf,
+        totalLf,
+        totalCount,
+        headLf: headLf > 0 ? headLf : undefined,
+        jambLf: jambLf > 0 ? jambLf : undefined,
+        sillLf: sillLf > 0 ? sillLf : undefined,
+        perimeterLf: perimeterLf > 0 ? perimeterLf : undefined,
+      });
+    }
+
+    // Separate into categories
+    const openingClasses = ['window', 'door', 'garage'];
+    const area = classTotals
+      .filter(c => c.measurementType === 'area' && !openingClasses.includes(c.className))
+      .sort((a, b) => b.totalSf - a.totalSf);
+    const openings = classTotals
+      .filter(c => openingClasses.includes(c.className))
+      .sort((a, b) => b.totalSf - a.totalSf);
+    const linear = classTotals
+      .filter(c => c.measurementType === 'linear')
+      .sort((a, b) => b.totalLf - a.totalLf);
+    const counts = classTotals
+      .filter(c => c.measurementType === 'count' && !openingClasses.includes(c.className))
+      .sort((a, b) => (b.totalCount || b.count) - (a.totalCount || a.count));
+
+    // Calculate grand totals
+    const totalAreaSf = classTotals.reduce((sum, c) => sum + c.totalSf, 0);
+    const totalLinearLf = classTotals.reduce((sum, c) => sum + c.totalLf, 0);
+    const totalCountItems = counts.reduce((sum, c) => sum + (c.totalCount || c.count), 0);
+    const totalOpeningsSf = openings.reduce((sum, c) => sum + c.totalSf, 0);
+
+    return {
+      area,
+      openings,
+      linear,
+      counts,
+      totalAreaSf,
+      totalLinearLf,
+      totalCountItems,
+      totalOpeningsSf,
+    };
+  }, [detections, pages]);
+
+  // ============================================================================
   // Material Assignment Helpers (for ID-based pricing) - V2 FIXED
   // ============================================================================
 
@@ -4303,6 +4443,7 @@ export default function DetectionEditor({
                 onMultiSelectModeChange={setMultiSelectMode}
                 liveDerivedTotals={liveDerivedTotals}
                 allPagesTotals={allPagesTotals}
+                dynamicClassTotals={dynamicClassTotals}
                 job={job}
                 jobTotals={jobTotals}
                 isCollapsed={isSidebarCollapsed}
