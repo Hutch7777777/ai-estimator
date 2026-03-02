@@ -407,10 +407,11 @@ export function useMaterialSearch(options: UseMaterialSearchOptions = {}): UseMa
           }
         }
 
-        // Apply search filter (case-insensitive with ilike)
+        // Apply search filter (case-insensitive with ilike) - searches product_name, manufacturer, AND sku
         if (search && search.trim()) {
-          console.log('[useMaterialSearch] Applying search filter:', search);
-          params.set('product_name', `ilike.*${search.trim()}*`);
+          const searchTerm = search.trim();
+          console.log('[useMaterialSearch] Applying search filter (product_name, manufacturer, sku):', searchTerm);
+          params.set('or', `(product_name.ilike.*${searchTerm}*,manufacturer.ilike.*${searchTerm}*,sku.ilike.*${searchTerm}*)`);
         }
 
         const fetchUrl = `${url}/rest/v1/pricing_items?${params.toString()}`;
