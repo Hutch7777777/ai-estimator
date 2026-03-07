@@ -1,7 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { createPortal } from 'react-dom';
+import React, { useState, useEffect, useCallback } from 'react';
 import { Settings, ChevronDown, ChevronRight, Info } from 'lucide-react';
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from '@/components/ui/collapsible';
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select';
@@ -56,12 +55,6 @@ export interface EstimateSettingsProps {
 
   /** Additional CSS class */
   className?: string;
-
-  /** Ref to the anchor element (canvas container) for positioning */
-  anchorRef?: React.RefObject<HTMLDivElement | null>;
-
-  /** Position relative to anchor: bottom-left, bottom-right, etc. */
-  anchorPosition?: 'bottom-left' | 'bottom-right';
 }
 
 // =============================================================================
@@ -88,10 +81,6 @@ const DEFAULT_WRB_PRODUCTS: WRBProduct[] = [
   { id: 'manual', name: 'Other / Manual', sku: undefined },
 ];
 
-// Panel dimensions for positioning calculations
-const PANEL_WIDTH = 224; // w-56 = 14rem = 224px
-const PANEL_OFFSET = 12; // 12px offset from edge (similar to left-3)
-
 // =============================================================================
 // Component
 // =============================================================================
@@ -108,76 +97,14 @@ export default function EstimateSettings({
   isLoading = false,
   defaultCollapsed = false,
   className,
-  anchorRef,
-  anchorPosition = 'bottom-left',
 }: EstimateSettingsProps) {
   const [isOpen, setIsOpen] = useState(!defaultCollapsed);
   const [localMarkup, setLocalMarkup] = useState<string>(markupPercent.toFixed(1));
-  const [position, setPosition] = useState({ top: 0, left: 0 });
-  const panelRef = useRef<HTMLDivElement>(null);
-
-  // Create portal container on mount
-  const [portalContainer] = useState(() => {
-    if (typeof document === 'undefined') return null;
-    const div = document.createElement('div');
-    div.id = 'estimate-settings-portal';
-    return div;
-  });
-
-  // Append/remove portal container from document.body
-  useEffect(() => {
-    if (!portalContainer) return;
-    document.body.appendChild(portalContainer);
-    return () => {
-      document.body.removeChild(portalContainer);
-    };
-  }, [portalContainer]);
 
   // Sync local markup when prop changes (e.g., loaded from DB)
   useEffect(() => {
     setLocalMarkup(markupPercent.toFixed(1));
   }, [markupPercent]);
-
-  // Position tracking - keep panel anchored to the canvas container
-  useEffect(() => {
-    if (!anchorRef?.current) return;
-
-    const updatePosition = () => {
-      if (!anchorRef?.current) return;
-      const anchorRect = anchorRef.current.getBoundingClientRect();
-      const panelHeight = panelRef.current?.offsetHeight || 200;
-
-      if (anchorPosition === 'bottom-left') {
-        setPosition({
-          top: anchorRect.bottom - panelHeight - PANEL_OFFSET,
-          left: anchorRect.left + PANEL_OFFSET,
-        });
-      } else {
-        // bottom-right
-        setPosition({
-          top: anchorRect.bottom - panelHeight - PANEL_OFFSET,
-          left: anchorRect.right - PANEL_WIDTH - PANEL_OFFSET,
-        });
-      }
-    };
-
-    // Initial position
-    updatePosition();
-
-    // Observe anchor size changes
-    const resizeObserver = new ResizeObserver(updatePosition);
-    resizeObserver.observe(anchorRef.current);
-
-    // Listen for scroll and resize events
-    window.addEventListener('scroll', updatePosition, true);
-    window.addEventListener('resize', updatePosition);
-
-    return () => {
-      resizeObserver.disconnect();
-      window.removeEventListener('scroll', updatePosition, true);
-      window.removeEventListener('resize', updatePosition);
-    };
-  }, [anchorRef, anchorPosition, isOpen]); // Re-calculate when isOpen changes (panel height changes)
 
   // Handle markup input change (local state only)
   const handleMarkupInputChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
@@ -212,21 +139,8 @@ export default function EstimateSettings({
   // Get selected WRB product name for display
   const selectedWrbName = wrbProducts.find((p) => p.id === wrbProduct)?.name || 'Select WRB...';
 
-  // Don't render if no portal container (SSR)
-  if (!portalContainer) return null;
-
-  const panelContent = (
-    <div
-      ref={panelRef}
-      className={cn('bg-gray-800 rounded-lg border border-gray-700 shadow-xl', className)}
-      style={{
-        position: 'fixed',
-        top: position.top,
-        left: position.left,
-        zIndex: 9999,
-        width: PANEL_WIDTH,
-      }}
-    >
+  return (
+    <div className={cn('bg-gray-800 rounded-lg border border-gray-700 shadow-lg', className)}>
       <Collapsible open={isOpen} onOpenChange={setIsOpen}>
         <CollapsibleTrigger asChild>
           <button
@@ -347,8 +261,6 @@ export default function EstimateSettings({
       </Collapsible>
     </div>
   );
-
-  return createPortal(panelContent, portalContainer);
 }
 
 // =============================================================================

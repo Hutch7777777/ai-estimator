@@ -4334,8 +4334,10 @@ export default function DetectionEditor({
               selectedCount={selectedIds.size}
             />
 
-            {/* Canvas Area - flex-1 with min-h-0 allows proper flex shrinking */}
-            <div ref={canvasContainerRef} className="flex-1 relative min-h-0">
+            {/* Canvas Area wrapper - provides positioning context for canvas and floating panels */}
+            <div className="flex-1 relative min-h-0">
+              {/* The actual Konva canvas container */}
+              <div ref={canvasContainerRef} className="h-full relative">
               {/* Floating Controls - Confidence Filter (left) & Estimate Settings (right) */}
               {!showMarkup && !showOriginalOnly && (
                 <div className="absolute top-3 left-3 z-50 flex items-center gap-2">
@@ -4352,8 +4354,6 @@ export default function DetectionEditor({
                   />
                 </div>
               )}
-
-              {/* EstimateSettings is rendered via portal - see below */}
 
               {/* Region Detection Pending Panel - appears when there are region pending detections */}
               {regionPendingDetections.length > 0 && (
@@ -4617,6 +4617,25 @@ export default function DetectionEditor({
                   <Layers className="w-4 h-4" />
                   {showBluebeamMarkups ? 'Hide Bluebeam' : 'Show Bluebeam'}
                 </button>
+              )}
+              </div>
+
+              {/* EstimateSettings - rendered as SIBLING of canvas container to avoid Konva event interception */}
+              {!showMarkup && !showOriginalOnly && (
+                <div className="absolute bottom-3 left-3 z-50 pointer-events-auto">
+                  <EstimateSettings
+                    markupPercent={markupPercent}
+                    onMarkupChange={setMarkupPercent}
+                    onMarkupSave={saveMarkupPercent}
+                    trimSystem={trimSystem}
+                    onTrimSystemChange={handleTrimSystemChange}
+                    wrbProduct={wrbProduct}
+                    onWrbProductChange={handleWrbProductChange}
+                    isLoading={isEstimateSettingsLoading}
+                    defaultCollapsed={true}
+                    className="w-56"
+                  />
+                </div>
               )}
             </div>
 
@@ -4929,22 +4948,6 @@ export default function DetectionEditor({
         projectAddress=""
       />
 
-      {/* Estimate Settings - rendered via React Portal to avoid Konva event interception */}
-      {!showMarkup && !showOriginalOnly && (
-        <EstimateSettings
-          markupPercent={markupPercent}
-          onMarkupChange={setMarkupPercent}
-          onMarkupSave={saveMarkupPercent}
-          trimSystem={trimSystem}
-          onTrimSystemChange={handleTrimSystemChange}
-          wrbProduct={wrbProduct}
-          onWrbProductChange={handleWrbProductChange}
-          isLoading={isEstimateSettingsLoading}
-          defaultCollapsed={true}
-          anchorRef={canvasContainerRef}
-          anchorPosition="bottom-left"
-        />
-      )}
     </div>
   );
 }
