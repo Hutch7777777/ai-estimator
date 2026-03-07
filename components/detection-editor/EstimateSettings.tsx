@@ -285,7 +285,7 @@ export default function EstimateSettings({
                 >
                   <SelectValue />
                 </SelectTrigger>
-                <SelectContent>
+                <SelectContent className="z-[10000]">
                   {TRIM_SYSTEM_OPTIONS.map((option) => (
                     <SelectItem key={option.value} value={option.value}>
                       {option.label}
@@ -320,7 +320,7 @@ export default function EstimateSettings({
                     {wrbProduct ? selectedWrbName : 'Select WRB...'}
                   </SelectValue>
                 </SelectTrigger>
-                <SelectContent>
+                <SelectContent className="z-[10000]">
                   {wrbProducts.map((product) => (
                     <SelectItem key={product.id} value={product.id}>
                       <div className="flex flex-col">
