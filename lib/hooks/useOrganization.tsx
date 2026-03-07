@@ -34,11 +34,12 @@ interface OrganizationMembership {
   organization: Organization;
 }
 
-// Mock organization for dev bypass - using valid UUID format (8-4-4-4-12)
+// Mock organization for dev bypass - using REAL Exterior Finishes org ID
+// This ensures overhead config, pricing overrides, and RLS work correctly in dev
 const DEV_MOCK_ORGANIZATION: Organization = {
-  id: '00000000-0000-0000-0000-000000000001',
-  name: 'Development Organization',
-  slug: 'dev-org',
+  id: '45aaa69c-8146-43b2-aef1-e2fe6fabcd86',
+  name: 'Exterior Finishes',
+  slug: 'exterior-finishes',
   logo_url: null,
   settings: {},
   subscription_tier: 'enterprise',
@@ -47,7 +48,7 @@ const DEV_MOCK_ORGANIZATION: Organization = {
 
 const DEV_MOCK_MEMBERSHIP: OrganizationMembership = {
   id: '00000000-0000-0000-0000-000000000002',
-  organization_id: '00000000-0000-0000-0000-000000000001',
+  organization_id: '45aaa69c-8146-43b2-aef1-e2fe6fabcd86',
   role: 'owner',
   joined_at: new Date().toISOString(),
   organization: DEV_MOCK_ORGANIZATION,
