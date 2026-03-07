@@ -65,11 +65,13 @@ import type { PageInput } from '@/lib/utils/pageTypeMapping';
 import { useConfidenceFilter } from '@/lib/hooks/useConfidenceFilter';
 import { useRegionDetect, type RegionDetectionResult, type DetectionRegion } from '@/lib/hooks/useRegionDetect';
 import { useSAMSegment, type SAMPendingDetection, type SAMSegmentResult } from '@/lib/hooks/useSAMSegment';
+import { getMaterialById } from '@/lib/hooks/useMaterialSearch';
 import SAMClassPicker from './SAMClassPicker';
 import BluebeamImportModal from './BluebeamImportModal';
 import { exportTakeoffToExcel, type TakeoffData } from '@/lib/utils/exportTakeoffExcel';
 import { useOrganization } from '@/lib/hooks/useOrganization';
 import { createClient } from '@supabase/supabase-js';
+import EstimateSettings, { type TrimSystem, type EstimateSettingsValues } from './EstimateSettings';
 
 // Create untyped Supabase client for extraction_detections_draft operations
 // (This table is not in the generated types)
@@ -451,6 +453,14 @@ export default function DetectionEditor({
   const [overheadSection, setOverheadSection] = useState<OverheadSection | undefined>();
   const [projectTotals, setProjectTotals] = useState<ProjectTotals | undefined>();
 
+  // ============================================================================
+  // Estimate Settings State
+  // ============================================================================
+  const [markupPercent, setMarkupPercent] = useState<number>(10);
+  const [trimSystem, setTrimSystem] = useState<TrimSystem>('hardie');
+  const [wrbProduct, setWrbProduct] = useState<string | null>(null);
+  const [isEstimateSettingsLoading, setIsEstimateSettingsLoading] = useState(false);
+
   // Debug: Log render state for approval modal
   console.log('[DetectionEditor Render]', {
     showApprovalResults,
@@ -577,6 +587,141 @@ export default function DetectionEditor({
       isMountedRef.current = false;
     };
   }, []);
+
+  // ============================================================================
+  // Load Estimate Settings from Database
+  // ============================================================================
+  useEffect(() => {
+    if (!projectId) return;
+
+    const loadEstimateSettings = async () => {
+      setIsEstimateSettingsLoading(true);
+      const supabase = getSupabaseClient();
+
+      try {
+        // Load markup_percent from projects table
+        const { data: project, error: projectError } = await supabase
+          .from('projects')
+          .select('markup_percent')
+          .eq('id', projectId)
+          .single();
+
+        if (projectError) {
+          console.warn('[EstimateSettings] Failed to load project markup:', projectError);
+        } else if (project?.markup_percent != null) {
+          setMarkupPercent(project.markup_percent);
+        }
+
+        // Load trim_system and wrb_product from project_configurations
+        const { data: config, error: configError } = await supabase
+          .from('project_configurations')
+          .select('configuration_data')
+          .eq('project_id', projectId)
+          .eq('trade', 'siding')
+          .single();
+
+        if (configError && configError.code !== 'PGRST116') {
+          // PGRST116 = no rows found (not an error, just no config yet)
+          console.warn('[EstimateSettings] Failed to load project config:', configError);
+        } else if (config?.configuration_data) {
+          const data = config.configuration_data as Record<string, unknown>;
+          if (data.trim_system === 'hardie' || data.trim_system === 'whitewood') {
+            setTrimSystem(data.trim_system);
+          }
+          if (typeof data.wrb_product === 'string') {
+            setWrbProduct(data.wrb_product);
+          }
+        }
+      } catch (err) {
+        console.error('[EstimateSettings] Error loading settings:', err);
+      } finally {
+        if (isMountedRef.current) {
+          setIsEstimateSettingsLoading(false);
+        }
+      }
+    };
+
+    loadEstimateSettings();
+  }, [projectId]);
+
+  // ============================================================================
+  // Save Estimate Settings to Database
+  // ============================================================================
+  const saveMarkupPercent = useCallback(async (value: number) => {
+    if (!projectId) return;
+
+    const supabase = getSupabaseClient();
+    const { error } = await supabase
+      .from('projects')
+      .update({ markup_percent: value })
+      .eq('id', projectId);
+
+    if (error) {
+      console.error('[EstimateSettings] Failed to save markup:', error);
+      toast.error('Failed to save markup percentage');
+    }
+  }, [projectId]);
+
+  const saveEstimateConfig = useCallback(async (
+    newTrimSystem: TrimSystem,
+    newWrbProduct: string | null
+  ) => {
+    if (!projectId) return;
+
+    const supabase = getSupabaseClient();
+
+    // First, try to get existing config
+    const { data: existing } = await supabase
+      .from('project_configurations')
+      .select('id, configuration_data')
+      .eq('project_id', projectId)
+      .eq('trade', 'siding')
+      .single();
+
+    const configData = {
+      ...(existing?.configuration_data as Record<string, unknown> || {}),
+      trim_system: newTrimSystem,
+      wrb_product: newWrbProduct,
+    };
+
+    if (existing) {
+      // Update existing config
+      const { error } = await supabase
+        .from('project_configurations')
+        .update({ configuration_data: configData, updated_at: new Date().toISOString() })
+        .eq('id', existing.id);
+
+      if (error) {
+        console.error('[EstimateSettings] Failed to update config:', error);
+        toast.error('Failed to save estimate settings');
+      }
+    } else {
+      // Insert new config
+      const { error } = await supabase
+        .from('project_configurations')
+        .insert({
+          project_id: projectId,
+          trade: 'siding',
+          configuration_data: configData,
+        });
+
+      if (error) {
+        console.error('[EstimateSettings] Failed to insert config:', error);
+        toast.error('Failed to save estimate settings');
+      }
+    }
+  }, [projectId]);
+
+  // Handlers for estimate settings changes
+  const handleTrimSystemChange = useCallback((value: TrimSystem) => {
+    setTrimSystem(value);
+    saveEstimateConfig(value, wrbProduct);
+  }, [wrbProduct, saveEstimateConfig]);
+
+  const handleWrbProductChange = useCallback((value: string | null) => {
+    setWrbProduct(value);
+    saveEstimateConfig(trimSystem, value);
+  }, [trimSystem, saveEstimateConfig]);
 
   // ============================================================================
   // Computed Image URL and Dimensions
@@ -1582,6 +1727,20 @@ export default function DetectionEditor({
         return;
       }
 
+      // Fetch material name if materialId is provided
+      let materialName: string | null = null;
+      if (materialId) {
+        try {
+          const material = await getMaterialById(materialId);
+          if (material) {
+            materialName = material.product_name;
+            console.log('[DetectionEditor] Fetched material name:', materialName);
+          }
+        } catch (err) {
+          console.error('[DetectionEditor] Failed to fetch material name:', err);
+        }
+      }
+
       // Get all detections for cross-page support
       const allDetections = getAllDetections();
       const detectionsMap = new Map(allDetections.map(d => [d.id, d]));
@@ -1597,6 +1756,7 @@ export default function DetectionEditor({
           const updatedDetection = {
             ...detection,
             assigned_material_id: materialId,
+            assigned_material_name: materialName,
             // Clear price override when material is cleared
             material_cost_override: materialId === null ? null : detection.material_cost_override,
             // Auto-verify when material is assigned (don't change status if clearing)
@@ -1606,6 +1766,7 @@ export default function DetectionEditor({
           console.log('[DetectionEditor] Updating detection with:', {
             id: updatedDetection.id,
             assigned_material_id: updatedDetection.assigned_material_id,
+            assigned_material_name: updatedDetection.assigned_material_name,
             status: updatedDetection.status
           });
           updateDetectionLocally(updatedDetection);
@@ -1617,6 +1778,7 @@ export default function DetectionEditor({
       const supabase = getSupabaseClient();
       const updateData: Record<string, unknown> = {
         assigned_material_id: materialId,
+        assigned_material_name: materialName,
         updated_at: new Date().toISOString()
       };
       // Clear price override when material is cleared
@@ -1851,6 +2013,17 @@ export default function DetectionEditor({
     async (detectionIds: string[], materialId: string, priceOverride: number) => {
       if (detectionIds.length === 0) return;
 
+      // Fetch material name
+      let materialName: string | null = null;
+      try {
+        const material = await getMaterialById(materialId);
+        if (material) {
+          materialName = material.product_name;
+        }
+      } catch (err) {
+        console.error('[DetectionEditor] Failed to fetch material name:', err);
+      }
+
       // Update local state immediately for optimistic UI
       detectionIds.forEach((id) => {
         const detection = currentPageDetections.find((d) => d.id === id);
@@ -1858,6 +2031,7 @@ export default function DetectionEditor({
           updateDetectionLocally({
             ...detection,
             assigned_material_id: materialId,
+            assigned_material_name: materialName,
             material_cost_override: priceOverride,
             edited_at: new Date().toISOString(),
           });
@@ -1870,6 +2044,7 @@ export default function DetectionEditor({
         .from('extraction_detections_draft')
         .update({
           assigned_material_id: materialId,
+          assigned_material_name: materialName,
           material_cost_override: priceOverride,
           updated_at: new Date().toISOString()
         })
@@ -2437,7 +2612,7 @@ export default function DetectionEditor({
           });
 
       // Building/Facade class (handle both underscore and space versions)
-      if (cls === 'building' || cls === 'exterior_wall' || cls === 'exterior wall') {
+      if (cls === 'building' || cls === 'exterior_wall' || cls === 'exterior wall' || cls === 'siding') {
         const buildingMeasurements = calculateBuildingMeasurements(points, scaleRatio);
         totals.buildingCount++;
         totals.buildingAreaSf += buildingMeasurements.area_sf;
@@ -3399,16 +3574,23 @@ export default function DetectionEditor({
           rake_lf: totals.gableRakeLf,
         },
 
-        // Minimal product config - n8n uses auto-scope rules and DB defaults
+        // Estimate settings - markup, trim system, WRB
+        markup_percent: markupPercent,
+        trim_system: trimSystem,
+        wrb_product: wrbProduct,
+
+        // Product config - extended with trim system
         products: {
           color: null,
           profile: 'cedarmill',
+          trim_system: trimSystem,
+          wrb_product: wrbProduct,
         },
 
-        // NEW: Include material assignments for ID-based pricing
+        // Include material assignments for ID-based pricing
         material_assignments: buildMaterialAssignments(allDetections),
 
-        // NEW: Include organization_id for multi-tenant pricing overrides
+        // Include organization_id for multi-tenant pricing overrides
         organization_id: organization?.id,
 
         // Detection counts by class (corbels, brackets, belly_bands, etc.)
@@ -3442,7 +3624,7 @@ export default function DetectionEditor({
         },
       };
     },
-    [jobId, projectId, job?.project_name, getAllDetections, organization?.id]
+    [jobId, projectId, job?.project_name, getAllDetections, organization?.id, markupPercent, trimSystem, wrbProduct]
   );
 
   // Re-detect page handler
@@ -4154,7 +4336,7 @@ export default function DetectionEditor({
 
             {/* Canvas Area - flex-1 with min-h-0 allows proper flex shrinking */}
             <div ref={canvasContainerRef} className="flex-1 relative min-h-0">
-              {/* Floating Controls - Confidence Filter & Claude Assistant */}
+              {/* Floating Controls - Confidence Filter (left) & Estimate Settings (right) */}
               {!showMarkup && !showOriginalOnly && (
                 <div className="absolute top-3 left-3 z-50 flex items-center gap-2">
                   <ConfidenceFilter
@@ -4170,6 +4352,8 @@ export default function DetectionEditor({
                   />
                 </div>
               )}
+
+              {/* EstimateSettings is rendered via portal - see below */}
 
               {/* Region Detection Pending Panel - appears when there are region pending detections */}
               {regionPendingDetections.length > 0 && (
@@ -4311,7 +4495,7 @@ export default function DetectionEditor({
                   </div>
                 </div>
               ) : currentPage ? (
-                <div className="absolute inset-0">
+                <div className="absolute inset-0 z-0">
                   <KonvaDetectionCanvas
                     key={currentPage.id}
                     page={currentPage}
@@ -4744,6 +4928,23 @@ export default function DetectionEditor({
         projectName={job?.project_name || 'Project'}
         projectAddress=""
       />
+
+      {/* Estimate Settings - rendered via React Portal to avoid Konva event interception */}
+      {!showMarkup && !showOriginalOnly && (
+        <EstimateSettings
+          markupPercent={markupPercent}
+          onMarkupChange={setMarkupPercent}
+          onMarkupSave={saveMarkupPercent}
+          trimSystem={trimSystem}
+          onTrimSystemChange={handleTrimSystemChange}
+          wrbProduct={wrbProduct}
+          onWrbProductChange={handleWrbProductChange}
+          isLoading={isEstimateSettingsLoading}
+          defaultCollapsed={true}
+          anchorRef={canvasContainerRef}
+          anchorPosition="bottom-left"
+        />
+      )}
     </div>
   );
 }
