@@ -288,6 +288,8 @@ export interface ExtractionDetection {
 
   // Product assignment (for Properties Panel)
   assigned_material_id?: string | null;
+  // Cached product name for display (e.g., "HardiePlank 7.25\" Primed")
+  assigned_material_name?: string | null;
 
   // Price overrides (user-edited prices that override pricing_items defaults)
   // Hierarchy: detection override > organization override > pricing_items base price
@@ -1230,6 +1232,14 @@ export interface ApprovePayload {
   client_name?: string;
   address?: string;
 
+  // Estimate settings
+  markup_percent?: number;
+  trim_system?: 'hardie' | 'whitewood';
+  wrb_product?: string | null;
+
+  // Phase 2: Full estimate settings object for Railway API
+  estimate_settings?: Record<string, unknown>;
+
   // Which trades to calculate (default: ['siding'])
   selected_trades: string[];
 
@@ -1285,10 +1295,12 @@ export interface ApprovePayload {
     rake_lf: number;
   };
 
-  // Minimal product config - n8n uses auto-scope rules and DB defaults
+  // Product config - extended with trim system and WRB
   products: {
     color: string | null;
     profile: string;
+    trim_system?: 'hardie' | 'whitewood';
+    wrb_product?: string | null;
   };
 
   // NEW: Material assignments from detections (for ID-based pricing)

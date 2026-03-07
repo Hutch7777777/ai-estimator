@@ -71,7 +71,7 @@ import BluebeamImportModal from './BluebeamImportModal';
 import { exportTakeoffToExcel, type TakeoffData } from '@/lib/utils/exportTakeoffExcel';
 import { useOrganization } from '@/lib/hooks/useOrganization';
 import { createClient } from '@supabase/supabase-js';
-import EstimateSettingsPanel, { type TrimSystem } from './EstimateSettingsPanel';
+import EstimateSettingsPanel, { type TrimSystem, type EstimateConfig, type CalculatedMeasurements } from './EstimateSettingsPanel';
 
 // Create untyped Supabase client for extraction_detections_draft operations
 // (This table is not in the generated types)
@@ -463,6 +463,8 @@ export default function DetectionEditor({
   const [trimSystem, setTrimSystem] = useState<TrimSystem>('hardie');
   const [wrbProduct, setWrbProduct] = useState<string | null>(null);
   const [isEstimateSettingsLoading, setIsEstimateSettingsLoading] = useState(false);
+  // Phase 2: Expanded estimate config
+  const [estimateConfig, setEstimateConfig] = useState<Partial<EstimateConfig>>({});
 
   // Debug: Log render state for approval modal (disabled to reduce console noise)
   // console.log('[DetectionEditor Render]', {
@@ -634,6 +636,10 @@ export default function DetectionEditor({
           if (typeof data.wrb_product === 'string') {
             setWrbProduct(data.wrb_product);
           }
+          // Load expanded Phase 2 config if present
+          if (data.window_trim || data.door_trim || data.flashing || data.consumables || data.overhead) {
+            setEstimateConfig(data as Partial<EstimateConfig>);
+          }
         }
       } catch (err) {
         console.error('[EstimateSettings] Error loading settings:', err);
@@ -725,6 +731,48 @@ export default function DetectionEditor({
     setWrbProduct(value);
     saveEstimateConfig(trimSystem, value);
   }, [trimSystem, saveEstimateConfig]);
+
+  // Phase 2: Save expanded config
+  const saveEstimateConfigExpanded = useCallback(async (newConfig: Partial<EstimateConfig>) => {
+    setEstimateConfig(newConfig);
+    if (!projectId) return;
+    const supabase = getSupabaseClient();
+    try {
+      // First, try to get existing config
+      const { data: existing } = await supabase
+        .from('project_configurations')
+        .select('id, configuration_data')
+        .eq('project_id', projectId)
+        .eq('trade', 'siding')
+        .single();
+
+      const configData = {
+        ...(existing?.configuration_data as Record<string, unknown> || {}),
+        trim_system: trimSystem,
+        wrb_product: wrbProduct,
+        ...newConfig,
+      };
+
+      if (existing) {
+        const { error } = await supabase
+          .from('project_configurations')
+          .update({ configuration_data: configData, updated_at: new Date().toISOString() })
+          .eq('id', existing.id);
+        if (error) console.error('Failed to save estimate config:', error);
+      } else {
+        const { error } = await supabase
+          .from('project_configurations')
+          .insert({
+            project_id: projectId,
+            trade: 'siding',
+            configuration_data: configData,
+          });
+        if (error) console.error('Failed to save estimate config:', error);
+      }
+    } catch (err) {
+      console.error('Error saving estimate config:', err);
+    }
+  }, [projectId, trimSystem, wrbProduct]);
 
   // ============================================================================
   // Computed Image URL and Dimensions
@@ -3609,6 +3657,14 @@ export default function DetectionEditor({
         trim_system: trimSystem,
         wrb_product: wrbProduct,
 
+        // Phase 2: Full estimate settings for Railway API
+        estimate_settings: {
+          markup_percent: markupPercent,
+          trim_system: trimSystem,
+          wrb_product: wrbProduct,
+          ...estimateConfig,
+        },
+
         // Product config - extended with trim system
         products: {
           color: null,
@@ -3654,7 +3710,7 @@ export default function DetectionEditor({
         },
       };
     },
-    [jobId, projectId, job?.project_name, getAllDetections, organization?.id, markupPercent, trimSystem, wrbProduct]
+    [jobId, projectId, job?.project_name, getAllDetections, organization?.id, markupPercent, trimSystem, wrbProduct, estimateConfig]
   );
 
   // Re-detect page handler
@@ -4379,6 +4435,8 @@ export default function DetectionEditor({
                 wrbProduct={wrbProduct}
                 onWrbProductChange={handleWrbProductChange}
                 isLoading={isEstimateSettingsLoading}
+                estimateConfig={estimateConfig}
+                onEstimateConfigChange={saveEstimateConfigExpanded}
               />
             )}
 

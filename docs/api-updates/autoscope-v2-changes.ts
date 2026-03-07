@@ -28,6 +28,14 @@
  * - WhiteWood rules have trigger_condition.trim_system = 'whitewood' and active=false
  * - When trim_system='whitewood', we load inactive WhiteWood rules and skip Hardie trim rules
  * - When trim_system='hardie' (default), existing behavior unchanged
+ *
+ * ESTIMATE SETTINGS SUPPORT (Phase 2B):
+ * - estimate_settings: Full config from frontend EstimateSettingsPanel
+ * - Section toggles: window_trim.include, door_trim.include, belly_band.include, etc.
+ * - Manual LF overrides: window_trim.manual_lf, door_trim.manual_lf, corners.outside_count
+ * - Flashing/consumables toggles: flashing.include_kickout, consumables.include_siding_nails
+ * - When section.include=false, skip ALL rules for that section
+ * - When manual_lf is set, override the detected LF in measurement context
  */
 
 import { getSupabaseClient, isDatabaseConfigured } from '../../services/database';
@@ -39,6 +47,7 @@ import {
   CadHoverMeasurements,
   ManufacturerGroups,
   ManufacturerMeasurements,
+  EstimateSettings,  // Phase 2B
 } from '../../types/autoscope';
 
 // ============================================================================
@@ -286,6 +295,80 @@ function buildManufacturerContext(
 }
 
 // ============================================================================
+// CHANGE 4b (Phase 2B): Add applyEstimateSettingsOverrides() function
+// Applies manual LF/count overrides from frontend to measurement context
+// ============================================================================
+
+/**
+ * Apply estimate settings overrides to measurement context
+ * Called AFTER building the measurement context but BEFORE evaluating rules
+ *
+ * @param context - Original measurement context
+ * @param estimateSettings - Estimate settings from frontend (may be null)
+ * @returns Modified measurement context with overrides applied
+ */
+function applyEstimateSettingsOverrides(
+  context: MeasurementContext,
+  estimateSettings: EstimateSettings | null
+): MeasurementContext {
+  if (!estimateSettings) return context;
+
+  const overridden = { ...context };
+
+  // Window trim LF override
+  if (estimateSettings.window_trim?.manual_lf != null) {
+    overridden.window_perimeter_lf = estimateSettings.window_trim.manual_lf;
+    console.log('📐 Override window_perimeter_lf:', overridden.window_perimeter_lf);
+  }
+
+  // Door trim LF override
+  if (estimateSettings.door_trim?.manual_lf != null) {
+    overridden.door_perimeter_lf = estimateSettings.door_trim.manual_lf;
+    console.log('📐 Override door_perimeter_lf:', overridden.door_perimeter_lf);
+  }
+
+  // Belly band LF override
+  if (estimateSettings.belly_band?.manual_lf != null) {
+    overridden.belly_band_lf = estimateSettings.belly_band.manual_lf;
+    console.log('📐 Override belly_band_lf:', overridden.belly_band_lf);
+  }
+
+  // Corner count overrides
+  if (estimateSettings.corners?.outside_count != null) {
+    overridden.outside_corners_count = estimateSettings.corners.outside_count;
+    overridden.outside_corner_count = estimateSettings.corners.outside_count;
+    console.log('📐 Override outside_corners_count:', overridden.outside_corners_count);
+  }
+  if (estimateSettings.corners?.inside_count != null) {
+    overridden.inside_corners_count = estimateSettings.corners.inside_count;
+    overridden.inside_corner_count = estimateSettings.corners.inside_count;
+    console.log('📐 Override inside_corners_count:', overridden.inside_corners_count);
+  }
+
+  // Corner LF overrides
+  if (estimateSettings.corners?.outside_lf != null) {
+    overridden.outside_corner_lf = estimateSettings.corners.outside_lf;
+    console.log('📐 Override outside_corner_lf:', overridden.outside_corner_lf);
+  }
+  if (estimateSettings.corners?.inside_lf != null) {
+    overridden.inside_corner_lf = estimateSettings.corners.inside_lf;
+    console.log('📐 Override inside_corner_lf:', overridden.inside_corner_lf);
+  }
+
+  // Recalculate totals if needed
+  overridden.total_opening_perimeter_lf =
+    overridden.window_perimeter_lf +
+    overridden.door_perimeter_lf +
+    overridden.garage_perimeter_lf;
+
+  overridden.total_corner_lf =
+    overridden.outside_corner_lf +
+    overridden.inside_corner_lf;
+
+  return overridden;
+}
+
+// ============================================================================
 // CHANGE 5: Replace generateAutoScopeItemsV2() function
 // Updated to support manufacturer-aware rule application
 // ============================================================================
@@ -313,6 +396,8 @@ export async function generateAutoScopeItemsV2(
     assignedMaterials?: AssignedMaterial[];
     /** NEW (v2.2): Trim system selection - 'hardie' (default) or 'whitewood' */
     trimSystem?: 'hardie' | 'whitewood';
+    /** NEW (Phase 2B): Full estimate settings for section toggles and overrides */
+    estimateSettings?: EstimateSettings | null;
   }
 ): Promise<AutoScopeV2Result> {
   const result: AutoScopeV2Result = {
@@ -337,7 +422,7 @@ export async function generateAutoScopeItemsV2(
     result.measurement_source = 'webhook';
   }
 
-  const totalContext = buildMeasurementContext(dbMeasurements, webhookMeasurements);
+  let totalContext = buildMeasurementContext(dbMeasurements, webhookMeasurements);
   const manufacturerGroups = options?.manufacturerGroups || {};
   const hasManufacturerGroups = Object.keys(manufacturerGroups).length > 0;
 
@@ -352,6 +437,12 @@ export async function generateAutoScopeItemsV2(
   // NEW (v2.2): Extract trim system - controls which trim/flashing rules fire
   const trimSystem = options?.trimSystem || 'hardie';
   console.log(`   Trim system: ${trimSystem}`);
+
+  // NEW (Phase 2B): Extract estimate settings and apply measurement overrides
+  const estimateSettings = options?.estimateSettings || null;
+  if (estimateSettings) {
+    totalContext = applyEstimateSettingsOverrides(totalContext, estimateSettings);
+  }
 
   // 2. Fetch auto-scope rules
   // UPDATED (v2.2): Pass trim system to fetch WhiteWood rules when needed
@@ -416,7 +507,8 @@ export async function generateAutoScopeItemsV2(
         const mfrContext = buildManufacturerContext(groupMeasurements, totalContext);
 
         // Pass assigned materials for material_category/sku_pattern trigger checks
-        const { applies, reason } = shouldApplyRule(rule, mfrContext, assignedMaterials);
+        // Phase 2B: Also pass estimateSettings for section toggles
+        const { applies, reason } = shouldApplyRule(rule, mfrContext, assignedMaterials, estimateSettings);
 
         if (applies) {
           const { result: quantity, error } = evaluateFormula(rule.quantity_formula, mfrContext);
@@ -450,7 +542,8 @@ export async function generateAutoScopeItemsV2(
       // =====================================================================
 
       // Pass assigned materials for material_category/sku_pattern trigger checks
-      const { applies, reason } = shouldApplyRule(rule, totalContext, assignedMaterials);
+      // Phase 2B: Also pass estimateSettings for section toggles
+      const { applies, reason } = shouldApplyRule(rule, totalContext, assignedMaterials, estimateSettings);
 
       if (applies) {
         const { result: quantity, error } = evaluateFormula(rule.quantity_formula, totalContext);
@@ -535,15 +628,21 @@ export async function generateAutoScopeItemsV2(
  * - material_category: matches against assigned material's category
  * - sku_pattern: substring match against assigned material's SKU
  *
+ * UPDATED (Phase 2B): Now supports estimate_settings section toggles:
+ * - window_trim.include, door_trim.include, belly_band.include, etc.
+ * - When section.include=false, skip ALL rules for that section
+ *
  * @param rule - The auto-scope rule to evaluate
  * @param context - Measurement context OR full trigger context with materials
  * @param assignedMaterials - Optional array of assigned materials (if not in context)
+ * @param estimateSettings - Optional estimate settings for section toggles
  * @returns Object with applies boolean and reason string
  */
 function shouldApplyRule(
   rule: DbAutoScopeRule,
   context: MeasurementContext | TriggerContext,
-  assignedMaterials?: AssignedMaterial[]
+  assignedMaterials?: AssignedMaterial[],
+  estimateSettings?: EstimateSettings | null
 ): { applies: boolean; reason: string } {
   const condition = rule.trigger_condition;
 
@@ -565,6 +664,100 @@ function shouldApplyRule(
   // =========================================================================
   if (condition.always === true) {
     return { applies: true, reason: 'always=true' };
+  }
+
+  // =========================================================================
+  // Phase 2B: Check estimate_settings section toggles
+  // These override ALL rules for a section when include=false
+  // =========================================================================
+  if (estimateSettings) {
+    const cat = rule.material_category?.toLowerCase() || '';
+    const ruleId = rule.rule_id;
+
+    // Window trim section toggle
+    if (estimateSettings.window_trim?.include === false && (cat === 'window_trim' || cat === 'casing')) {
+      return { applies: false, reason: 'window_trim disabled' };
+    }
+
+    // Door trim section toggle
+    if (estimateSettings.door_trim?.include === false && cat === 'door_trim') {
+      return { applies: false, reason: 'door_trim disabled' };
+    }
+
+    // Top-out section toggle (rule_ids 184-185)
+    if (estimateSettings.top_out?.include === false && (ruleId === 184 || ruleId === 185)) {
+      return { applies: false, reason: 'top_out disabled' };
+    }
+
+    // Belly band section toggle
+    if (estimateSettings.belly_band?.include === false) {
+      const bellyBandCats = ['belly_band', 'belly_band_flashing', 'belly_band_caulk', 'belly_band_fastener'];
+      const bellyBandRuleIds = [22, 23, 24, 25, 26, 27, 186, 187];
+      if (bellyBandCats.includes(cat) || bellyBandRuleIds.includes(ruleId)) {
+        return { applies: false, reason: 'belly_band disabled' };
+      }
+    }
+
+    // Flashing section toggles
+    const fl = estimateSettings.flashing;
+    if (fl) {
+      if (fl.include_kickout === false && ruleId === 14) {
+        return { applies: false, reason: 'kickout disabled' };
+      }
+      if (fl.include_corner_flashing === false && ruleId === 15) {
+        return { applies: false, reason: 'corner flashing disabled' };
+      }
+      if (fl.include_fortiflash === false && ruleId === 192) {
+        return { applies: false, reason: 'fortiflash disabled' };
+      }
+      if (fl.include_moistop === false && ruleId === 193) {
+        return { applies: false, reason: 'moistop disabled' };
+      }
+      if (fl.include_rolled_galv === false && ruleId === 191) {
+        return { applies: false, reason: 'rolled galv disabled' };
+      }
+      if (fl.include_joint_flashing === false && ruleId === 20) {
+        return { applies: false, reason: 'joint flashing disabled' };
+      }
+      if (fl.window_head === 'none' && (ruleId === 19 || ruleId === 188)) {
+        return { applies: false, reason: 'window head = none' };
+      }
+      if (fl.door_head === 'none' && (ruleId === 189 || ruleId === 190)) {
+        return { applies: false, reason: 'door head = none' };
+      }
+      if (fl.base_starter === 'none' && ruleId === 13) {
+        return { applies: false, reason: 'base starter = none' };
+      }
+    }
+
+    // Consumables section toggles
+    const cs = estimateSettings.consumables;
+    if (cs) {
+      if (cs.include_paintable_caulk === false && ruleId === 17) {
+        return { applies: false, reason: 'paintable caulk disabled' };
+      }
+      if (cs.include_color_matched_caulk === false && ruleId === 21) {
+        return { applies: false, reason: 'color-matched caulk disabled' };
+      }
+      if (cs.include_primer_cans === false && ruleId === 195) {
+        return { applies: false, reason: 'primer cans disabled' };
+      }
+      if (cs.include_spackle === false && ruleId === 196) {
+        return { applies: false, reason: 'spackle disabled' };
+      }
+      if (cs.include_wood_blades === false && ruleId === 197) {
+        return { applies: false, reason: 'wood blades disabled' };
+      }
+      if (cs.include_hardie_blades === false && ruleId === 198) {
+        return { applies: false, reason: 'hardie blades disabled' };
+      }
+      if (cs.include_siding_nails === false && ruleId === 8) {
+        return { applies: false, reason: 'siding nails disabled' };
+      }
+      if (cs.include_trim_nails === false && ruleId === 16) {
+        return { applies: false, reason: 'trim nails disabled' };
+      }
+    }
   }
 
   // =========================================================================
