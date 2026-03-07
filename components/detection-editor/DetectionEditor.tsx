@@ -461,15 +461,15 @@ export default function DetectionEditor({
   const [wrbProduct, setWrbProduct] = useState<string | null>(null);
   const [isEstimateSettingsLoading, setIsEstimateSettingsLoading] = useState(false);
 
-  // Debug: Log render state for approval modal
-  console.log('[DetectionEditor Render]', {
-    showApprovalResults,
-    hasApprovalResult: !!approvalResult,
-    approvalResultTakeoffId: approvalResult?.takeoff_id,
-    hasTakeoffDetails: !!takeoffDetails,
-    takeoffDetailsLineItems: takeoffDetails?.line_items?.length,
-    isLoadingDetails,
-  });
+  // Debug: Log render state for approval modal (disabled to reduce console noise)
+  // console.log('[DetectionEditor Render]', {
+  //   showApprovalResults,
+  //   hasApprovalResult: !!approvalResult,
+  //   approvalResultTakeoffId: approvalResult?.takeoff_id,
+  //   hasTakeoffDetails: !!takeoffDetails,
+  //   takeoffDetailsLineItems: takeoffDetails?.line_items?.length,
+  //   isLoadingDetails,
+  // });
 
   // Canvas container size tracking for Konva
   const canvasContainerRef = useRef<HTMLDivElement>(null);
@@ -794,18 +794,20 @@ export default function DetectionEditor({
 
     const updateSize = () => {
       const rect = container.getBoundingClientRect();
-      console.log('[DetectionEditor] Canvas container size update:', {
-        clientWidth: container.clientWidth,
-        clientHeight: container.clientHeight,
-        boundingRect: { width: rect.width, height: rect.height },
-      });
-
       // Use bounding rect dimensions, fallback to client dimensions, then window
       const width = rect.width || container.clientWidth || window.innerWidth - 400;
       const height = rect.height || container.clientHeight || window.innerHeight - 200;
 
       if (width > 0 && height > 0) {
-        setCanvasContainerSize({ width, height });
+        const roundedWidth = Math.round(width);
+        const roundedHeight = Math.round(height);
+        // Only update state if dimensions actually changed (prevents render loop)
+        setCanvasContainerSize(prev => {
+          if (prev.width === roundedWidth && prev.height === roundedHeight) {
+            return prev; // Same object reference = no re-render
+          }
+          return { width: roundedWidth, height: roundedHeight };
+        });
       }
     };
 
@@ -821,9 +823,16 @@ export default function DetectionEditor({
     const resizeObserver = new ResizeObserver((entries) => {
       for (const entry of entries) {
         const { width, height } = entry.contentRect;
-        console.log('[DetectionEditor] ResizeObserver fired:', { width, height });
         if (width > 0 && height > 0) {
-          setCanvasContainerSize({ width, height });
+          const roundedWidth = Math.round(width);
+          const roundedHeight = Math.round(height);
+          // Only update state if dimensions actually changed (prevents render loop)
+          setCanvasContainerSize(prev => {
+            if (prev.width === roundedWidth && prev.height === roundedHeight) {
+              return prev; // Same object reference = no re-render
+            }
+            return { width: roundedWidth, height: roundedHeight };
+          });
         }
       }
     });
@@ -3187,6 +3196,17 @@ export default function DetectionEditor({
     return hasPreCalculated;
   }, [detections]);
 
+  /**
+   * Memoized list of all detections across all pages.
+   * Used by MarkupsListPanel to avoid calling getAllDetections() on every render
+   * which would create a new array reference and cause unnecessary re-renders.
+   * Depends on `detections` (the raw Map) so it only recomputes when data changes.
+   */
+  const allDetectionsForList = useMemo(() => {
+    return getAllDetections();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [detections]);
+
   // ============================================================================
   // Material Assignment Helpers (for ID-based pricing) - V2 FIXED
   // ============================================================================
@@ -4682,7 +4702,7 @@ export default function DetectionEditor({
 
             {/* Bottom Markups List Panel */}
             <MarkupsListPanel
-              allDetections={getAllDetections()}
+              allDetections={allDetectionsForList}
               pages={pages}
               selectedIds={selectedIds}
               onDetectionSelect={handleMarkupSelect}
