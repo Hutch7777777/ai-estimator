@@ -1,7 +1,7 @@
 'use client';
 
 import React, { memo, useState, useRef, useCallback } from 'react';
-import { MousePointer2, Pentagon, Hand, Ruler, Minus, MapPin, ChevronRight, Download, Loader2, Scissors, ScanSearch, Wand2 } from 'lucide-react';
+import { MousePointer2, Pentagon, Hand, Ruler, Minus, MapPin, ChevronRight, Download, Loader2, Scissors, ScanSearch, Wand2, Settings } from 'lucide-react';
 import type { ToolMode, DetectionClass } from '@/lib/types/extraction';
 import { DETECTION_CLASS_COLORS, getClassDisplayLabel } from '@/lib/types/extraction';
 import ToolClassSelector from './ToolClassSelector';
@@ -29,6 +29,10 @@ interface MarkupToolbarProps {
   isDownloadingMarkup?: boolean;
   /** Number of currently selected detections (for split tool enable state) */
   selectedCount?: number;
+  /** Callback to toggle estimate settings panel */
+  onSettingsToggle?: () => void;
+  /** Whether the estimate settings panel is open */
+  isSettingsOpen?: boolean;
 }
 
 interface ToolDefinition {
@@ -86,6 +90,8 @@ const MarkupToolbar = memo(function MarkupToolbar({
   onDownloadMarkupPlans,
   isDownloadingMarkup = false,
   selectedCount = 0,
+  onSettingsToggle,
+  isSettingsOpen = false,
 }: MarkupToolbarProps) {
   // Track which tool's class selector is open
   const [openSelector, setOpenSelector] = useState<'create' | 'line' | 'point' | null>(null);
@@ -227,6 +233,33 @@ const MarkupToolbar = memo(function MarkupToolbar({
             </div>
           );
         })}
+
+        {/* Estimate Settings Toggle */}
+        {onSettingsToggle && (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
+                onClick={onSettingsToggle}
+                disabled={disabled}
+                className={`
+                  w-12 h-10 flex items-center justify-center relative transition-colors
+                  ${disabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}
+                  ${
+                    isSettingsOpen
+                      ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 border-l-2 border-blue-600'
+                      : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 border-l-2 border-transparent'
+                  }
+                `}
+              >
+                <Settings className="w-5 h-5" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="right" sideOffset={8}>
+              Estimate Settings (E)
+            </TooltipContent>
+          </Tooltip>
+        )}
 
         {/* Download Markup Plans */}
         {onDownloadMarkupPlans && (

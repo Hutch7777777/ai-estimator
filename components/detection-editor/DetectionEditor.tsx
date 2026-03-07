@@ -71,7 +71,7 @@ import BluebeamImportModal from './BluebeamImportModal';
 import { exportTakeoffToExcel, type TakeoffData } from '@/lib/utils/exportTakeoffExcel';
 import { useOrganization } from '@/lib/hooks/useOrganization';
 import { createClient } from '@supabase/supabase-js';
-import EstimateSettings, { type TrimSystem, type EstimateSettingsValues } from './EstimateSettings';
+import EstimateSettingsPanel, { type TrimSystem } from './EstimateSettingsPanel';
 
 // Create untyped Supabase client for extraction_detections_draft operations
 // (This table is not in the generated types)
@@ -334,6 +334,9 @@ export default function DetectionEditor({
 
   // Markups panel (bottom) collapsed state
   const [isMarkupsPanelCollapsed, setIsMarkupsPanelCollapsed] = useState(false);
+
+  // Estimate settings panel state
+  const [showEstimateSettings, setShowEstimateSettings] = useState(false);
 
   // ============================================================================
   // Local UI State
@@ -2340,6 +2343,13 @@ export default function DetectionEditor({
       if (key === 'm') {
         e.preventDefault();
         setToolMode('sam_select');
+        return;
+      }
+
+      // Estimate Settings toggle shortcut
+      if (key === 'e') {
+        e.preventDefault();
+        setShowEstimateSettings(prev => !prev);
         return;
       }
 
@@ -4352,7 +4362,25 @@ export default function DetectionEditor({
               onDownloadMarkupPlans={handleDownloadMarkupPlans}
               isDownloadingMarkup={isDownloadingMarkup}
               selectedCount={selectedIds.size}
+              onSettingsToggle={() => setShowEstimateSettings(prev => !prev)}
+              isSettingsOpen={showEstimateSettings}
             />
+
+            {/* Estimate Settings Panel - slides out between toolbar and canvas */}
+            {showEstimateSettings && (
+              <EstimateSettingsPanel
+                isOpen={showEstimateSettings}
+                onClose={() => setShowEstimateSettings(false)}
+                markupPercent={markupPercent}
+                onMarkupChange={setMarkupPercent}
+                onMarkupSave={saveMarkupPercent}
+                trimSystem={trimSystem}
+                onTrimSystemChange={handleTrimSystemChange}
+                wrbProduct={wrbProduct}
+                onWrbProductChange={handleWrbProductChange}
+                isLoading={isEstimateSettingsLoading}
+              />
+            )}
 
             {/* Canvas Area wrapper - provides positioning context for canvas and floating panels */}
             <div className="flex-1 relative min-h-0">
@@ -4640,23 +4668,6 @@ export default function DetectionEditor({
               )}
               </div>
 
-              {/* EstimateSettings - rendered as SIBLING of canvas container to avoid Konva event interception */}
-              {!showMarkup && !showOriginalOnly && (
-                <div className="absolute bottom-3 left-3 z-50 pointer-events-auto">
-                  <EstimateSettings
-                    markupPercent={markupPercent}
-                    onMarkupChange={setMarkupPercent}
-                    onMarkupSave={saveMarkupPercent}
-                    trimSystem={trimSystem}
-                    onTrimSystemChange={handleTrimSystemChange}
-                    wrbProduct={wrbProduct}
-                    onWrbProductChange={handleWrbProductChange}
-                    isLoading={isEstimateSettingsLoading}
-                    defaultCollapsed={true}
-                    className="w-56"
-                  />
-                </div>
-              )}
             </div>
 
             {/* Sidebar - pages, properties, totals, and markups list (resizable) */}
