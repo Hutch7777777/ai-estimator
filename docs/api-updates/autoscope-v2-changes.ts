@@ -22,6 +22,12 @@
  * - Board & Batten specific accessories
  * - ColorPlus specific touch-up kits
  * - 16" OC vs 12" OC specific fasteners
+ *
+ * TRIM SYSTEM SUPPORT (v2.2):
+ * - trim_system: 'hardie' | 'whitewood' - toggles which trim/flashing rules fire
+ * - WhiteWood rules have trigger_condition.trim_system = 'whitewood' and active=false
+ * - When trim_system='whitewood', we load inactive WhiteWood rules and skip Hardie trim rules
+ * - When trim_system='hardie' (default), existing behavior unchanged
  */
 
 import { getSupabaseClient, isDatabaseConfigured } from '../../services/database';
@@ -60,6 +66,11 @@ interface DbTriggerCondition {
   // Matches against assigned materials from the Detection Editor
   material_category?: string;  // e.g., "board_batten" - matches pricing_items.category
   sku_pattern?: string;        // e.g., "16OC-CP" - substring match against pricing_items.sku
+
+  // NEW (v2.2): Trim system trigger - used to identify WhiteWood-specific rules
+  // When present in a rule's trigger_condition, the rule only fires if
+  // the payload's trim_system matches this value
+  trim_system?: 'hardie' | 'whitewood';
 }
 
 // ============================================================================
@@ -300,6 +311,8 @@ export async function generateAutoScopeItemsV2(
     manufacturerGroups?: ManufacturerGroups;
     /** NEW: Assigned materials for material_category/sku_pattern trigger conditions */
     assignedMaterials?: AssignedMaterial[];
+    /** NEW (v2.2): Trim system selection - 'hardie' (default) or 'whitewood' */
+    trimSystem?: 'hardie' | 'whitewood';
   }
 ): Promise<AutoScopeV2Result> {
   const result: AutoScopeV2Result = {
@@ -336,8 +349,13 @@ export async function generateAutoScopeItemsV2(
     console.log(`   Assigned materials: ${assignedMaterials.map(m => m.sku).join(', ')}`);
   }
 
+  // NEW (v2.2): Extract trim system - controls which trim/flashing rules fire
+  const trimSystem = options?.trimSystem || 'hardie';
+  console.log(`   Trim system: ${trimSystem}`);
+
   // 2. Fetch auto-scope rules
-  const rules = await fetchAutoScopeRules();
+  // UPDATED (v2.2): Pass trim system to fetch WhiteWood rules when needed
+  const rules = await fetchAutoScopeRulesWithTrimSystem(trimSystem);
   result.rules_evaluated = rules.length;
 
   console.log(`📋 Evaluating ${rules.length} auto-scope rules...`);
@@ -571,16 +589,27 @@ function shouldApplyRule(
   }
 
   // Check sku_pattern - must have at least one material with SKU containing pattern
+  // V9.1 FIX: When material_category is also specified, only check sku_pattern
+  // against products in that category, not ALL assigned products
   if (condition.sku_pattern) {
     const pattern = condition.sku_pattern.toLowerCase();
-    const hasMatchingSku = materials.some(
+
+    // Filter to category-specific products when material_category is specified
+    const productsToCheck = condition.material_category
+      ? materials.filter(m => m.category?.toLowerCase() === condition.material_category.toLowerCase())
+      : materials;
+
+    console.log(`🔍 Rule ${rule.rule_id} sku_pattern check: "${condition.sku_pattern}" against ${productsToCheck.length} products (category: ${condition.material_category || 'all'})`);
+
+    const hasMatchingSku = productsToCheck.some(
       m => m.sku?.toLowerCase().includes(pattern)
     );
 
     if (!hasMatchingSku) {
+      console.log(`[AutoScope] Rule ${rule.rule_id} skipped: sku_pattern "${condition.sku_pattern}" not found in ${condition.material_category || 'all'} products`);
       return {
         applies: false,
-        reason: `no material SKU matching pattern '${condition.sku_pattern}'`
+        reason: `no material SKU matching pattern '${condition.sku_pattern}' in ${condition.material_category || 'all'} products`
       };
     }
     // If we get here, sku_pattern check passed - continue to other checks
@@ -737,8 +766,155 @@ export function buildAssignedMaterialsFromPricing(
 }
 
 // ============================================================================
+// CHANGE 8 (v2.2): Add fetchAutoScopeRulesWithTrimSystem() function
+// This replaces fetchAutoScopeRules() to handle trim_system toggling
+// ============================================================================
+
+/**
+ * Hardie trim material categories that should be skipped when WhiteWood is selected
+ * These are the DEFAULT Hardie trim rules that would conflict with WhiteWood rules
+ */
+const HARDIE_TRIM_CATEGORIES = [
+  'starter_strip',
+  'frieze_board',
+  'j_channel',
+  'z_flashing',
+  'window_trim',
+  'door_trim',
+  'outside_corner_trim',
+  'inside_corner_trim',
+  'head_casing',
+  'jamb_casing',
+  'sill_casing',
+];
+
+/**
+ * Fetch auto-scope rules with trim system awareness
+ *
+ * - When trimSystem='hardie' (default): Load only active=true rules (existing behavior)
+ * - When trimSystem='whitewood':
+ *   1. Load active=true rules
+ *   2. ALSO load inactive rules where trigger_condition.trim_system='whitewood'
+ *   3. FILTER OUT conflicting Hardie trim rules
+ *
+ * @param trimSystem - 'hardie' or 'whitewood'
+ * @returns Filtered array of auto-scope rules
+ */
+async function fetchAutoScopeRulesWithTrimSystem(
+  trimSystem: 'hardie' | 'whitewood'
+): Promise<DbAutoScopeRule[]> {
+  const supabase = getSupabaseClient();
+
+  if (!isDatabaseConfigured()) {
+    console.log('[AutoScope] Database not configured, using fallback rules');
+    return getFallbackRules();
+  }
+
+  // Build the query based on trim system
+  let query = supabase
+    .from('siding_auto_scope_rules')
+    .select('*')
+    .order('priority', { ascending: false })
+    .order('group_order', { ascending: true })
+    .order('item_order', { ascending: true });
+
+  if (trimSystem === 'whitewood') {
+    // For WhiteWood: Load active rules OR inactive WhiteWood-specific rules
+    // We use OR logic: active=true OR (trigger_condition->>'trim_system' = 'whitewood')
+    query = query.or('active.eq.true,trigger_condition->>trim_system.eq.whitewood');
+  } else {
+    // For Hardie (default): Only load active rules
+    query = query.eq('active', true);
+  }
+
+  const { data, error } = await query;
+
+  if (error) {
+    console.error('[AutoScope] Error fetching rules:', error);
+    return getFallbackRules();
+  }
+
+  let rules = (data || []) as DbAutoScopeRule[];
+  console.log(`[AutoScope] Fetched ${rules.length} rules from database (trimSystem=${trimSystem})`);
+
+  // Apply trim system filtering
+  if (trimSystem === 'whitewood') {
+    rules = filterRulesForWhiteWood(rules);
+  } else {
+    rules = filterRulesForHardie(rules);
+  }
+
+  console.log(`[AutoScope] After trim system filtering: ${rules.length} rules`);
+
+  return rules;
+}
+
+/**
+ * Filter rules for WhiteWood trim system
+ * - Keep rules that have trigger_condition.trim_system='whitewood'
+ * - Keep generic rules (no trim_system in trigger_condition) that are NOT Hardie trim
+ * - Skip Hardie-specific trim rules (conflicting categories)
+ */
+function filterRulesForWhiteWood(rules: DbAutoScopeRule[]): DbAutoScopeRule[] {
+  return rules.filter(rule => {
+    const triggerCondition = rule.trigger_condition || {};
+
+    // If rule explicitly requires whitewood, include it
+    if (triggerCondition.trim_system === 'whitewood') {
+      console.log(`  ✓ Rule ${rule.rule_id} (${rule.rule_name}): included (whitewood-specific)`);
+      return true;
+    }
+
+    // If rule explicitly requires hardie, skip it
+    if (triggerCondition.trim_system === 'hardie') {
+      console.log(`  ✗ Rule ${rule.rule_id} (${rule.rule_name}): skipped (hardie-specific)`);
+      return false;
+    }
+
+    // For rules without trim_system in trigger:
+    // Skip if it's a generic Hardie trim category that conflicts with WhiteWood
+    const category = rule.material_category?.toLowerCase() || '';
+    const isHardieTrimCategory = HARDIE_TRIM_CATEGORIES.includes(category);
+
+    // Check if the rule has a manufacturer filter
+    const isGenericOrHardie = !rule.manufacturer_filter ||
+      rule.manufacturer_filter.some(f =>
+        f.toLowerCase().includes('hardie') || f.toLowerCase().includes('james')
+      );
+
+    if (isHardieTrimCategory && isGenericOrHardie) {
+      console.log(`  ✗ Rule ${rule.rule_id} (${rule.rule_name}): skipped (hardie trim category: ${category})`);
+      return false;
+    }
+
+    // Include all other rules (fasteners, WRB, siding panels, etc.)
+    return true;
+  });
+}
+
+/**
+ * Filter rules for Hardie trim system (default)
+ * - Skip rules that have trigger_condition.trim_system='whitewood'
+ * - Include all other active rules
+ */
+function filterRulesForHardie(rules: DbAutoScopeRule[]): DbAutoScopeRule[] {
+  return rules.filter(rule => {
+    const triggerCondition = rule.trigger_condition || {};
+
+    // Skip WhiteWood-specific rules
+    if (triggerCondition.trim_system === 'whitewood') {
+      console.log(`  ✗ Rule ${rule.rule_id} (${rule.rule_name}): skipped (whitewood-specific)`);
+      return false;
+    }
+
+    // Include all other active rules
+    return true;
+  });
+}
+
+// ============================================================================
 // NOTE: The following functions are unchanged from the original file:
-// - fetchAutoScopeRules()
+// - fetchAutoScopeRules()  <-- NOW REPLACED by fetchAutoScopeRulesWithTrimSystem()
 // - fetchMeasurementsFromDatabase()
 // - buildMeasurementContext()
 // - evaluateFormula()
