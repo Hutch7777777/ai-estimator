@@ -143,7 +143,8 @@ export default function EstimateSettings({
     if (!anchorRef?.current) return;
 
     const updatePosition = () => {
-      const anchorRect = anchorRef.current!.getBoundingClientRect();
+      if (!anchorRef?.current) return;
+      const anchorRect = anchorRef.current.getBoundingClientRect();
       const panelHeight = panelRef.current?.offsetHeight || 200;
 
       if (anchorPosition === 'bottom-left') {
