@@ -636,9 +636,13 @@ export default function DetectionEditor({
           if (typeof data.wrb_product === 'string') {
             setWrbProduct(data.wrb_product);
           }
-          // Load expanded Phase 2 config if present
-          if (data.window_trim || data.door_trim || data.flashing || data.consumables || data.overhead) {
+          // Load expanded Phase 2 config if present (all section types)
+          if (data.window_trim || data.door_trim || data.top_out || data.belly_band ||
+              data.corners || data.wrb || data.flashing || data.consumables || data.overhead) {
             setEstimateConfig(data as Partial<EstimateConfig>);
+            console.log('⚙️ Loaded estimate config from DB:', Object.keys(data).filter(k =>
+              ['window_trim', 'door_trim', 'top_out', 'belly_band', 'corners', 'wrb', 'flashing', 'consumables', 'overhead'].includes(k)
+            ).join(', '));
           }
         }
       } catch (err) {

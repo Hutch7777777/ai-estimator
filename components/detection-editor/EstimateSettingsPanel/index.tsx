@@ -55,6 +55,21 @@ export default function EstimateSettingsPanel({
   }, [wrbProduct]);
   useEffect(() => { setLocalMarkup(String(markupPercent)); }, [markupPercent]);
 
+  // Emit initial config on mount so DetectionEditor has full merged state for buildApprovePayload
+  const hasEmittedInitial = useRef(false);
+  useEffect(() => {
+    if (!hasEmittedInitial.current && onEstimateConfigChange) {
+      hasEmittedInitial.current = true;
+      // Use setTimeout to ensure state is fully initialized
+      setTimeout(() => {
+        setConfig(currentConfig => {
+          onEstimateConfigChange(currentConfig);
+          return currentConfig;
+        });
+      }, 0);
+    }
+  }, [onEstimateConfigChange]);
+
   const saveTimerRef = useRef<NodeJS.Timeout | null>(null);
   const emitConfigChange = useCallback((newConfig: EstimateConfig) => {
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
