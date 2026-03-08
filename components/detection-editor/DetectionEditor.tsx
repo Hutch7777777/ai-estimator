@@ -3657,11 +3657,11 @@ export default function DetectionEditor({
         trim_system: trimSystem,
         wrb_product: wrbProduct,
 
-        // Phase 2: Full estimate settings for Railway API
+        // Phase 2B: Full estimate settings for Railway API
         estimate_settings: {
           markup_percent: markupPercent,
           trim_system: trimSystem,
-          wrb_product: wrbProduct,
+          wrb_product: wrbProduct || estimateConfig?.wrb?.product || null,
           ...estimateConfig,
         },
 
