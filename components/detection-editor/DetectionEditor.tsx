@@ -72,6 +72,7 @@ import { exportTakeoffToExcel, type TakeoffData } from '@/lib/utils/exportTakeof
 import { useOrganization } from '@/lib/hooks/useOrganization';
 import { createClient } from '@supabase/supabase-js';
 import EstimateSettingsPanel, { type TrimSystem, type EstimateConfig, type CalculatedMeasurements } from './EstimateSettingsPanel';
+import { DEFAULT_ESTIMATE_CONFIG } from './EstimateSettingsPanel/defaults';
 
 // Create untyped Supabase client for extraction_detections_draft operations
 // (This table is not in the generated types)
@@ -464,7 +465,7 @@ export default function DetectionEditor({
   const [wrbProduct, setWrbProduct] = useState<string | null>(null);
   const [isEstimateSettingsLoading, setIsEstimateSettingsLoading] = useState(false);
   // Phase 2: Expanded estimate config
-  const [estimateConfig, setEstimateConfig] = useState<Partial<EstimateConfig>>({});
+  const [estimateConfig, setEstimateConfig] = useState<Partial<EstimateConfig>>(DEFAULT_ESTIMATE_CONFIG);
 
   // Debug: Log render state for approval modal (disabled to reduce console noise)
   // console.log('[DetectionEditor Render]', {
@@ -636,14 +637,24 @@ export default function DetectionEditor({
           if (typeof data.wrb_product === 'string') {
             setWrbProduct(data.wrb_product);
           }
-          // Load expanded Phase 2 config if present (all section types)
-          if (data.window_trim || data.door_trim || data.top_out || data.belly_band ||
-              data.corners || data.wrb || data.flashing || data.consumables || data.overhead) {
-            setEstimateConfig(data as Partial<EstimateConfig>);
-            console.log('⚙️ Loaded estimate config from DB:', Object.keys(data).filter(k =>
-              ['window_trim', 'door_trim', 'top_out', 'belly_band', 'corners', 'wrb', 'flashing', 'consumables', 'overhead'].includes(k)
-            ).join(', '));
-          }
+          // Phase 2: Load expanded config, merged with defaults so estimateConfig is NEVER empty
+          const savedConfig = data as Partial<EstimateConfig>;
+          const mergedConfig = {
+            ...DEFAULT_ESTIMATE_CONFIG,
+            ...savedConfig,
+            // Deep merge sections (spread only overrides saved values)
+            window_trim: { ...DEFAULT_ESTIMATE_CONFIG.window_trim, ...savedConfig?.window_trim },
+            door_trim: { ...DEFAULT_ESTIMATE_CONFIG.door_trim, ...savedConfig?.door_trim },
+            top_out: { ...DEFAULT_ESTIMATE_CONFIG.top_out, ...savedConfig?.top_out },
+            belly_band: { ...DEFAULT_ESTIMATE_CONFIG.belly_band, ...savedConfig?.belly_band },
+            corners: { ...DEFAULT_ESTIMATE_CONFIG.corners, ...savedConfig?.corners },
+            wrb: { ...DEFAULT_ESTIMATE_CONFIG.wrb, ...savedConfig?.wrb },
+            flashing: { ...DEFAULT_ESTIMATE_CONFIG.flashing, ...savedConfig?.flashing },
+            consumables: { ...DEFAULT_ESTIMATE_CONFIG.consumables, ...savedConfig?.consumables },
+            overhead: { ...DEFAULT_ESTIMATE_CONFIG.overhead, ...savedConfig?.overhead },
+          };
+          setEstimateConfig(mergedConfig);
+          console.log('⚙️ Loaded estimate config:', Object.keys(mergedConfig).join(', '));
         }
       } catch (err) {
         console.error('[EstimateSettings] Error loading settings:', err);
