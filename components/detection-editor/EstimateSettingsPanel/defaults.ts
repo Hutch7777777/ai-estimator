@@ -38,6 +38,7 @@ export const DEFAULT_FLASHING: FlashingSettings = {
 
 export const DEFAULT_CONSUMABLES: ConsumablesSettings = {
   caulk_type: 'osi-quad', include_paintable_caulk: true, include_color_matched_caulk: true,
+  include_titebond_caulk: false, // WhiteWood only
   include_primer_cans: false, include_spackle: false, include_wood_blades: false,
   include_hardie_blades: true, include_siding_nails: true, include_trim_nails: true,
 };
@@ -71,6 +72,7 @@ export const TRIM_SYSTEM_CASCADES: Record<TrimSystem, {
     },
     consumables: {
       caulk_type: 'osi-quad', include_paintable_caulk: true, include_color_matched_caulk: true,
+      include_titebond_caulk: false,  // Hardie uses OSI Quad, not Titebond
       include_primer_cans: false, include_spackle: false,
       include_wood_blades: false, include_hardie_blades: true,
     },
@@ -84,6 +86,7 @@ export const TRIM_SYSTEM_CASCADES: Record<TrimSystem, {
     },
     consumables: {
       caulk_type: 'titebond', include_paintable_caulk: false, include_color_matched_caulk: false,
+      include_titebond_caulk: true,   // WhiteWood uses Titebond III caulk (rule 194)
       include_primer_cans: true, include_spackle: true,
       include_wood_blades: true, include_hardie_blades: true,
     },

@@ -13,6 +13,9 @@ export function ConsumablesSection({ trimSystem, settings, onChange }: Consumabl
   return (
     <SectionWrapper title="Consumables & Fasteners" badge="SET" badgeColor="green">
       <SelectField label="Caulk Type" value={settings.caulk_type} options={caulkOptions} onChange={(v) => update({ caulk_type: v as CaulkType })} />
+      {trimSystem === 'whitewood' && (
+        <ToggleRow label="Titebond III Caulk" checked={settings.include_titebond_caulk} onChange={(v) => update({ include_titebond_caulk: v })} hint="WhiteWood trim caulk (rule 194)" />
+      )}
       <ToggleRow label="Paintable Caulk" checked={settings.include_paintable_caulk} onChange={(v) => update({ include_paintable_caulk: v })} hint={trimSystem === 'whitewood' ? 'Not typical with WhiteWood' : ''} />
       <ToggleRow label="Color-Matched Caulk" checked={settings.include_color_matched_caulk} onChange={(v) => update({ include_color_matched_caulk: v })} hint={trimSystem === 'whitewood' ? 'Not typical with WhiteWood' : ''} />
       <div className="border-t border-gray-800 pt-2 mt-1 space-y-2">

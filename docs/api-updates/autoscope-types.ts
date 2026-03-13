@@ -68,6 +68,14 @@ export interface MeasurementContext {
   belly_band_count: number;
   belly_band_lf: number;
 
+  // Gable Top-Out (wall-to-gable transition trim)
+  gable_topout_count: number;
+  gable_topout_lf: number;
+
+  // Top-Out (top of wall at eave/soffit termination trim)
+  topout_count: number;
+  topout_lf: number;
+
   // Other
   level_starter_lf: number;
   avg_wall_height_ft: number;
@@ -264,6 +272,20 @@ export interface EstimateSettingsBellyBand {
   manual_lf?: number | null;
 }
 
+export interface EstimateSettingsGableTopout {
+  include: boolean;
+  size?: string;
+  flashing_type?: string;
+  manual_lf?: number | null;
+}
+
+export interface EstimateSettingsTopout {
+  include: boolean;
+  size?: string;
+  flashing_type?: string;
+  manual_lf?: number | null;
+}
+
 export interface EstimateSettingsCorners {
   include_inside?: boolean;
   outside_count?: number | null;
@@ -295,10 +317,11 @@ export interface EstimateSettingsConsumables {
   caulk_type?: string;
   include_paintable_caulk?: boolean;
   include_color_matched_caulk?: boolean;
-  include_primer_cans?: boolean;
-  include_spackle?: boolean;
-  include_wood_blades?: boolean;
-  include_hardie_blades?: boolean;
+  include_titebond_caulk?: boolean;  // WhiteWood: Titebond III caulk (rule 194)
+  include_primer_cans?: boolean;     // WhiteWood: Primer spray cans (rule 195)
+  include_spackle?: boolean;         // WhiteWood: Spackle (rule 196)
+  include_wood_blades?: boolean;     // WhiteWood: Wood saw blades (rule 197)
+  include_hardie_blades?: boolean;   // Hardie: Fiber cement blades (rule 198)
   include_siding_nails?: boolean;
   include_trim_nails?: boolean;
 }
@@ -328,6 +351,8 @@ export interface EstimateSettings {
   door_trim?: EstimateSettingsDoorTrim;
   top_out?: EstimateSettingsTopOut;
   belly_band?: EstimateSettingsBellyBand;
+  gable_topout?: EstimateSettingsGableTopout;
+  topout?: EstimateSettingsTopout;
   corners?: EstimateSettingsCorners;
   wrb?: EstimateSettingsWRB;
   flashing?: EstimateSettingsFlashing;

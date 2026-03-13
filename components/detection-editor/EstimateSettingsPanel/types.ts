@@ -64,10 +64,11 @@ export interface ConsumablesSettings {
   caulk_type: CaulkType;
   include_paintable_caulk: boolean;
   include_color_matched_caulk: boolean;
-  include_primer_cans: boolean;
-  include_spackle: boolean;
-  include_wood_blades: boolean;
-  include_hardie_blades: boolean;
+  include_titebond_caulk: boolean;  // WhiteWood: Titebond III caulk (rule 194)
+  include_primer_cans: boolean;     // WhiteWood: Primer spray cans (rule 195)
+  include_spackle: boolean;         // WhiteWood: Spackle (rule 196)
+  include_wood_blades: boolean;     // WhiteWood: Wood saw blades (rule 197)
+  include_hardie_blades: boolean;   // Hardie: Fiber cement blades (rule 198)
   include_siding_nails: boolean;
   include_trim_nails: boolean;
 }
@@ -119,7 +120,6 @@ export interface EstimateSettingsPanelProps {
   onTrimSystemChange: (value: TrimSystem) => void;
   wrbProduct: string | null;
   onWrbProductChange: (value: string | null) => void;
-  isLoading?: boolean;
   estimateConfig?: Partial<EstimateConfig>;
   onEstimateConfigChange?: (config: Partial<EstimateConfig>) => void;
   calculatedValues?: CalculatedMeasurements;

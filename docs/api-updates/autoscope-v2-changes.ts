@@ -68,6 +68,8 @@ interface DbTriggerCondition {
   min_net_area?: number;
   min_facade_area?: number;
   min_belly_band_lf?: number;
+  min_gable_topout_lf?: number;
+  min_topout_lf?: number;
   min_trim_total_lf?: number;
   trim_total_lf_gt?: number;
 
@@ -331,6 +333,18 @@ function applyEstimateSettingsOverrides(
   if (estimateSettings.belly_band?.manual_lf != null) {
     overridden.belly_band_lf = estimateSettings.belly_band.manual_lf;
     console.log('📐 Override belly_band_lf:', overridden.belly_band_lf);
+  }
+
+  // Gable top-out LF override
+  if (estimateSettings.gable_topout?.manual_lf != null) {
+    overridden.gable_topout_lf = estimateSettings.gable_topout.manual_lf;
+    console.log('📐 Override gable_topout_lf:', overridden.gable_topout_lf);
+  }
+
+  // Top-out LF override
+  if (estimateSettings.topout?.manual_lf != null) {
+    overridden.topout_lf = estimateSettings.topout.manual_lf;
+    console.log('📐 Override topout_lf:', overridden.topout_lf);
   }
 
   // Corner count overrides
@@ -698,6 +712,22 @@ function shouldApplyRule(
       }
     }
 
+    // Gable top-out section toggle
+    if (estimateSettings.gable_topout?.include === false) {
+      const gableTopoutCats = ['gable_topout', 'gable_topout_trim', 'gable_topout_flashing'];
+      if (gableTopoutCats.includes(cat)) {
+        return { applies: false, reason: 'gable_topout disabled' };
+      }
+    }
+
+    // Top-out section toggle (eave/soffit termination)
+    if (estimateSettings.topout?.include === false) {
+      const topoutCats = ['topout', 'topout_trim', 'topout_flashing'];
+      if (topoutCats.includes(cat)) {
+        return { applies: false, reason: 'topout disabled' };
+      }
+    }
+
     // Flashing section toggles
     const fl = estimateSettings.flashing;
     if (fl) {
@@ -731,32 +761,49 @@ function shouldApplyRule(
     }
 
     // Consumables section toggles
-    const cs = estimateSettings.consumables;
-    if (cs) {
-      if (cs.include_paintable_caulk === false && ruleId === 17) {
-        return { applies: false, reason: 'paintable caulk disabled' };
-      }
-      if (cs.include_color_matched_caulk === false && ruleId === 21) {
-        return { applies: false, reason: 'color-matched caulk disabled' };
-      }
-      if (cs.include_primer_cans === false && ruleId === 195) {
-        return { applies: false, reason: 'primer cans disabled' };
-      }
-      if (cs.include_spackle === false && ruleId === 196) {
-        return { applies: false, reason: 'spackle disabled' };
-      }
-      if (cs.include_wood_blades === false && ruleId === 197) {
-        return { applies: false, reason: 'wood blades disabled' };
-      }
-      if (cs.include_hardie_blades === false && ruleId === 198) {
-        return { applies: false, reason: 'hardie blades disabled' };
-      }
-      if (cs.include_siding_nails === false && ruleId === 8) {
-        return { applies: false, reason: 'siding nails disabled' };
-      }
-      if (cs.include_trim_nails === false && ruleId === 16) {
-        return { applies: false, reason: 'trim nails disabled' };
-      }
+    // V9.2.1: WhiteWood trim system defaults all consumables ON
+    // (frontend settings panel isn't reliably passing these yet)
+    const isWhiteWood = estimateSettings.trim_system === 'whitewood';
+    const cs = estimateSettings.consumables || {};
+
+    // Compute effective toggles with WhiteWood defaults
+    const includePaintableCaulk = cs.include_paintable_caulk ?? true;
+    const includeColorMatchedCaulk = cs.include_color_matched_caulk ?? true;
+    const includePrimerCans = cs.include_primer_cans ?? isWhiteWood;
+    const includeSpackle = cs.include_spackle ?? isWhiteWood;
+    const includeWoodBlades = cs.include_wood_blades ?? isWhiteWood;
+    const includeHardieBlades = cs.include_hardie_blades ?? true;
+    const includeTitebondCaulk = cs.include_titebond_caulk ?? isWhiteWood; // Rule 194
+    const includeSidingNails = cs.include_siding_nails ?? true;
+    const includeTrimNails = cs.include_trim_nails ?? true;
+
+    // Apply consumable toggles
+    if (!includePaintableCaulk && ruleId === 17) {
+      return { applies: false, reason: 'paintable caulk disabled' };
+    }
+    if (!includeColorMatchedCaulk && ruleId === 21) {
+      return { applies: false, reason: 'color-matched caulk disabled' };
+    }
+    if (!includeTitebondCaulk && ruleId === 194) {
+      return { applies: false, reason: 'titebond caulk disabled' };
+    }
+    if (!includePrimerCans && ruleId === 195) {
+      return { applies: false, reason: 'primer cans disabled' };
+    }
+    if (!includeSpackle && ruleId === 196) {
+      return { applies: false, reason: 'spackle disabled' };
+    }
+    if (!includeWoodBlades && ruleId === 197) {
+      return { applies: false, reason: 'wood blades disabled' };
+    }
+    if (!includeHardieBlades && ruleId === 198) {
+      return { applies: false, reason: 'hardie blades disabled' };
+    }
+    if (!includeSidingNails && ruleId === 8) {
+      return { applies: false, reason: 'siding nails disabled' };
+    }
+    if (!includeTrimNails && ruleId === 16) {
+      return { applies: false, reason: 'trim nails disabled' };
     }
   }
 
@@ -852,6 +899,22 @@ function shouldApplyRule(
     }
   }
 
+  // min_gable_topout_lf check
+  if (condition.min_gable_topout_lf !== undefined) {
+    const gableTopoutLf = measurements.gable_topout_lf || 0;
+    if (gableTopoutLf < condition.min_gable_topout_lf) {
+      return { applies: false, reason: `gable topout ${gableTopoutLf.toFixed(0)} LF < ${condition.min_gable_topout_lf}` };
+    }
+  }
+
+  // min_topout_lf check
+  if (condition.min_topout_lf !== undefined) {
+    const topoutLf = measurements.topout_lf || 0;
+    if (topoutLf < condition.min_topout_lf) {
+      return { applies: false, reason: `topout ${topoutLf.toFixed(0)} LF < ${condition.min_topout_lf}` };
+    }
+  }
+
   // min_trim_total_lf check
   if (condition.min_trim_total_lf !== undefined) {
     const trimTotalLf = measurements.trim_total_lf || 0;
@@ -895,6 +958,12 @@ function shouldApplyRule(
   }
   if (condition.min_belly_band_lf !== undefined) {
     matchedConditions.push(`bellyBand>=${condition.min_belly_band_lf}`);
+  }
+  if (condition.min_gable_topout_lf !== undefined) {
+    matchedConditions.push(`gableTopout>=${condition.min_gable_topout_lf}`);
+  }
+  if (condition.min_topout_lf !== undefined) {
+    matchedConditions.push(`topout>=${condition.min_topout_lf}`);
   }
   if (condition.min_trim_total_lf !== undefined) {
     matchedConditions.push(`trimTotal>=${condition.min_trim_total_lf}`);
@@ -1106,10 +1175,31 @@ function filterRulesForHardie(rules: DbAutoScopeRule[]): DbAutoScopeRule[] {
 }
 
 // ============================================================================
+// CHANGE 8: Update buildMeasurementContext() to extract gable_topout and topout
+// Add these lines where detection_counts are processed (similar to belly_band_lf)
+// ============================================================================
+
+/**
+ * In buildMeasurementContext(), add extraction of gable_topout and topout from detection_counts:
+ *
+ * // Existing belly_band extraction (reference):
+ * belly_band_lf: detectionCounts?.belly_band?.total_lf || webhookMeasurements?.belly_band_lf || 0,
+ * belly_band_count: detectionCounts?.belly_band?.count || 0,
+ *
+ * // ADD: Gable top-out extraction
+ * gable_topout_lf: detectionCounts?.gable_topout?.total_lf || webhookMeasurements?.gable_topout_lf || 0,
+ * gable_topout_count: detectionCounts?.gable_topout?.count || 0,
+ *
+ * // ADD: Top-out extraction
+ * topout_lf: detectionCounts?.topout?.total_lf || webhookMeasurements?.topout_lf || 0,
+ * topout_count: detectionCounts?.topout?.count || 0,
+ */
+
+// ============================================================================
 // NOTE: The following functions are unchanged from the original file:
 // - fetchAutoScopeRules()  <-- NOW REPLACED by fetchAutoScopeRulesWithTrimSystem()
 // - fetchMeasurementsFromDatabase()
-// - buildMeasurementContext()
+// - buildMeasurementContext()  <-- NEEDS UPDATE per CHANGE 8 above
 // - evaluateFormula()
 // - getFallbackRules()
 // - clearAutoScopeRulesCache()
