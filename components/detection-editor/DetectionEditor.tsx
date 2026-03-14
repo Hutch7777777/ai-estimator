@@ -130,6 +130,7 @@ const CLASS_COUNT_INFO: Record<string, {
 }> = {
   // === LINEAR CLASSES (LF) ===
   belly_band: { display_name: 'Belly Band', measurement_type: 'linear', unit: 'LF' },
+  topout: { display_name: 'Top-Out', measurement_type: 'linear', unit: 'LF' },
   fascia: { display_name: 'Fascia', measurement_type: 'linear', unit: 'LF' },
   gutter: { display_name: 'Gutter', measurement_type: 'linear', unit: 'LF' },
   eave: { display_name: 'Eave', measurement_type: 'linear', unit: 'LF' },
@@ -142,6 +143,7 @@ const CLASS_COUNT_INFO: Record<string, {
   soffit: { display_name: 'Soffit', measurement_type: 'area', unit: 'SF' },
 
   // === COUNT CLASSES (EA) ===
+  gable_topout: { display_name: 'Gable Top-Out', measurement_type: 'count', unit: 'EA' },
   corbel: { display_name: 'Corbel', measurement_type: 'count', unit: 'EA' },
   bracket: { display_name: 'Bracket', measurement_type: 'count', unit: 'EA' },
   shutter: { display_name: 'Shutter', measurement_type: 'count', unit: 'EA' },
@@ -466,6 +468,8 @@ export default function DetectionEditor({
   const [isEstimateSettingsLoading, setIsEstimateSettingsLoading] = useState(false);
   // Phase 2: Expanded estimate config
   const [estimateConfig, setEstimateConfig] = useState<Partial<EstimateConfig>>(DEFAULT_ESTIMATE_CONFIG);
+  // Gate config emissions until DB config has loaded to prevent race conditions
+  const [configLoaded, setConfigLoaded] = useState(false);
 
   // Debug: Log render state for approval modal (disabled to reduce console noise)
   // console.log('[DetectionEditor Render]', {
@@ -598,9 +602,17 @@ export default function DetectionEditor({
   // Load Estimate Settings from Database
   // ============================================================================
   useEffect(() => {
-    if (!projectId) return;
+    console.log('🔄 loadEstimateSettings effect running, projectId:', projectId);
+    if (!projectId) {
+      // No project yet - still set configLoaded so panel can function with defaults
+      console.log('⚙️ No projectId, setting configLoaded=true with defaults');
+      setConfigLoaded(true);
+      setIsEstimateSettingsLoading(false);
+      return;
+    }
 
     const loadEstimateSettings = async () => {
+      console.log('⏳ Starting loadEstimateSettings...');
       setIsEstimateSettingsLoading(true);
       const supabase = getSupabaseClient();
 
@@ -659,8 +671,11 @@ export default function DetectionEditor({
       } catch (err) {
         console.error('[EstimateSettings] Error loading settings:', err);
       } finally {
+        console.log('✅ loadEstimateSettings finally block, isMounted:', isMountedRef.current);
         if (isMountedRef.current) {
           setIsEstimateSettingsLoading(false);
+          setConfigLoaded(true); // Gate config emissions until first load completes
+          console.log('✅ configLoaded set to true');
         }
       }
     };
@@ -749,8 +764,15 @@ export default function DetectionEditor({
 
   // Phase 2: Save expanded config
   const saveEstimateConfigExpanded = useCallback(async (newConfig: Partial<EstimateConfig>) => {
+    console.log('💾 saveEstimateConfigExpanded called', {
+      hasProjectId: !!projectId,
+      configKeys: Object.keys(newConfig),
+    });
     setEstimateConfig(newConfig);
-    if (!projectId) return;
+    if (!projectId) {
+      console.log('⚠️ No projectId, skipping save');
+      return;
+    }
     const supabase = getSupabaseClient();
     try {
       // First, try to get existing config
@@ -768,21 +790,43 @@ export default function DetectionEditor({
         ...newConfig,
       };
 
+      console.log('📦 Config to save:', {
+        overhead: (configData as any).overhead,
+        consumables: (configData as any).consumables,
+      });
+
       if (existing) {
-        const { error } = await supabase
+        console.log('📝 Updating existing config id:', existing.id);
+        const { data, error } = await supabase
           .from('project_configurations')
           .update({ configuration_data: configData, updated_at: new Date().toISOString() })
-          .eq('id', existing.id);
-        if (error) console.error('Failed to save estimate config:', error);
+          .eq('id', existing.id)
+          .select();
+        if (error) {
+          console.error('❌ Failed to save estimate config:', error);
+        } else {
+          console.log('✅ Estimate config saved (update)', {
+            rowsAffected: data?.length,
+            overhead: configData.overhead,
+          });
+        }
       } else {
-        const { error } = await supabase
+        console.log('📝 Inserting new config for project:', projectId);
+        const { data, error } = await supabase
           .from('project_configurations')
           .insert({
             project_id: projectId,
             trade: 'siding',
             configuration_data: configData,
+          })
+          .select();
+        if (error) {
+          console.error('❌ Failed to save estimate config:', error);
+        } else {
+          console.log('✅ Estimate config saved (insert)', {
+            rowsAffected: data?.length,
           });
-        if (error) console.error('Failed to save estimate config:', error);
+        }
       }
     } catch (err) {
       console.error('Error saving estimate config:', err);
@@ -2652,6 +2696,11 @@ export default function DetectionEditor({
       // BELLY BAND (line)
       bellyBandCount: 0,
       bellyBandLf: 0,
+      // GABLE TOP-OUT (count - point marker per gable peak)
+      gableTopoutCount: 0,
+      // TOP-OUT (line - top of wall at eave/soffit)
+      topoutCount: 0,
+      topoutLf: 0,
       // GUTTERS
       gutterCount: 0,
       gutterLf: 0,
@@ -2678,6 +2727,16 @@ export default function DetectionEditor({
         const countLabel = cls || 'Count';
         totals.countsByClass[countLabel] = (totals.countsByClass[countLabel] || 0) + 1;
         totals.totalPointCount++;
+
+        // Also populate dedicated corner fields for point-type corner markers
+        // This ensures corners.outside_count is sent to Railway API even when
+        // corners are drawn as points instead of lines (no LF measurement for points)
+        if (cls === 'corner_outside' || cls === 'outside_corner') {
+          totals.outsideCornerCount++;
+        } else if (cls === 'corner_inside' || cls === 'inside_corner') {
+          totals.insideCornerCount++;
+        }
+
         continue; // Points don't have area/perimeter measurements
       }
 
@@ -2760,6 +2819,13 @@ export default function DetectionEditor({
         const lineMeasurement = calculateLineMeasurements(points, scaleRatio);
         totals.bellyBandCount++;
         totals.bellyBandLf += lineMeasurement.length_lf;
+      } else if (cls === 'gable_topout') {
+        // Count-based: just increment count (point marker per gable peak)
+        totals.gableTopoutCount++;
+      } else if (cls === 'topout') {
+        const lineMeasurement = calculateLineMeasurements(points, scaleRatio);
+        totals.topoutCount++;
+        totals.topoutLf += lineMeasurement.length_lf;
       } else if (cls === 'gutter') {
         const lineMeasurement = calculateLineMeasurements(points, scaleRatio);
         totals.gutterCount++;
@@ -2974,6 +3040,9 @@ export default function DetectionEditor({
       fasciaLf: 0,
       bellyBandCount: 0,
       bellyBandLf: 0,
+      gableTopoutCount: 0,
+      topoutCount: 0,
+      topoutLf: 0,
       gutterCount: 0,
       gutterLf: 0,
       downspoutCount: 0,
@@ -3072,6 +3141,13 @@ export default function DetectionEditor({
           const lineMeasurement = calculateLineMeasurements(points, scaleRatio);
           aggregateTotals.bellyBandCount++;
           aggregateTotals.bellyBandLf += lineMeasurement.length_lf;
+        } else if (cls === 'gable_topout') {
+          // Count-based: just increment count (point marker per gable peak)
+          aggregateTotals.gableTopoutCount++;
+        } else if (cls === 'topout') {
+          const lineMeasurement = calculateLineMeasurements(points, scaleRatio);
+          aggregateTotals.topoutCount++;
+          aggregateTotals.topoutLf += lineMeasurement.length_lf;
         } else if (cls === 'gutter') {
           const lineMeasurement = calculateLineMeasurements(points, scaleRatio);
           aggregateTotals.gutterCount++;
@@ -3541,6 +3617,7 @@ export default function DetectionEditor({
       // These are line-type detections that have both count and total_lf
       const linearDetections = [
         { key: 'belly_band', count: totals.bellyBandCount, lf: totals.bellyBandLf },
+        { key: 'topout', count: totals.topoutCount, lf: totals.topoutLf },
         { key: 'fascia', count: totals.fasciaCount, lf: totals.fasciaLf },
         { key: 'gutter', count: totals.gutterCount, lf: totals.gutterLf },
         { key: 'eave', count: totals.eavesCount, lf: totals.eavesLf },
@@ -3594,6 +3671,21 @@ export default function DetectionEditor({
           display_name: downspoutInfo.display_name,
           measurement_type: downspoutInfo.measurement_type,
           unit: downspoutInfo.unit
+        };
+      }
+
+      // Add gable_topout as a count measurement (point per gable peak)
+      if (totals.gableTopoutCount > 0) {
+        const gableTopoutInfo = CLASS_COUNT_INFO['gable_topout'] || {
+          display_name: 'Gable Top-Out',
+          measurement_type: 'count' as const,
+          unit: 'EA'
+        };
+        detectionCounts['gable_topout'] = {
+          count: totals.gableTopoutCount,
+          display_name: gableTopoutInfo.display_name,
+          measurement_type: gableTopoutInfo.measurement_type,
+          unit: gableTopoutInfo.unit
         };
       }
 
@@ -4438,7 +4530,7 @@ export default function DetectionEditor({
             />
 
             {/* Estimate Settings Panel - slides out between toolbar and canvas */}
-            {showEstimateSettings && (
+            {showEstimateSettings && configLoaded && (
               <EstimateSettingsPanel
                 isOpen={showEstimateSettings}
                 onClose={() => setShowEstimateSettings(false)}
@@ -4449,7 +4541,6 @@ export default function DetectionEditor({
                 onTrimSystemChange={handleTrimSystemChange}
                 wrbProduct={wrbProduct}
                 onWrbProductChange={handleWrbProductChange}
-                isLoading={isEstimateSettingsLoading}
                 estimateConfig={estimateConfig}
                 onEstimateConfigChange={saveEstimateConfigExpanded}
               />

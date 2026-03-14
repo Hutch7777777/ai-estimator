@@ -1,7 +1,7 @@
-// EstimateSettingsPanel/index.tsx — Phase 2
+// EstimateSettingsPanel/index.tsx — Phase 2 (Simplified Save Flow)
 'use client';
 
-import React, { useState, useCallback, useEffect, useRef } from 'react';
+import React, { useState, useCallback, useEffect, useRef, useMemo } from 'react';
 import { X, Settings } from 'lucide-react';
 
 import type {
@@ -27,69 +27,171 @@ import { OverheadSection } from './OverheadSection';
 export type { TrimSystem, EstimateSettingsPanelProps, EstimateConfig };
 export type { CalculatedMeasurements } from './types';
 
+// Simple debounce helper
+function debounce<T extends (...args: unknown[]) => void>(fn: T, ms: number): T {
+  let timeoutId: NodeJS.Timeout | null = null;
+  return ((...args: unknown[]) => {
+    if (timeoutId) clearTimeout(timeoutId);
+    timeoutId = setTimeout(() => fn(...args), ms);
+  }) as T;
+}
+
 export default function EstimateSettingsPanel({
   isOpen, onClose,
   markupPercent, onMarkupChange, onMarkupSave,
   trimSystem, onTrimSystemChange,
   wrbProduct, onWrbProductChange,
-  isLoading = false,
   estimateConfig, onEstimateConfigChange,
   calculatedValues, overheadDefaults,
 }: EstimateSettingsPanelProps) {
+  // Local config state - initialized with defaults, will be populated from DB
   const [config, setConfig] = useState<EstimateConfig>(() => ({
     ...DEFAULT_ESTIMATE_CONFIG,
     trim_system: trimSystem,
     wrb_product: wrbProduct as EstimateConfig['wrb_product'],
-    ...estimateConfig,
-    overhead: { ...DEFAULT_OVERHEAD, ...overheadDefaults, ...estimateConfig?.overhead },
+    overhead: { ...DEFAULT_OVERHEAD, ...overheadDefaults },
   }));
 
+  // Track if we've initialized from DB config (prevents saving defaults)
+  const [hasInitialized, setHasInitialized] = useState(false);
   const [localMarkup, setLocalMarkup] = useState<string>(String(markupPercent));
 
+  // 2-second mount guard: prevents saving defaults before DB data loads
+  const [canSave, setCanSave] = useState(false);
+  const mountTimeRef = useRef<number>(Date.now());
+
+  // Enable saves after 2 seconds (gives DB time to load)
+  useEffect(() => {
+    const timeout = setTimeout(() => {
+      setCanSave(true);
+      console.log('✅ EstimateSettingsPanel: save guard lifted after 2s');
+    }, 2000);
+    return () => clearTimeout(timeout);
+  }, []);
+
+  // Initialize from DB config when it arrives (runs once)
+  useEffect(() => {
+    if (!hasInitialized && estimateConfig && Object.keys(estimateConfig).length > 0) {
+      setConfig({
+        ...DEFAULT_ESTIMATE_CONFIG,
+        ...estimateConfig,
+        // Deep merge sections to preserve defaults for missing fields
+        window_trim: { ...DEFAULT_ESTIMATE_CONFIG.window_trim, ...estimateConfig.window_trim },
+        door_trim: { ...DEFAULT_ESTIMATE_CONFIG.door_trim, ...estimateConfig.door_trim },
+        top_out: { ...DEFAULT_ESTIMATE_CONFIG.top_out, ...estimateConfig.top_out },
+        belly_band: { ...DEFAULT_ESTIMATE_CONFIG.belly_band, ...estimateConfig.belly_band },
+        corners: { ...DEFAULT_ESTIMATE_CONFIG.corners, ...estimateConfig.corners },
+        wrb: { ...DEFAULT_ESTIMATE_CONFIG.wrb, ...estimateConfig.wrb },
+        flashing: { ...DEFAULT_ESTIMATE_CONFIG.flashing, ...estimateConfig.flashing },
+        consumables: { ...DEFAULT_ESTIMATE_CONFIG.consumables, ...estimateConfig.consumables },
+        overhead: { ...DEFAULT_OVERHEAD, ...overheadDefaults, ...estimateConfig.overhead },
+      });
+      setHasInitialized(true);
+      console.log('✅ EstimateSettingsPanel initialized from DB config');
+    }
+  }, [estimateConfig, hasInitialized, overheadDefaults]);
+
+  // Sync full estimateConfig prop into local state when it changes (after initialization)
+  // This ensures DB-loaded config is reflected even if it arrives after hasInitialized is set
+  const prevEstimateConfigRef = useRef(estimateConfig);
+  useEffect(() => {
+    // Skip if this is the same reference or we haven't initialized yet
+    if (!hasInitialized || estimateConfig === prevEstimateConfigRef.current) return;
+
+    // Only sync if the incoming config has meaningful data (not just defaults)
+    if (estimateConfig && Object.keys(estimateConfig).length > 0) {
+      console.log('🔄 Syncing estimateConfig prop changes to local state');
+      setConfig(prev => ({
+        ...prev,
+        ...estimateConfig,
+        // Deep merge sections
+        window_trim: { ...prev.window_trim, ...estimateConfig.window_trim },
+        door_trim: { ...prev.door_trim, ...estimateConfig.door_trim },
+        top_out: { ...prev.top_out, ...estimateConfig.top_out },
+        belly_band: { ...prev.belly_band, ...estimateConfig.belly_band },
+        corners: { ...prev.corners, ...estimateConfig.corners },
+        wrb: { ...prev.wrb, ...estimateConfig.wrb },
+        flashing: { ...prev.flashing, ...estimateConfig.flashing },
+        consumables: { ...prev.consumables, ...estimateConfig.consumables },
+        overhead: { ...prev.overhead, ...estimateConfig.overhead },
+      }));
+    }
+    prevEstimateConfigRef.current = estimateConfig;
+  }, [estimateConfig, hasInitialized]);
+
+  // If no DB config after 1 second, initialize anyway so saves work
+  useEffect(() => {
+    const timeout = setTimeout(() => {
+      if (!hasInitialized) {
+        setHasInitialized(true);
+        console.log('✅ EstimateSettingsPanel initialized with defaults (no DB config)');
+      }
+    }, 1000);
+    return () => clearTimeout(timeout);
+  }, [hasInitialized]);
+
+  // Sync trimSystem prop changes
   useEffect(() => { setConfig(prev => ({ ...prev, trim_system: trimSystem })); }, [trimSystem]);
+
+  // Sync wrbProduct prop changes
   useEffect(() => {
     setConfig(prev => ({
       ...prev, wrb_product: wrbProduct as EstimateConfig['wrb_product'],
       wrb: { ...prev.wrb, product: wrbProduct as EstimateConfig['wrb_product'] },
     }));
   }, [wrbProduct]);
+
+  // Sync markup prop changes
   useEffect(() => { setLocalMarkup(String(markupPercent)); }, [markupPercent]);
 
-  const saveTimerRef = useRef<NodeJS.Timeout | null>(null);
-  const emitConfigChange = useCallback((newConfig: EstimateConfig) => {
-    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
-    saveTimerRef.current = setTimeout(() => { onEstimateConfigChange?.(newConfig); }, 500);
-  }, [onEstimateConfigChange]);
+  // Debounced save - fires 500ms after last config change
+  // Guard: requires both hasInitialized AND canSave (2-second mount guard)
+  const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
+  useEffect(() => {
+    // Must be initialized AND past the 2-second mount guard
+    if (!hasInitialized || !canSave) return;
+
+    if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
+    saveTimeoutRef.current = setTimeout(() => {
+      console.log('💾 Auto-saving estimate config...', {
+        overhead_dumpster: config.overhead?.include_dumpster,
+        overhead_toilet: config.overhead?.include_toilet,
+        consumables_paintable: config.consumables?.include_paintable_caulk,
+      });
+      onEstimateConfigChange?.(config);
+    }, 500);
+
+    return () => {
+      if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
+    };
+  }, [config, hasInitialized, canSave, onEstimateConfigChange]);
+
+  // Update a single config key
   const updateConfig = useCallback(<K extends keyof EstimateConfig>(key: K, value: EstimateConfig[K]) => {
-    setConfig(prev => {
-      const next = { ...prev, [key]: value };
-      emitConfigChange(next);
-      return next;
-    });
-  }, [emitConfigChange]);
+    setConfig(prev => ({ ...prev, [key]: value }));
+  }, []);
 
+  // Handle trim system change with cascading updates
   const handleTrimSystemChange = useCallback((newSystem: TrimSystem) => {
     onTrimSystemChange(newSystem);
     const cascade = TRIM_SYSTEM_CASCADES[newSystem];
-    setConfig(prev => {
-      const next: EstimateConfig = {
-        ...prev, trim_system: newSystem,
-        window_trim: { ...prev.window_trim, ...cascade.window_trim },
-        door_trim: { ...prev.door_trim, ...cascade.door_trim },
-        flashing: { ...prev.flashing, ...cascade.flashing },
-        consumables: { ...prev.consumables, ...cascade.consumables },
-      };
-      emitConfigChange(next);
-      return next;
-    });
-  }, [onTrimSystemChange, emitConfigChange]);
+    setConfig(prev => ({
+      ...prev, trim_system: newSystem,
+      window_trim: { ...prev.window_trim, ...cascade.window_trim },
+      door_trim: { ...prev.door_trim, ...cascade.door_trim },
+      flashing: { ...prev.flashing, ...cascade.flashing },
+      consumables: { ...prev.consumables, ...cascade.consumables },
+    }));
+  }, [onTrimSystemChange]);
 
+  // Handle WRB change
   const handleWRBChange = useCallback((wrb: WRBSettings) => {
     onWrbProductChange(wrb.product);
     updateConfig('wrb', wrb);
   }, [onWrbProductChange, updateConfig]);
 
+  // Handle markup blur (save on blur)
   const handleMarkupBlur = useCallback(() => {
     const value = parseFloat(localMarkup);
     if (!isNaN(value) && value >= 0 && value <= 100) {
@@ -115,12 +217,6 @@ export default function EstimateSettingsPanel({
           <X className="w-4 h-4 text-gray-500" />
         </button>
       </div>
-
-      {isLoading && (
-        <div className="px-3 py-2 bg-blue-900/20 border-b border-blue-800/30">
-          <span className="text-xs text-blue-400">Loading settings...</span>
-        </div>
-      )}
 
       <div className="flex-1 overflow-y-auto">
         {/* General */}
