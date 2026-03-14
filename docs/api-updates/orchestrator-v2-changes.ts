@@ -98,6 +98,8 @@ async function calculateWithAutoScopeV2_UPDATED_SECTION(
         door_trim: estimateSettings.door_trim?.include,
         top_out: estimateSettings.top_out?.include,
         belly_band: estimateSettings.belly_band?.include,
+        gable_topout: estimateSettings.gable_topout?.include,
+        topout: estimateSettings.topout?.include,
         flashing: estimateSettings.flashing ? 'configured' : 'default',
         consumables: estimateSettings.consumables ? 'configured' : 'default',
         overhead: estimateSettings.overhead ? 'configured' : 'default',
@@ -106,6 +108,8 @@ async function calculateWithAutoScopeV2_UPDATED_SECTION(
         window_lf: estimateSettings.window_trim?.manual_lf,
         door_lf: estimateSettings.door_trim?.manual_lf,
         belly_band_lf: estimateSettings.belly_band?.manual_lf,
+        gable_topout_lf: estimateSettings.gable_topout?.manual_lf,
+        topout_lf: estimateSettings.topout?.manual_lf,
         corner_count: estimateSettings.corners?.outside_count,
       },
     }));
@@ -296,9 +300,85 @@ function applyOverheadOverrides_EXAMPLE(
     dumpster: overheadConfig.include_dumpster,
     toilet: overheadConfig.include_toilet,
     mobilization: overheadConfig.mobilization_total,
+    li_hourly_rate: overheadConfig.li_hourly_rate,
     crew_size: overheadConfig.crew_size,
     weeks: overheadConfig.estimated_weeks,
   });
+}
+
+// ============================================================================
+// CHANGE 4 (Phase 2B): L&I Insurance Line Item - Use Actual Rate in Notes
+// When generating the L&I Insurance overhead line item, use the actual
+// li_hourly_rate from config instead of a hardcoded value in the notes string
+// ============================================================================
+
+/**
+ * Generate L&I Insurance overhead line item with dynamic rate in notes
+ *
+ * LOCATION: Find where overhead line items are generated (search for "L&I Insurance"
+ * or "li_hourly_rate" or where overhead.line_items is built)
+ *
+ * PROBLEM: The notes string may have a hardcoded rate like "$3.56 per man-hour"
+ * SOLUTION: Use the actual li_hourly_rate from overheadConfig in the notes
+ *
+ * @example
+ * // BEFORE (hardcoded rate):
+ * {
+ *   name: 'L&I Insurance',
+ *   notes: '$3.56 per man-hour × total labor hours',
+ *   ...
+ * }
+ *
+ * // AFTER (dynamic rate):
+ * {
+ *   name: 'L&I Insurance',
+ *   notes: `$${overheadConfig.li_hourly_rate?.toFixed(2) || '3.56'} per man-hour × ${totalLaborHours.toFixed(1)} hours`,
+ *   ...
+ * }
+ */
+function generateLIInsuranceLineItem_EXAMPLE(
+  overheadConfig: {
+    li_hourly_rate?: number;
+    crew_size?: number;
+    estimated_weeks?: number;
+  },
+  totalLaborHours: number
+): {
+  name: string;
+  quantity: number;
+  unit: string;
+  equipment_unit_cost: number;
+  notes: string;
+} {
+  // Get the actual L&I rate (default to $3.56 if not configured)
+  const liRate = overheadConfig.li_hourly_rate ?? 3.56;
+  const liCost = totalLaborHours * liRate;
+
+  return {
+    name: 'L&I Insurance',
+    quantity: 1,
+    unit: 'job',
+    equipment_unit_cost: liCost,
+    // Use actual rate in notes - NOT hardcoded
+    notes: `$${liRate.toFixed(2)} per man-hour × ${totalLaborHours.toFixed(1)} hours`,
+  };
+}
+
+/**
+ * Calculate total labor hours from crew size and estimated weeks
+ *
+ * Standard formula: crew_size × estimated_weeks × 40 hours/week
+ *
+ * @example
+ * // 3-person crew for 2 weeks = 240 man-hours
+ * const hours = 3 * 2 * 40; // 240
+ */
+function calculateTotalLaborHours(
+  crewSize: number = 3,
+  estimatedWeeks: number = 2
+): number {
+  const hoursPerWeek = 40;
+  return crewSize * estimatedWeeks * hoursPerWeek;
 }
 
 export { };

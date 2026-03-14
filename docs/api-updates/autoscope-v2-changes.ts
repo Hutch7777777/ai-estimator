@@ -82,6 +82,14 @@ interface DbTriggerCondition {
   // When present in a rule's trigger_condition, the rule only fires if
   // the payload's trim_system matches this value
   trim_system?: 'hardie' | 'whitewood';
+
+  // NEW (v2.3): Config match for string equality checks against estimateSettings
+  // Similar to config_toggle but for string values instead of booleans
+  // Used to conditionally fire rules based on dropdown/select values
+  config_match?: {
+    path: string;   // Dot-notation path into estimateSettings (e.g., "flashing.window_head")
+    value: string;  // Expected value for the rule to fire (e.g., "z_flashing")
+  };
 }
 
 // ============================================================================
@@ -631,6 +639,38 @@ export async function generateAutoScopeItemsV2(
 }
 
 // ============================================================================
+// CHANGE 5b: Add resolveConfigValue() helper for config_match
+// Walks a dot-notation path and returns the raw value (not coerced to boolean)
+// ============================================================================
+
+/**
+ * Resolve a dot-notation path against an object and return the raw value.
+ * Used by config_match to check string equality against estimateSettings.
+ *
+ * @param obj - The object to traverse (e.g., estimateSettings)
+ * @param path - Dot-notation path (e.g., "flashing.window_head")
+ * @returns The raw value at the path, or undefined if not found
+ *
+ * @example
+ * resolveConfigValue({ flashing: { window_head: 'z_flashing' } }, 'flashing.window_head')
+ * // Returns: 'z_flashing'
+ */
+function resolveConfigValue(obj: Record<string, unknown> | null | undefined, path: string): unknown {
+  if (!obj || !path) return undefined;
+
+  const parts = path.split('.');
+  let current: unknown = obj;
+
+  for (const part of parts) {
+    if (current === null || current === undefined) return undefined;
+    if (typeof current !== 'object') return undefined;
+    current = (current as Record<string, unknown>)[part];
+  }
+
+  return current;
+}
+
+// ============================================================================
 // CHANGE 6: Replace shouldApplyRule() function
 // Updated to support material_category and sku_pattern trigger conditions
 // ============================================================================
@@ -853,6 +893,27 @@ function shouldApplyRule(
       };
     }
     // If we get here, sku_pattern check passed - continue to other checks
+  }
+
+  // =========================================================================
+  // Check config_match condition (NEW v2.3)
+  // String equality check against estimateSettings values
+  // =========================================================================
+  if (condition.config_match) {
+    const { path, value } = condition.config_match;
+    const actualValue = resolveConfigValue(estimateSettings as Record<string, unknown>, path);
+
+    // If path resolves to undefined/null, let the rule fire (backwards compatible)
+    if (actualValue !== undefined && actualValue !== null) {
+      if (String(actualValue) !== value) {
+        console.log(`🔀 Rule ${rule.rule_id}: ${rule.name || rule.rule_name} — SKIPPED (config match failed: ${path}=${actualValue}, expected ${value})`);
+        return {
+          applies: false,
+          reason: `config_match failed: ${path}=${actualValue}, expected ${value}`
+        };
+      }
+    }
+    // If actualValue is undefined/null, continue (don't skip rule)
   }
 
   // =========================================================================
