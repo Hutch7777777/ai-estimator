@@ -714,7 +714,29 @@ function shouldApplyRule(
     : (assignedMaterials || []);
 
   // =========================================================================
-  // Check "always" condition first
+  // Check config_match condition FIRST (NEW v2.3)
+  // String equality check against estimateSettings values
+  // This runs BEFORE always:true so config_match can block even "always" rules
+  // =========================================================================
+  if (condition.config_match) {
+    const { path, value } = condition.config_match;
+    const actualValue = resolveConfigValue(estimateSettings as Record<string, unknown>, path);
+
+    // If path resolves to undefined/null, let the rule fire (backwards compatible)
+    if (actualValue !== undefined && actualValue !== null) {
+      if (String(actualValue) !== value) {
+        console.log(`🔀 Rule ${rule.rule_id}: ${rule.name || rule.rule_name} — SKIPPED (config match failed: ${path}=${actualValue}, expected ${value})`);
+        return {
+          applies: false,
+          reason: `config_match failed: ${path}=${actualValue}, expected ${value}`
+        };
+      }
+    }
+    // If actualValue is undefined/null, continue (don't skip rule)
+  }
+
+  // =========================================================================
+  // Check "always" condition
   // =========================================================================
   if (condition.always === true) {
     return { applies: true, reason: 'always=true' };
@@ -893,27 +915,6 @@ function shouldApplyRule(
       };
     }
     // If we get here, sku_pattern check passed - continue to other checks
-  }
-
-  // =========================================================================
-  // Check config_match condition (NEW v2.3)
-  // String equality check against estimateSettings values
-  // =========================================================================
-  if (condition.config_match) {
-    const { path, value } = condition.config_match;
-    const actualValue = resolveConfigValue(estimateSettings as Record<string, unknown>, path);
-
-    // If path resolves to undefined/null, let the rule fire (backwards compatible)
-    if (actualValue !== undefined && actualValue !== null) {
-      if (String(actualValue) !== value) {
-        console.log(`🔀 Rule ${rule.rule_id}: ${rule.name || rule.rule_name} — SKIPPED (config match failed: ${path}=${actualValue}, expected ${value})`);
-        return {
-          applies: false,
-          reason: `config_match failed: ${path}=${actualValue}, expected ${value}`
-        };
-      }
-    }
-    // If actualValue is undefined/null, continue (don't skip rule)
   }
 
   // =========================================================================
