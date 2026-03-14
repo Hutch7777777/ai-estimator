@@ -315,24 +315,33 @@ function applyOverheadOverrides_EXAMPLE(
 /**
  * Generate L&I Insurance overhead line item with dynamic rate in notes
  *
- * LOCATION: Find where overhead line items are generated (search for "L&I Insurance"
- * or "li_hourly_rate" or where overhead.line_items is built)
+ * LOCATION: Find where overhead line items are generated. Search for:
+ *   grep -n "3.56" src/calculations/siding/orchestrator-v2.ts
+ *   grep -n "L&I Insurance" src/calculations/siding/orchestrator-v2.ts
+ *   grep -n "per man-hour" src/calculations/siding/orchestrator-v2.ts
  *
- * PROBLEM: The notes string may have a hardcoded rate like "$3.56 per man-hour"
+ * PROBLEM: The notes string has a hardcoded rate like "$3.56 per man-hour"
  * SOLUTION: Use the actual li_hourly_rate from overheadConfig in the notes
  *
+ * FIND AND REPLACE:
+ *   FIND:    notes: '$3.56 per man-hour × total labor hours'
+ *   REPLACE: notes: `$${liRate.toFixed(2)} per man-hour × ${totalLaborHours.toFixed(1)} hours`
+ *
+ * Where liRate = overheadConfig.li_hourly_rate ?? 3.56
+ *
  * @example
- * // BEFORE (hardcoded rate):
+ * // BEFORE (hardcoded rate - FIND THIS):
  * {
  *   name: 'L&I Insurance',
- *   notes: '$3.56 per man-hour × total labor hours',
+ *   notes: '$3.56 per man-hour × total labor hours',  // <-- HARDCODED!
  *   ...
  * }
  *
- * // AFTER (dynamic rate):
+ * // AFTER (dynamic rate - REPLACE WITH THIS):
+ * const liRate = overheadConfig.li_hourly_rate ?? 3.56;
  * {
  *   name: 'L&I Insurance',
- *   notes: `$${overheadConfig.li_hourly_rate?.toFixed(2) || '3.56'} per man-hour × ${totalLaborHours.toFixed(1)} hours`,
+ *   notes: `$${liRate.toFixed(2)} per man-hour × ${totalLaborHours.toFixed(1)} hours`,
  *   ...
  * }
  */

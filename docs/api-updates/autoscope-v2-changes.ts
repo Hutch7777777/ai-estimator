@@ -722,6 +722,15 @@ function shouldApplyRule(
     const { path, value } = condition.config_match;
     const actualValue = resolveConfigValue(estimateSettings as Record<string, unknown>, path);
 
+    // Debug logging to trace config_match evaluation
+    console.log('🔍 config_match check:', {
+      rule: rule.rule_name || rule.rule_id,
+      path,
+      expected: value,
+      actual: actualValue,
+      estimateSettingsKeys: estimateSettings ? Object.keys(estimateSettings) : 'null',
+    });
+
     // If path resolves to undefined/null, let the rule fire (backwards compatible)
     if (actualValue !== undefined && actualValue !== null) {
       if (String(actualValue) !== value) {
