@@ -4075,7 +4075,12 @@ export default function DetectionEditor({
     const rawTotals = allPagesTotals || liveDerivedTotals || jobTotals;
 
     if (!jobId || !rawTotals) {
-      console.error('[Approve] Missing job ID or calculations');
+      console.error('[Approve] Missing job ID or calculations:', {
+        jobId: !!jobId,
+        allPagesTotals: !!allPagesTotals,
+        liveDerivedTotals: !!liveDerivedTotals,
+        jobTotals: !!jobTotals,
+      });
       return;
     }
 
@@ -4510,7 +4515,7 @@ export default function DetectionEditor({
             reviewProgress={reviewProgress}
             onApprove={handleApprove}
             isApproving={isApproving}
-            canApprove={!!liveDerivedTotals || hasBluebeamData}
+            canApprove={!!allPagesTotals || !!liveDerivedTotals || !!jobTotals}
             isApproved={!!approvalResult}
             // Bluebeam export props
             onExportBluebeam={handleExportBluebeam}
