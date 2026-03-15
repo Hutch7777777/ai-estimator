@@ -77,7 +77,6 @@ export async function searchProducts(
   }
 ): Promise<{ data: ProductCatalog[] | null; error: Error | null }> {
   try {
-    console.log('🔍 searchProducts called with:', { query, options });
     const supabase = createClient();
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -88,20 +87,15 @@ export async function searchProducts(
     // Only apply text search if query is not empty
     if (query && query.trim()) {
       queryBuilder = queryBuilder.or(`product_name.ilike.%${query}%,sku.ilike.%${query}%,manufacturer.ilike.%${query}%`);
-      console.log('📊 Query pattern:', `product_name.ilike.%${query}%,sku.ilike.%${query}%,manufacturer.ilike.%${query}%`);
-    } else {
-      console.log('📊 No text search - fetching all products (will be filtered by category/manufacturer if set)');
     }
 
     // Apply optional filters
     if (options?.category) {
       queryBuilder = queryBuilder.ilike('category', options.category);
-      console.log('🏷️ Filtering by category (case-insensitive):', options.category);
     }
 
     if (options?.manufacturer) {
       queryBuilder = queryBuilder.ilike('manufacturer', options.manufacturer);
-      console.log('🏭 Filtering by manufacturer (case-insensitive):', options.manufacturer);
     }
 
     // Limit results (default 50)
@@ -112,32 +106,14 @@ export async function searchProducts(
 
     const { data, error } = await queryBuilder;
 
-    console.log('✅ Search results:', {
-      resultCount: data?.length || 0,
-      hasError: !!error,
-      errorMessage: error?.message,
-      errorDetails: error,
-    });
-
     if (error) {
-      console.error('❌ Error searching products:', error);
+      console.error('Error searching products:', error);
       return { data: null, error: new Error(error.message) };
-    }
-
-    if (data) {
-      console.log(
-        '📦 Sample products:',
-        data.slice(0, 3).map((p: any) => ({
-          id: p.id,
-          name: p.product_name,
-          sku: p.sku,
-        }))
-      );
     }
 
     return { data, error: null };
   } catch (err) {
-    console.error('💥 Unexpected error in searchProducts:', err);
+    console.error('Unexpected error in searchProducts:', err);
     return {
       data: null,
       error: err instanceof Error ? err : new Error('Unknown error'),

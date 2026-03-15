@@ -201,7 +201,6 @@ export function HoverUploadStep({ data, onUpdate }: HoverUploadStepProps) {
       created_at: new Date().toISOString()
     };
 
-    console.log('🔍 Webhook payload (cleaned):', JSON.stringify(payload, null, 2));
     return payload;
   };
 
@@ -232,9 +231,6 @@ export function HoverUploadStep({ data, onUpdate }: HoverUploadStepProps) {
 
   // Main handler
   const handleGenerateEstimate = async () => {
-    console.log('🔍 Full form data:', JSON.stringify(data, null, 2));
-    console.log('🔍 Available keys:', Object.keys(data));
-
     if (!selectedFile) return;
 
     // Verify organization is selected before proceeding

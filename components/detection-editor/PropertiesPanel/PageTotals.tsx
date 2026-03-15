@@ -289,24 +289,6 @@ const GrandTotalRow = memo(function GrandTotalRow({
 const PageTotals = memo(function PageTotals({ detections, scaleRatio }: PageTotalsProps) {
   // Calculate totals grouped by class
   const { classTotals, grandTotal } = useMemo(() => {
-    // Debug logging to diagnose derived measurement calculations
-    const detectionsWithPolygonPoints = detections.filter(d => {
-      const simplePoints = getSimplePolygonPoints(d.polygon_points);
-      return simplePoints && simplePoints.length > 0;
-    }).length;
-    const samplePoints = detections[0] ? getSimplePolygonPoints(detections[0].polygon_points) : null;
-    console.log('[PageTotals Debug]', {
-      totalDetections: detections.length,
-      scaleRatio,
-      detectionsWithPolygonPoints,
-      sampleDetection: detections[0] ? {
-        class: detections[0].class,
-        hasPolygonPoints: !!detections[0].polygon_points,
-        polygonPointsLength: samplePoints?.length || 0,
-        status: detections[0].status,
-      } : null,
-    });
-
     // Filter out deleted detections and internal classes
     const validDetections = detections.filter((d) => {
       if (d.status === 'deleted') return false;

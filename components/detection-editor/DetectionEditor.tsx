@@ -36,6 +36,7 @@ import type {
   DetectionStatus,
   AllDetectionClasses,
   ExtractionDetection,
+  ExtractionJobTotals,
   PolygonPoint,
   MarkupType,
   LiveDerivedTotals,
@@ -3571,18 +3572,6 @@ export default function DetectionEditor({
       const selectedTrades = Array.from(trades);
 
       // Log trade detection for debugging
-      const materialsByClass = detectionsWithMaterials.reduce((acc, d) => {
-        acc[d.class] = (acc[d.class] || 0) + 1;
-        return acc;
-      }, {} as Record<string, number>);
-
-      console.log('[Approve] Trade detection:', {
-        totalDetections: allDetections.length,
-        detectionsWithMaterials: detectionsWithMaterials.length,
-        materialsByClass,
-        selectedTrades,
-      });
-
       // Build enriched detection_counts from countsByClass
       const detectionCounts: Record<string, {
         count: number;
@@ -3689,7 +3678,23 @@ export default function DetectionEditor({
         };
       }
 
-      console.log('[Approve] Detection counts:', detectionCounts);
+      // Bluebeam count items: aggregate item_count by bluebeam_content
+      // These are Bluebeam count annotations stored as polygons with item_count > 0
+      // e.g., "1\" x 6\" WW Trim Count = 64", "Corbel Count = 10"
+      allDetections.forEach(detection => {
+        if (detection.item_count && detection.item_count > 0 && detection.bluebeam_content) {
+          const key = detection.bluebeam_content;
+          if (!detectionCounts[key]) {
+            detectionCounts[key] = {
+              count: 0,
+              display_name: detection.bluebeam_content,
+              measurement_type: 'count' as const,
+              unit: 'EA'
+            };
+          }
+          detectionCounts[key].count += detection.item_count;
+        }
+      });
 
       return {
         job_id: jobId,
@@ -3815,6 +3820,39 @@ export default function DetectionEditor({
             perimeter_lf: totals.garagePerimeterLf,
           },
         },
+
+        // Collect Bluebeam detections that have content but no material assigned
+        // These will flow through to the takeoff as flagged items needing pricing
+        unmatched_bluebeam_items: (() => {
+          const unmatchedMap: Record<string, {
+            bluebeam_content: string;
+            class: string;
+            total_area_sf: number;
+            total_item_count: number;
+            annotation_count: number;
+          }> = {};
+
+          allDetections
+            .filter(d => d.bluebeam_content && !d.assigned_material_id && (d.class as string) !== 'deduction' && d.status !== 'deleted')
+            .forEach(d => {
+              const key = `${d.bluebeam_content}__${d.class}`;
+              if (!unmatchedMap[key]) {
+                unmatchedMap[key] = {
+                  bluebeam_content: d.bluebeam_content!,
+                  class: d.class,
+                  total_area_sf: 0,
+                  total_item_count: 0,
+                  annotation_count: 0,
+                };
+              }
+              unmatchedMap[key].total_area_sf += parseFloat(String(d.area_sf)) || 0;
+              unmatchedMap[key].total_item_count += parseInt(String(d.item_count)) || 0;
+              unmatchedMap[key].annotation_count += 1;
+            });
+
+          const items = Object.values(unmatchedMap);
+          return items.length > 0 ? items : undefined;
+        })(),
       };
     },
     [jobId, projectId, job?.project_name, getAllDetections, organization?.id, markupPercent, trimSystem, wrbProduct, estimateConfig]
@@ -4032,13 +4070,91 @@ export default function DetectionEditor({
   }, []);
 
   const handleApprove = useCallback(async () => {
-    // Use allPagesTotals (aggregated from all elevation pages) if available,
-    // otherwise fall back to liveDerivedTotals (current page only)
-    const totalsForApproval = allPagesTotals || liveDerivedTotals;
+    // Priority: allPagesTotals (live from all calibrated pages) > liveDerivedTotals (current page)
+    // > jobTotals (from DB - used for Bluebeam imports without calibrated pages)
+    const rawTotals = allPagesTotals || liveDerivedTotals || jobTotals;
 
-    if (!jobId || !totalsForApproval) {
+    if (!jobId || !rawTotals) {
       console.error('[Approve] Missing job ID or calculations');
       return;
+    }
+
+    // Convert ExtractionJobTotals (from DB) to LiveDerivedTotals format if needed
+    // ExtractionJobTotals uses snake_case (total_windows), LiveDerivedTotals uses camelCase (windowCount)
+    const isExtractionJobTotals = 'total_windows' in rawTotals || 'total_net_siding_sf' in rawTotals;
+
+    let totalsForApproval: LiveDerivedTotals;
+    if (isExtractionJobTotals) {
+      const dbTotals = rawTotals as ExtractionJobTotals;
+      totalsForApproval = {
+        // FACADE
+        buildingCount: 1,
+        buildingAreaSf: dbTotals.total_gross_facade_sf || 0,
+        buildingPerimeterLf: 0,
+        buildingLevelStarterLf: 0,
+        // WINDOWS
+        windowCount: dbTotals.total_windows || 0,
+        windowAreaSf: 0,
+        windowPerimeterLf: dbTotals.total_window_perimeter_lf || 0,
+        windowHeadLf: dbTotals.total_window_head_lf || 0,
+        windowJambLf: dbTotals.total_window_jamb_lf || 0,
+        windowSillLf: dbTotals.total_window_sill_lf || 0,
+        // DOORS
+        doorCount: dbTotals.total_doors || 0,
+        doorAreaSf: 0,
+        doorPerimeterLf: dbTotals.total_door_perimeter_lf || 0,
+        doorHeadLf: dbTotals.total_door_head_lf || 0,
+        doorJambLf: dbTotals.total_door_jamb_lf || 0,
+        // GARAGES
+        garageCount: dbTotals.total_garages || 0,
+        garageAreaSf: 0,
+        garagePerimeterLf: 0,
+        garageHeadLf: dbTotals.total_garage_head_lf || 0,
+        garageJambLf: 0,
+        // GABLES
+        gableCount: dbTotals.total_gables || 0,
+        gableAreaSf: 0,
+        gableRakeLf: dbTotals.total_gable_rake_lf || 0,
+        // CORNERS
+        insideCornerCount: dbTotals.inside_corners_count || 0,
+        insideCornerLf: dbTotals.inside_corners_lf || 0,
+        outsideCornerCount: dbTotals.outside_corners_count || 0,
+        outsideCornerLf: dbTotals.outside_corners_lf || 0,
+        // ROOFLINE
+        eavesCount: 0,
+        eavesLf: dbTotals.total_roof_eave_lf || 0,
+        rakesCount: 0,
+        rakesLf: 0,
+        ridgeCount: 0,
+        ridgeLf: 0,
+        valleyCount: 0,
+        valleyLf: 0,
+        // SOFFIT
+        soffitCount: 0,
+        soffitAreaSf: 0,
+        // FASCIA
+        fasciaCount: 0,
+        fasciaLf: 0,
+        // BELLY BAND
+        bellyBandCount: 0,
+        bellyBandLf: 0,
+        // GABLE TOP-OUT
+        gableTopoutCount: 0,
+        // TOP-OUT
+        topoutCount: 0,
+        topoutLf: 0,
+        // GUTTERS
+        gutterCount: 0,
+        gutterLf: 0,
+        downspoutCount: 0,
+        // SIDING
+        sidingNetSf: dbTotals.total_net_siding_sf || 0,
+        // COUNTS
+        countsByClass: {},
+        totalPointCount: 0,
+      };
+    } else {
+      totalsForApproval = rawTotals as LiveDerivedTotals;
     }
 
     setIsApproving(true);
@@ -4046,22 +4162,6 @@ export default function DetectionEditor({
     try {
       // Build the payload with all measurements (from all pages when available)
       const payload = buildApprovePayload(totalsForApproval);
-      console.log('[Approve] Using totals from:', allPagesTotals ? 'ALL PAGES' : 'CURRENT PAGE ONLY');
-      console.log('[Approve] Sending payload:', payload);
-      console.log('[Approve] Material assignments:', payload.material_assignments?.length || 0);
-      if (payload.material_assignments?.length) {
-        console.log('[Approve] Sample assignment:', payload.material_assignments[0]);
-        // Log assignments with price overrides
-        const withOverrides = payload.material_assignments.filter(
-          a => a.material_cost_override !== null || a.labor_cost_override !== null
-        );
-        if (withOverrides.length > 0) {
-          console.log(`[Approve] Assignments with price overrides: ${withOverrides.length}`);
-          withOverrides.forEach(a => {
-            console.log(`  - ${a.detection_class}: material=$${a.material_cost_override}, labor=$${a.labor_cost_override}`);
-          });
-        }
-      }
 
       const response = await fetch(
         '/api/n8n/approve-detection-editor',
@@ -4104,16 +4204,10 @@ export default function DetectionEditor({
         document.body.removeChild(a);
         window.URL.revokeObjectURL(url);
 
-        console.log('[Approve] Excel downloaded:', filename);
         toast.success(`Takeoff downloaded: ${filename}`);
       } else {
         // It's JSON - parse response text once
         const responseText = await response.text();
-        console.log('[Approve] ========== RAW API RESPONSE ==========');
-        console.log('[Approve] Response status:', response.status);
-        console.log('[Approve] Response length:', responseText.length);
-        console.log('[Approve] Raw response:', responseText);
-        console.log('[Approve] ========================================');
 
         let data: ApprovalResult;
         try {
@@ -4123,60 +4217,17 @@ export default function DetectionEditor({
           throw new Error(`Invalid JSON response: ${responseText.slice(0, 100)}`);
         }
 
-        console.log('[Approve] ========== PARSED RESULT ==========');
-        console.log('[Approve] Parsed result:', JSON.stringify(data, null, 2));
-        console.log('[Approve] Key fields:');
-        console.log('[Approve] - success:', data.success);
-        console.log('[Approve] - takeoff_id:', data.takeoff_id);
-        console.log('[Approve] - line_items_created:', data.line_items_created);
-        console.log('[Approve] ========== TOTALS DEBUG ==========');
-        console.log('[Approve] data.totals exists:', !!data.totals);
-        console.log('[Approve] data.totals keys:', data.totals ? Object.keys(data.totals) : 'N/A');
-        console.log('[Approve] data.totals full:', JSON.stringify(data.totals, null, 2));
-        if (data.totals) {
-          console.log('[Approve] totals.material_cost:', data.totals.material_cost);
-          console.log('[Approve] totals.labor_cost:', data.totals.labor_cost);
-          console.log('[Approve] totals.overhead_cost:', data.totals.overhead_cost);
-          console.log('[Approve] totals.subtotal:', data.totals.subtotal);
-          console.log('[Approve] totals.final_price:', data.totals.final_price);
-        }
-        console.log('[Approve] ========== PROJECT_TOTALS DEBUG ==========');
-        const debugPt = (data as { project_totals?: Record<string, unknown> }).project_totals;
-        console.log('[Approve] data.project_totals exists:', !!debugPt);
-        if (debugPt) {
-          console.log('[Approve] project_totals keys:', Object.keys(debugPt));
-          console.log('[Approve] project_totals.material_cost:', debugPt.material_cost);
-          console.log('[Approve] project_totals.installation_labor_subtotal:', debugPt.installation_labor_subtotal);
-          console.log('[Approve] project_totals.overhead_total:', debugPt.overhead_total);
-          console.log('[Approve] project_totals.grand_total:', debugPt.grand_total);
-        }
-        console.log('[Approve] ========================================');
-
         if (!data.success) {
-          throw new Error((data as { error?: string }).error || 'Approval failed');
+          console.error('[Approve] Approval failed:', (data as { error?: string }).error || (data as { message?: string }).message);
+          throw new Error((data as { error?: string }).error || (data as { message?: string }).message || 'Approval failed');
         }
 
         // Parse V2 response format (Mike Skjei methodology)
         if (isV2Response(data)) {
-          console.log('✅ Received V2 response with project_totals');
-
-          // Set the new state for V2 data
           setLaborSection(data.labor);
           setOverheadSection(data.overhead);
           setProjectTotals(data.project_totals);
-
-          // Log for debugging
-          console.log('📊 Project Totals:', data.project_totals);
-          console.log('👷 Labor Items:', data.labor?.installation_items?.length || 0);
-          console.log('🏗️ Overhead Items:', data.overhead?.items?.length || 0);
-
-          // Check for warnings in metadata
-          const metadata = (data as { metadata?: { warnings?: string[] } }).metadata;
-          if (metadata?.warnings?.length) {
-            console.warn('⚠️ Calculation warnings:', metadata.warnings);
-          }
         } else {
-          console.log('⚠️ Received legacy response format (no project_totals)');
           // Clear V2 state if using legacy format
           setLaborSection(undefined);
           setOverheadSection(undefined);
@@ -4184,9 +4235,7 @@ export default function DetectionEditor({
         }
 
         // Store the approval result and show the results panel
-        console.log('[Approve] Setting approvalResult:', data.takeoff_id);
         setApprovalResult(data);
-        console.log('[Approve] Setting showApprovalResults: true');
         setShowApprovalResults(true);
 
         // Format cost for toast (with defensive checks)
@@ -4197,7 +4246,6 @@ export default function DetectionEditor({
         // Priority: project_totals.grand_total (available) > totals.final_price (usually empty)
         const finalPrice: number = toastPt?.grand_total ?? toastTotals?.final_price ?? toastTotals?.grand_total ?? 0;
         const lineItemsCreated = data?.line_items_created ?? 0;
-        console.log('[Approve] Toast values:', { finalPrice, lineItemsCreated, project_totals: toastPt, totals: toastTotals });
         const formattedTotal = new Intl.NumberFormat('en-US', {
           style: 'currency',
           currency: 'USD',
@@ -4211,44 +4259,24 @@ export default function DetectionEditor({
         if (data.takeoff_id) {
           try {
             setIsLoadingDetails(true);
-            console.log('[Approve] Fetching takeoff details for:', data.takeoff_id);
             const detailsResponse = await fetch(`/api/takeoffs/${data.takeoff_id}`);
-            console.log('[Approve] Details response status:', detailsResponse.status);
-
             const details = await detailsResponse.json();
-            console.log('[Approve] Takeoff details response:', details);
 
             if (details.success && details.takeoff && Array.isArray(details.line_items)) {
-              console.log('[Approve] Setting takeoff details:', {
-                takeoff_id: details.takeoff?.id,
-                line_items_count: details.line_items?.length,
-              });
               setTakeoffDetails({
                 takeoff: details.takeoff,
                 line_items: details.line_items,
               });
-            } else {
-              console.warn('[Approve] Invalid takeoff details response:', {
-                success: details.success,
-                has_takeoff: !!details.takeoff,
-                has_line_items: Array.isArray(details.line_items),
-              });
-              // Don't set takeoffDetails - we'll just show the summary from approvalResult
             }
           } catch (detailsErr) {
             console.error('[Approve] Error fetching takeoff details:', detailsErr);
-            // Don't crash - we'll just show the summary data we already have
           } finally {
             setIsLoadingDetails(false);
           }
         }
       }
 
-      // Refresh data (but don't call onComplete yet - user needs to see the results panel first)
-      console.log('[Approve] About to call refresh()');
       await refresh();
-      console.log('[Approve] After refresh(), showApprovalResults should still be true');
-      // NOTE: onComplete is now called when user clicks "Done" button in the approval results panel
     } catch (err) {
       const error = err instanceof Error ? err : new Error('Approval failed');
       console.error('[Approve] Error:', error);
@@ -4263,6 +4291,7 @@ export default function DetectionEditor({
     jobId,
     allPagesTotals,
     liveDerivedTotals,
+    jobTotals,
     buildApprovePayload,
     refresh,
     onError,

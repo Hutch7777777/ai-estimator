@@ -65,6 +65,8 @@ export type DetectionClass =
   | 'corbel'
   | 'gable_vent'
   | 'belly_band'
+  | 'gable_topout'
+  | 'topout'
   | 'corner_inside'
   | 'corner_outside'
   | 'shutter'
@@ -537,6 +539,8 @@ export const DETECTION_CLASS_COLORS: Record<DetectionClass | InternalDetectionCl
   corbel: '#D97706',         // Amber-600
   gable_vent: '#7C3AED',     // Violet-600
   belly_band: '#DC2626',     // Red-600
+  gable_topout: '#C026D3',   // Fuchsia-600 - wall-to-gable transition
+  topout: '#A855F7',         // Purple-500 - top of wall at eave/soffit
   corner_inside: '#059669',  // Emerald-600
   corner_outside: '#0D9488', // Teal-600
   shutter: '#4F46E5',        // Indigo-600
@@ -577,6 +581,8 @@ export const USER_SELECTABLE_CLASSES: DetectionClass[] = [
   'corbel',
   'gable_vent',
   'belly_band',
+  'gable_topout',
+  'topout',
   // Note: corner_inside and corner_outside are excluded from user selection
   // They come from floor plan analysis, not manual markup
   'shutter',
@@ -613,6 +619,8 @@ export const CLASS_MEASUREMENT_TYPES: Record<DetectionClass, 'area' | 'linear' |
   corbel: 'count',
   gable_vent: 'count',
   belly_band: 'linear',
+  gable_topout: 'count',
+  topout: 'linear',
   corner_inside: 'count',
   corner_outside: 'count',
   shutter: 'count',
@@ -1107,6 +1115,11 @@ export interface LiveDerivedTotals {
   // BELLY BAND (line)
   bellyBandCount: number;
   bellyBandLf: number;
+  // GABLE TOP-OUT (count - point marker per gable peak)
+  gableTopoutCount: number;
+  // TOP-OUT (line - top of wall at eave/soffit)
+  topoutCount: number;
+  topoutLf: number;
   // GUTTERS
   gutterCount: number;
   gutterLf: number;
@@ -1343,6 +1356,15 @@ export interface ApprovePayload {
       perimeter_lf?: number;
     };
   };
+
+  // Bluebeam items with content but no assigned material (safety net for unmapped subjects)
+  unmatched_bluebeam_items?: Array<{
+    bluebeam_content: string;
+    class: string;
+    total_area_sf: number;
+    total_item_count: number;
+    annotation_count: number;
+  }>;
 }
 
 // =============================================================================

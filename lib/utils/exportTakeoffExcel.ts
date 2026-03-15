@@ -157,8 +157,12 @@ const PRESENTATION_GROUPS: Record<string, { title: string; color: string; order:
   'other': { title: 'OTHER MATERIALS', color: 'EEEEEE', order: 98 },
   'other materials': { title: 'OTHER MATERIALS', color: 'EEEEEE', order: 98 },
 
-  // 99. Overhead (always last)
+  // 99. Overhead
   'overhead': { title: 'OVERHEAD', color: 'E0E0E0', order: 99 },
+
+  // 100. Unmatched Items (Bluebeam items needing pricing - always render last with warning)
+  'unmatched': { title: '⚠️ UNMATCHED ITEMS — VERIFY PRICING', color: 'FFCDD2', order: 100 },
+  'unmatched items': { title: '⚠️ UNMATCHED ITEMS — VERIFY PRICING', color: 'FFCDD2', order: 100 },
 };
 
 // =============================================================================
