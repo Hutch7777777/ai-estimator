@@ -25,6 +25,7 @@ import {
   Pencil,
   Check,
   X,
+  Trash2,
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { toast } from "sonner";
@@ -68,6 +69,10 @@ export function ExtractionsTable() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editValue, setEditValue] = useState('');
   const [isSaving, setIsSaving] = useState(false);
+
+  // Delete confirmation state
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const [deletingJobId, setDeletingJobId] = useState<string | null>(null);
 
   const { organization, isLoading: isOrgLoading } = useOrganization();
 
@@ -117,6 +122,34 @@ export function ExtractionsTable() {
       toast.error(err instanceof Error ? err.message : 'Failed to update project name');
     } finally {
       setIsSaving(false);
+    }
+  };
+
+  // ==========================================================================
+  // Delete Functions
+  // ==========================================================================
+
+  const deleteJob = async (jobId: string) => {
+    setDeletingJobId(jobId);
+    try {
+      const response = await fetch(`/api/extraction-jobs/${jobId}`, {
+        method: 'DELETE',
+      });
+
+      if (!response.ok) {
+        const data = await response.json();
+        throw new Error(data.error || 'Failed to delete extraction job');
+      }
+
+      // Remove from local state
+      setJobs(prev => prev.filter(job => job.id !== jobId));
+      setConfirmDeleteId(null);
+      toast.success('Extraction job deleted');
+    } catch (err) {
+      console.error('[ExtractionsTable] Error deleting job:', err);
+      toast.error(err instanceof Error ? err.message : 'Failed to delete extraction job');
+    } finally {
+      setDeletingJobId(null);
     }
   };
 
@@ -437,28 +470,73 @@ export function ExtractionsTable() {
                   {formatDate(job.created_at)}
                 </TableCell>
                 <TableCell className="text-right">
-                  {job.status === "classified" ? (
-                    <Button variant="outline" size="sm" asChild>
-                      <Link href={`/dashboard/extractions/${job.id}/classify`}>
-                        <Eye className="mr-2 h-4 w-4" />
-                        Review
-                      </Link>
-                    </Button>
-                  ) : (job.status === "complete" || job.status === "approved") && job.project_id ? (
-                    <Button variant="outline" size="sm" asChild>
-                      <Link href={`/projects/${job.project_id}/extraction/${job.id}`}>
-                        <Eye className="mr-2 h-4 w-4" />
-                        Review
-                      </Link>
-                    </Button>
-                  ) : job.status === "failed" ? (
-                    <span className="text-sm text-muted-foreground">Failed</span>
-                  ) : (
-                    <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                      Processing...
-                    </div>
-                  )}
+                  <div className="flex items-center justify-end gap-2">
+                    {job.status === "classified" ? (
+                      <Button variant="outline" size="sm" asChild>
+                        <Link href={`/dashboard/extractions/${job.id}/classify`}>
+                          <Eye className="mr-2 h-4 w-4" />
+                          Review
+                        </Link>
+                      </Button>
+                    ) : (job.status === "complete" || job.status === "approved") && job.project_id ? (
+                      <Button variant="outline" size="sm" asChild>
+                        <Link href={`/projects/${job.project_id}/extraction/${job.id}`}>
+                          <Eye className="mr-2 h-4 w-4" />
+                          Review
+                        </Link>
+                      </Button>
+                    ) : job.status === "failed" ? (
+                      <span className="text-sm text-muted-foreground">Failed</span>
+                    ) : (
+                      <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                        Processing...
+                      </div>
+                    )}
+
+                    {/* Delete button with confirmation */}
+                    {confirmDeleteId === job.id ? (
+                      <div className="flex items-center gap-1">
+                        <Button
+                          size="sm"
+                          variant="destructive"
+                          className="h-8 px-2 bg-red-600 text-white hover:bg-red-700"
+                          onClick={() => deleteJob(job.id)}
+                          disabled={deletingJobId === job.id}
+                        >
+                          {deletingJobId === job.id ? (
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                          ) : (
+                            'Confirm'
+                          )}
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="h-8 px-2"
+                          onClick={() => setConfirmDeleteId(null)}
+                          disabled={deletingJobId === job.id}
+                        >
+                          Cancel
+                        </Button>
+                      </div>
+                    ) : (
+                      <Button
+                        size="icon"
+                        variant="ghost"
+                        className="h-8 w-8 text-gray-400 hover:text-red-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                        onClick={() => setConfirmDeleteId(job.id)}
+                        disabled={job.status === 'processing' || job.status === 'converting'}
+                        title={
+                          job.status === 'processing' || job.status === 'converting'
+                            ? 'Cannot delete while processing'
+                            : 'Delete extraction job'
+                        }
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    )}
+                  </div>
                 </TableCell>
               </TableRow>
             ))}

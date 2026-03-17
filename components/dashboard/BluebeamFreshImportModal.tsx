@@ -220,6 +220,17 @@ export function BluebeamFreshImportModal({
       const data: ImportResult = await response.json();
 
       if (data.success) {
+        // Re-enrich detections with material IDs from bluebeam_subject_mappings
+        try {
+          const enrichResponse = await fetch(`${EXTRACTION_API_URL}/reenrich-materials/${data.job_id}`, {
+            method: "POST",
+          });
+          const enrichResult = await enrichResponse.json();
+          console.log(`[Re-enrich] ${enrichResult.updated} detections assigned materials`);
+        } catch (enrichErr) {
+          console.warn("[Re-enrich] Failed to enrich materials:", enrichErr);
+        }
+
         setResult(data);
         setStep("summary");
         onJobCreated?.(data.job_id);
