@@ -240,7 +240,10 @@ const MarkupToolbar = memo(function MarkupToolbar({
             <TooltipTrigger asChild>
               <button
                 type="button"
-                onClick={onSettingsToggle}
+                onClick={() => {
+                  console.log('🔧 MarkupToolbar: Settings button clicked! disabled:', disabled);
+                  onSettingsToggle?.();
+                }}
                 disabled={disabled}
                 className={`
                   w-12 h-10 flex items-center justify-center relative transition-colors

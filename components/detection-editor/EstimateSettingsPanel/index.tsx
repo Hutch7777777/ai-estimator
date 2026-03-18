@@ -205,9 +205,10 @@ export default function EstimateSettingsPanel({
 
   if (!isOpen) return null;
   const trimInfo = TRIM_SYSTEM_INFO[trimSystem];
+  console.log('🔧 EstimateSettingsPanel rendering, isOpen:', isOpen);
 
   return (
-    <div className="w-80 h-full bg-gray-900 border-r border-gray-700 flex flex-col shrink-0 overflow-hidden">
+    <div className="w-80 h-full bg-gray-900 border-r border-gray-700 flex flex-col shrink-0 overflow-hidden z-30">
       <div className="flex items-center justify-between px-3 py-2.5 border-b border-gray-700 bg-gray-900">
         <div className="flex items-center gap-2">
           <Settings className="w-4 h-4 text-gray-400" />

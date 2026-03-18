@@ -337,7 +337,7 @@ export default function DetectionEditor({
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
 
   // Markups panel (bottom) collapsed state
-  const [isMarkupsPanelCollapsed, setIsMarkupsPanelCollapsed] = useState(false);
+  const [isMarkupsPanelCollapsed, setIsMarkupsPanelCollapsed] = useState(true);
 
   // Estimate settings panel state
   const [showEstimateSettings, setShowEstimateSettings] = useState(false);
@@ -4559,12 +4559,16 @@ export default function DetectionEditor({
               onDownloadMarkupPlans={handleDownloadMarkupPlans}
               isDownloadingMarkup={isDownloadingMarkup}
               selectedCount={selectedIds.size}
-              onSettingsToggle={() => setShowEstimateSettings(prev => !prev)}
+              onSettingsToggle={() => {
+                console.log('🔧 Settings toggle clicked! configLoaded:', configLoaded, 'showEstimateSettings before:', showEstimateSettings);
+                setShowEstimateSettings(prev => !prev);
+              }}
               isSettingsOpen={showEstimateSettings}
             />
 
             {/* Estimate Settings Panel - slides out between toolbar and canvas */}
-            {showEstimateSettings && configLoaded && (
+            {console.log('🔧 Panel render check: showEstimateSettings=', showEstimateSettings, 'configLoaded=', configLoaded)}
+            {showEstimateSettings && (
               <EstimateSettingsPanel
                 isOpen={showEstimateSettings}
                 onClose={() => setShowEstimateSettings(false)}
