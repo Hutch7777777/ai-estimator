@@ -3602,81 +3602,100 @@ export default function DetectionEditor({
         });
       }
 
-      // Add linear measurements (not in countsByClass, have dedicated fields)
-      // These are line-type detections that have both count and total_lf
-      const linearDetections = [
-        { key: 'belly_band', count: totals.bellyBandCount, lf: totals.bellyBandLf },
-        { key: 'topout', count: totals.topoutCount, lf: totals.topoutLf },
-        { key: 'fascia', count: totals.fasciaCount, lf: totals.fasciaLf },
-        { key: 'gutter', count: totals.gutterCount, lf: totals.gutterLf },
-        { key: 'eave', count: totals.eavesCount, lf: totals.eavesLf },
-        { key: 'rake', count: totals.rakesCount, lf: totals.rakesLf },
-        { key: 'ridge', count: totals.ridgeCount, lf: totals.ridgeLf },
-        { key: 'valley', count: totals.valleyCount, lf: totals.valleyLf },
-      ];
+      // =========================================================================
+      // DYNAMIC DETECTION AGGREGATION
+      // Aggregate all non-deleted detections by class and markup_type.
+      // This replaces hardcoded lists for linear/area/count measurements.
+      // =========================================================================
 
-      linearDetections.forEach(({ key, count, lf }) => {
-        if (count > 0) {
-          const info = CLASS_COUNT_INFO[key] || {
-            display_name: key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase()),
-            measurement_type: 'linear' as const,
-            unit: 'LF'
-          };
-          detectionCounts[key] = {
-            count,
-            total_lf: lf,
-            display_name: info.display_name,
-            measurement_type: info.measurement_type,
-            unit: info.unit
-          };
+      // Classes handled by siding area calculation (not double-counted here)
+      const SIDING_INSTALLATION_CLASSES = new Set([
+        'siding', 'gable', 'exterior_wall', 'exterior wall', 'building', 'facade'
+      ]);
+
+      // Classes already in payload as dedicated fields (window, door, garage, corners, gables)
+      // We still aggregate these to detection_counts for the API to consume
+      const DEDICATED_PAYLOAD_CLASSES = new Set([
+        'window', 'door', 'garage', 'corner_inside', 'corner_outside'
+      ]);
+
+      // Aggregate by class: { class: { count, total_lf, total_sf } }
+      const dynamicAggregation: Record<string, { count: number; total_lf: number; total_sf: number }> = {};
+
+      for (const detection of allDetections) {
+        // Skip deleted detections
+        if (detection.status === 'deleted') continue;
+
+        const className = detection.class.toLowerCase();
+        const markupType = detection.markup_type || 'polygon';  // Default to polygon for legacy
+
+        // Skip siding installation classes (already handled by facade/net siding calculation)
+        if (SIDING_INSTALLATION_CLASSES.has(className)) continue;
+
+        // Initialize aggregation entry
+        if (!dynamicAggregation[className]) {
+          dynamicAggregation[className] = { count: 0, total_lf: 0, total_sf: 0 };
         }
-      });
 
-      // Add soffit as an area measurement
-      if (totals.soffitCount > 0) {
-        const soffitInfo = CLASS_COUNT_INFO['soffit'] || {
-          display_name: 'Soffit',
-          measurement_type: 'area' as const,
-          unit: 'SF'
-        };
-        detectionCounts['soffit'] = {
-          count: totals.soffitCount,
-          total_sf: totals.soffitAreaSf,
-          display_name: soffitInfo.display_name,
-          measurement_type: soffitInfo.measurement_type,
-          unit: soffitInfo.unit
+        const agg = dynamicAggregation[className];
+        agg.count += 1;
+
+        // Aggregate based on markup type
+        if (markupType === 'line') {
+          // Line-type: use perimeter_lf as the linear measurement
+          agg.total_lf += detection.perimeter_lf || 0;
+        } else if (markupType === 'polygon') {
+          // Polygon-type: use area_sf (only for non-siding classes)
+          agg.total_sf += detection.area_sf || 0;
+        }
+        // Point-type: just counted (handled by countsByClass already, but we add here too)
+      }
+
+      // Convert dynamic aggregation to detectionCounts format
+      for (const [className, agg] of Object.entries(dynamicAggregation)) {
+        // Skip if already in detectionCounts (from countsByClass)
+        if (detectionCounts[className]) continue;
+
+        // Skip classes with no meaningful data
+        if (agg.count <= 0) continue;
+
+        // Determine measurement type from CLASS_COUNT_INFO or infer from data
+        const info = CLASS_COUNT_INFO[className];
+        let measurementType: 'count' | 'linear' | 'area';
+        let unit: string;
+
+        if (info) {
+          measurementType = info.measurement_type;
+          unit = info.unit;
+        } else if (agg.total_lf > 0) {
+          measurementType = 'linear';
+          unit = 'LF';
+        } else if (agg.total_sf > 0) {
+          measurementType = 'area';
+          unit = 'SF';
+        } else {
+          measurementType = 'count';
+          unit = 'EA';
+        }
+
+        const displayName = info?.display_name ||
+          className.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+
+        detectionCounts[className] = {
+          count: agg.count,
+          ...(agg.total_lf > 0 && { total_lf: agg.total_lf }),
+          ...(agg.total_sf > 0 && { total_sf: agg.total_sf }),
+          display_name: displayName,
+          measurement_type: measurementType,
+          unit: unit
         };
       }
 
-      // Add downspout as a count measurement
-      if (totals.downspoutCount > 0) {
-        const downspoutInfo = CLASS_COUNT_INFO['downspout'] || {
-          display_name: 'Downspout',
-          measurement_type: 'count' as const,
-          unit: 'EA'
-        };
-        detectionCounts['downspout'] = {
-          count: totals.downspoutCount,
-          display_name: downspoutInfo.display_name,
-          measurement_type: downspoutInfo.measurement_type,
-          unit: downspoutInfo.unit
-        };
-      }
-
-      // Add gable_topout as a count measurement (point per gable peak)
-      if (totals.gableTopoutCount > 0) {
-        const gableTopoutInfo = CLASS_COUNT_INFO['gable_topout'] || {
-          display_name: 'Gable Top-Out',
-          measurement_type: 'count' as const,
-          unit: 'EA'
-        };
-        detectionCounts['gable_topout'] = {
-          count: totals.gableTopoutCount,
-          display_name: gableTopoutInfo.display_name,
-          measurement_type: gableTopoutInfo.measurement_type,
-          unit: gableTopoutInfo.unit
-        };
-      }
+      // Log dynamic aggregation for debugging
+      const dynamicClasses = Object.entries(detectionCounts)
+        .filter(([_, data]) => data.count > 0)
+        .map(([cls, data]) => `${cls}(${data.count})`);
+      console.log(`[buildApprovePayload] detection_counts classes: ${dynamicClasses.join(', ')}`);
 
       // Bluebeam count items: aggregate item_count by bluebeam_content
       // These are Bluebeam count annotations stored as polygons with item_count > 0
