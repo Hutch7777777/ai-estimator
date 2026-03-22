@@ -356,8 +356,6 @@ export default function DetectionEditor({
   const [pointClass, setPointClass] = useState<DetectionClass>('vent');
   const [transform, setTransform] = useState<ViewTransform>(DEFAULT_TRANSFORM);
   const [showDeleted, setShowDeleted] = useState(false);
-  const [showDimensions, setShowDimensions] = useState(true);
-  const [showArea, setShowArea] = useState(true);
   const [isApproving, setIsApproving] = useState(false);
   const [isExportingBluebeam, setIsExportingBluebeam] = useState(false);
   const [showImportModal, setShowImportModal] = useState(false);
@@ -702,53 +700,64 @@ export default function DetectionEditor({
     }
   }, [projectId]);
 
+  // Unified save: merges v1 fields (trimSystem, wrbProduct) and optional v2 expanded config
+  // into a single upsert so concurrent calls can't fight over the same row.
   const saveEstimateConfig = useCallback(async (
     newTrimSystem: TrimSystem,
-    newWrbProduct: string | null
+    newWrbProduct: string | null,
+    expandedConfig?: Partial<EstimateConfig>
   ) => {
-    if (!projectId) return;
+    if (!projectId) {
+      console.log('⚠️ No projectId, skipping save');
+      return;
+    }
+
+    if (expandedConfig) {
+      setEstimateConfig(expandedConfig);
+    }
 
     const supabase = getSupabaseClient();
 
-    // First, try to get existing config
-    const { data: existing } = await supabase
-      .from('project_configurations')
-      .select('id, configuration_data')
-      .eq('project_id', projectId)
-      .eq('trade', 'siding')
-      .single();
-
-    const configData = {
-      ...(existing?.configuration_data as Record<string, unknown> || {}),
-      trim_system: newTrimSystem,
-      wrb_product: newWrbProduct,
-    };
-
-    if (existing) {
-      // Update existing config
-      const { error } = await supabase
+    try {
+      // Read current row once so both v1 and v2 fields merge correctly
+      const { data: existing } = await supabase
         .from('project_configurations')
-        .update({ configuration_data: configData, updated_at: new Date().toISOString() })
-        .eq('id', existing.id);
+        .select('id, configuration_data')
+        .eq('project_id', projectId)
+        .eq('trade', 'siding')
+        .single();
 
-      if (error) {
-        console.error('[EstimateSettings] Failed to update config:', error);
-        toast.error('Failed to save estimate settings');
-      }
-    } else {
-      // Insert new config
-      const { error } = await supabase
-        .from('project_configurations')
-        .insert({
-          project_id: projectId,
-          trade: 'siding',
-          configuration_data: configData,
-        });
+      const configData = {
+        ...(existing?.configuration_data as Record<string, unknown> || {}),
+        trim_system: newTrimSystem,
+        wrb_product: newWrbProduct,
+        ...(expandedConfig ?? {}),
+      };
 
-      if (error) {
-        console.error('[EstimateSettings] Failed to insert config:', error);
-        toast.error('Failed to save estimate settings');
+      if (existing) {
+        const { error } = await supabase
+          .from('project_configurations')
+          .update({ configuration_data: configData, updated_at: new Date().toISOString() })
+          .eq('id', existing.id);
+        if (error) {
+          console.error('[EstimateSettings] Failed to update config:', error);
+          toast.error('Failed to save estimate settings');
+        }
+      } else {
+        const { error } = await supabase
+          .from('project_configurations')
+          .insert({
+            project_id: projectId,
+            trade: 'siding',
+            configuration_data: configData,
+          });
+        if (error) {
+          console.error('[EstimateSettings] Failed to insert config:', error);
+          toast.error('Failed to save estimate settings');
+        }
       }
+    } catch (err) {
+      console.error('Error saving estimate config:', err);
     }
   }, [projectId]);
 
@@ -762,77 +771,6 @@ export default function DetectionEditor({
     setWrbProduct(value);
     saveEstimateConfig(trimSystem, value);
   }, [trimSystem, saveEstimateConfig]);
-
-  // Phase 2: Save expanded config
-  const saveEstimateConfigExpanded = useCallback(async (newConfig: Partial<EstimateConfig>) => {
-    console.log('💾 saveEstimateConfigExpanded called', {
-      hasProjectId: !!projectId,
-      configKeys: Object.keys(newConfig),
-    });
-    setEstimateConfig(newConfig);
-    if (!projectId) {
-      console.log('⚠️ No projectId, skipping save');
-      return;
-    }
-    const supabase = getSupabaseClient();
-    try {
-      // First, try to get existing config
-      const { data: existing } = await supabase
-        .from('project_configurations')
-        .select('id, configuration_data')
-        .eq('project_id', projectId)
-        .eq('trade', 'siding')
-        .single();
-
-      const configData = {
-        ...(existing?.configuration_data as Record<string, unknown> || {}),
-        trim_system: trimSystem,
-        wrb_product: wrbProduct,
-        ...newConfig,
-      };
-
-      console.log('📦 Config to save:', {
-        overhead: (configData as any).overhead,
-        consumables: (configData as any).consumables,
-      });
-
-      if (existing) {
-        console.log('📝 Updating existing config id:', existing.id);
-        const { data, error } = await supabase
-          .from('project_configurations')
-          .update({ configuration_data: configData, updated_at: new Date().toISOString() })
-          .eq('id', existing.id)
-          .select();
-        if (error) {
-          console.error('❌ Failed to save estimate config:', error);
-        } else {
-          console.log('✅ Estimate config saved (update)', {
-            rowsAffected: data?.length,
-            overhead: configData.overhead,
-          });
-        }
-      } else {
-        console.log('📝 Inserting new config for project:', projectId);
-        const { data, error } = await supabase
-          .from('project_configurations')
-          .insert({
-            project_id: projectId,
-            trade: 'siding',
-            configuration_data: configData,
-          })
-          .select();
-        if (error) {
-          console.error('❌ Failed to save estimate config:', error);
-        } else {
-          console.log('✅ Estimate config saved (insert)', {
-            rowsAffected: data?.length,
-          });
-        }
-      }
-    } catch (err) {
-      console.error('Error saving estimate config:', err);
-    }
-  }, [projectId, trimSystem, wrbProduct]);
 
   // ============================================================================
   // Computed Image URL and Dimensions
@@ -2056,14 +1994,8 @@ export default function DetectionEditor({
         const result = await response.json();
         console.log('[DetectionEditor] Page classification updated:', result);
 
-        // Update local state - find and update the page
-        setPages((prevPages) =>
-          prevPages.map((p) =>
-            p.id === pageId
-              ? { ...p, page_type: pageType as ExtractionPage['page_type'] }
-              : p
-          )
-        );
+        // Refresh data from server to pick up updated page_type
+        await refresh();
 
         toast.success(`Page classified as ${pageType.replace('_', ' ')}`);
       } catch (error) {
@@ -2071,7 +2003,7 @@ export default function DetectionEditor({
         toast.error(error instanceof Error ? error.message : 'Failed to classify page');
       }
     },
-    []
+    [refresh]
   );
 
   // Handle price override from Properties panel
@@ -4599,7 +4531,7 @@ export default function DetectionEditor({
                 wrbProduct={wrbProduct}
                 onWrbProductChange={handleWrbProductChange}
                 estimateConfig={estimateConfig}
-                onEstimateConfigChange={saveEstimateConfigExpanded}
+                onEstimateConfigChange={(newConfig) => saveEstimateConfig(trimSystem, wrbProduct, newConfig)}
               />
             )}
 
