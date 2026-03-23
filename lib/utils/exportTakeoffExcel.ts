@@ -762,20 +762,80 @@ export async function exportTakeoffToExcel(data: TakeoffData, filename?: string)
   summarySheet.getCell(`A${row}`).value = 'PROJECT GRAND TOTAL'; styleGrandTotal(summarySheet.getCell(`A${row}`)); summarySheet.getCell(`A${row}`).alignment = { horizontal: 'right' };
   summarySheet.mergeCells(`A${row}:C${row}`);
   summarySheet.getCell(`D${row}`).value = { formula: `D${row-2}` }; summarySheet.getCell(`D${row}`).numFmt = '"$"#,##0.00'; styleGrandTotal(summarySheet.getCell(`D${row}`));
-  const grandTotalRow = row;
+  const summaryGrandTotalRow = row;
   row += 2;
 
-  if (squares > 0) {
-    summarySheet.getCell(`A${row}`).value = `PRICE PER SQUARE (${squares.toFixed(2)} sq)`;
-    summarySheet.getCell(`A${row}`).font = { bold: true, italic: true };
-    summarySheet.mergeCells(`A${row}:C${row}`);
-    summarySheet.getCell(`D${row}`).value = { formula: `D${grandTotalRow}/${squares}` };
-    summarySheet.getCell(`D${row}`).numFmt = '"$"#,##0.00';
-    summarySheet.getCell(`D${row}`).font = { bold: true, italic: true };
-    row += 2;
-  }
-
+  // ==========================================================================
+  // PER-SQUARE METRICS SECTION (values populated after Takeoff sheet is built)
+  // ==========================================================================
+  // Total SQ's row (cross-sheet reference to Takeoff sheet)
+  const summaryTotalSqsRow = row;
+  summarySheet.getCell(`A${summaryTotalSqsRow}`).value = "Total SQ's:";
+  summarySheet.getCell(`A${summaryTotalSqsRow}`).font = { bold: true };
+  summarySheet.getCell(`A${summaryTotalSqsRow}`).alignment = { horizontal: 'right' };
+  summarySheet.mergeCells(`A${summaryTotalSqsRow}:C${summaryTotalSqsRow}`);
+  // D column formula will be added after Takeoff sheet is built
+  summarySheet.getCell(`D${summaryTotalSqsRow}`).numFmt = '#,##0.00';
+  summarySheet.getCell(`D${summaryTotalSqsRow}`).font = { bold: true };
   row++;
+
+  // Sell Pr SQ row
+  const summarySellPrSqRow = row;
+  summarySheet.getCell(`A${summarySellPrSqRow}`).value = 'Sell Pr SQ:';
+  summarySheet.getCell(`A${summarySellPrSqRow}`).font = { bold: true };
+  summarySheet.getCell(`A${summarySellPrSqRow}`).alignment = { horizontal: 'right' };
+  summarySheet.mergeCells(`A${summarySellPrSqRow}:C${summarySellPrSqRow}`);
+  // Formula: Grand Total / Total SQ's (will be set after Takeoff sheet)
+  summarySheet.getCell(`D${summarySellPrSqRow}`).numFmt = '"$"#,##0.00';
+  summarySheet.getCell(`D${summarySellPrSqRow}`).font = { bold: true };
+  row++;
+
+  // Sub Payout row (cross-sheet reference to Takeoff sheet)
+  const summarySubPayoutRow = row;
+  summarySheet.getCell(`A${summarySubPayoutRow}`).value = 'Sub Payout:';
+  summarySheet.getCell(`A${summarySubPayoutRow}`).font = { bold: true };
+  summarySheet.getCell(`A${summarySubPayoutRow}`).alignment = { horizontal: 'right' };
+  summarySheet.mergeCells(`A${summarySubPayoutRow}:C${summarySubPayoutRow}`);
+  // D column formula will be added after Takeoff sheet is built
+  summarySheet.getCell(`D${summarySubPayoutRow}`).numFmt = '"$"#,##0.00';
+  summarySheet.getCell(`D${summarySubPayoutRow}`).font = { bold: true };
+  row++;
+
+  // Sub Payout Pr SQ row
+  const summarySubPayoutPrSqRow = row;
+  summarySheet.getCell(`A${summarySubPayoutPrSqRow}`).value = 'Sub Payout Pr SQ:';
+  summarySheet.getCell(`A${summarySubPayoutPrSqRow}`).font = { bold: true };
+  summarySheet.getCell(`A${summarySubPayoutPrSqRow}`).alignment = { horizontal: 'right' };
+  summarySheet.mergeCells(`A${summarySubPayoutPrSqRow}:C${summarySubPayoutPrSqRow}`);
+  // Formula: Sub Payout / Total SQ's (will be set after Takeoff sheet)
+  summarySheet.getCell(`D${summarySubPayoutPrSqRow}`).numFmt = '"$"#,##0.00';
+  summarySheet.getCell(`D${summarySubPayoutPrSqRow}`).font = { bold: true };
+  row += 2;
+
+  // Profit row (sum of markup amounts from Summary sheet)
+  const summaryProfitRow = row;
+  summarySheet.getCell(`A${summaryProfitRow}`).value = 'Profit:';
+  summarySheet.getCell(`A${summaryProfitRow}`).font = { bold: true };
+  summarySheet.getCell(`A${summaryProfitRow}`).alignment = { horizontal: 'right' };
+  summarySheet.mergeCells(`A${summaryProfitRow}:C${summaryProfitRow}`);
+  // Formula: sum of markup column (C) from the data rows
+  summarySheet.getCell(`D${summaryProfitRow}`).value = { formula: `SUM(C${summaryDataStartRow}:C${summaryDataStartRow + 3})` };
+  summarySheet.getCell(`D${summaryProfitRow}`).numFmt = '"$"#,##0.00';
+  summarySheet.getCell(`D${summaryProfitRow}`).font = { bold: true };
+  row++;
+
+  // Margin row (Profit / Grand Total as percentage)
+  const summaryMarginRow = row;
+  summarySheet.getCell(`A${summaryMarginRow}`).value = 'Margin:';
+  summarySheet.getCell(`A${summaryMarginRow}`).font = { bold: true };
+  summarySheet.getCell(`A${summaryMarginRow}`).alignment = { horizontal: 'right' };
+  summarySheet.mergeCells(`A${summaryMarginRow}:C${summaryMarginRow}`);
+  summarySheet.getCell(`D${summaryMarginRow}`).value = { formula: `D${summaryProfitRow}/D${summaryGrandTotalRow}` };
+  summarySheet.getCell(`D${summaryMarginRow}`).numFmt = '0.00%';
+  summarySheet.getCell(`D${summaryMarginRow}`).font = { bold: true };
+  row += 2;
+
+  // Markup Percentage section
   summarySheet.getCell(`A${row}`).value = 'Markup Percentage:'; summarySheet.getCell(`A${row}`).font = { bold: true };
   summarySheet.getCell(`B${row}`).value = markupPercent / 100; summarySheet.getCell(`B${row}`).numFmt = '0%';
   summarySheet.getCell(`B${row}`).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFFFCC' } };
@@ -1179,6 +1239,43 @@ export async function exportTakeoffToExcel(data: TakeoffData, filename?: string)
     takeoffSheet.getCell(`F${row}`).font = { bold: true, size: 11, italic: true };
     takeoffSheet.getCell(`F${row}`).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF0F0F0' } };
     takeoffSheet.getCell(`F${row}`).border = { top: { style: 'thin' }, left: { style: 'thin' }, bottom: { style: 'thin' }, right: { style: 'thin' } };
+  }
+
+  // ==========================================================================
+  // POPULATE SUMMARY SHEET CROSS-SHEET REFERENCES
+  // Now that Takeoff sheet is built, add formulas that reference it
+  // ==========================================================================
+  if (totalSqsQtyCell) {
+    // Extract row number from totalSqsQtyCell (e.g., "C42" -> 42)
+    const totalSqsRowMatch = totalSqsQtyCell.match(/C(\d+)/);
+    if (totalSqsRowMatch) {
+      const takeoffTotalSqsRow = parseInt(totalSqsRowMatch[1], 10);
+
+      // Total SQ's: reference Takeoff sheet's Total SQ's quantity
+      summarySheet.getCell(`D${summaryTotalSqsRow}`).value = { formula: `'Takeoff'!${totalSqsQtyCell}` };
+
+      // Sell Pr SQ: Grand Total / Total SQ's
+      summarySheet.getCell(`D${summarySellPrSqRow}`).value = { formula: `D${summaryGrandTotalRow}/D${summaryTotalSqsRow}` };
+
+      // Sub Payout: reference Takeoff sheet's Sub Payout cell (column G on the same row)
+      summarySheet.getCell(`D${summarySubPayoutRow}`).value = { formula: `'Takeoff'!G${takeoffTotalSqsRow}` };
+
+      // Sub Payout Pr SQ: Sub Payout / Total SQ's
+      summarySheet.getCell(`D${summarySubPayoutPrSqRow}`).value = { formula: `D${summarySubPayoutRow}/D${summaryTotalSqsRow}` };
+    }
+  } else if (squares > 0) {
+    // Fallback: use squares from takeoff header if no SQ labor items
+    summarySheet.getCell(`D${summaryTotalSqsRow}`).value = squares;
+    summarySheet.getCell(`D${summarySellPrSqRow}`).value = { formula: `D${summaryGrandTotalRow}/D${summaryTotalSqsRow}` };
+    // No Sub Payout available without SQ labor items
+    summarySheet.getCell(`D${summarySubPayoutRow}`).value = 0;
+    summarySheet.getCell(`D${summarySubPayoutPrSqRow}`).value = 0;
+  } else {
+    // No SQ data available - set to 0
+    summarySheet.getCell(`D${summaryTotalSqsRow}`).value = 0;
+    summarySheet.getCell(`D${summarySellPrSqRow}`).value = 0;
+    summarySheet.getCell(`D${summarySubPayoutRow}`).value = 0;
+    summarySheet.getCell(`D${summarySubPayoutPrSqRow}`).value = 0;
   }
 
   // Generate and Download
