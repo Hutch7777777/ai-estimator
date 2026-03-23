@@ -14,34 +14,56 @@ export interface MaterialsTableProps {
 }
 
 // =============================================================================
-// Constants
+// Constants - Matches exportTakeoffExcel.ts section ordering
 // =============================================================================
 
+const SECTION_ORDER: Record<string, number> = {
+  'cladding': 1,
+  'trims': 2,
+  'metals_flashings': 3,
+  'waterproofing': 4,
+  'accessories': 5,
+  'soffit': 6,
+  'gutters': 7,
+  'labor': 8,
+  'overhead': 99,
+};
+
 const PRESENTATION_GROUP_COLORS: Record<string, { bg: string; text: string; border: string }> = {
-  siding: {
+  cladding: {
     bg: 'bg-blue-100 dark:bg-blue-900/30',
     text: 'text-blue-800 dark:text-blue-200',
     border: 'border-blue-200 dark:border-blue-800',
   },
-  trim: {
+  trims: {
     bg: 'bg-purple-100 dark:bg-purple-900/30',
     text: 'text-purple-800 dark:text-purple-200',
     border: 'border-purple-200 dark:border-purple-800',
+  },
+  metals_flashings: {
+    bg: 'bg-orange-100 dark:bg-orange-900/30',
+    text: 'text-orange-800 dark:text-orange-200',
+    border: 'border-orange-200 dark:border-orange-800',
+  },
+  waterproofing: {
+    bg: 'bg-green-100 dark:bg-green-900/30',
+    text: 'text-green-800 dark:text-green-200',
+    border: 'border-green-200 dark:border-green-800',
   },
   accessories: {
     bg: 'bg-amber-100 dark:bg-amber-900/30',
     text: 'text-amber-800 dark:text-amber-200',
     border: 'border-amber-200 dark:border-amber-800',
   },
-  corners: {
-    bg: 'bg-green-100 dark:bg-green-900/30',
-    text: 'text-green-800 dark:text-green-200',
-    border: 'border-green-200 dark:border-green-800',
+  soffit: {
+    bg: 'bg-teal-100 dark:bg-teal-900/30',
+    text: 'text-teal-800 dark:text-teal-200',
+    border: 'border-teal-200 dark:border-teal-800',
   },
-  openings: {
-    bg: 'bg-orange-100 dark:bg-orange-900/30',
-    text: 'text-orange-800 dark:text-orange-200',
-    border: 'border-orange-200 dark:border-orange-800',
+  gutters: {
+    bg: 'bg-cyan-100 dark:bg-cyan-900/30',
+    text: 'text-cyan-800 dark:text-cyan-200',
+    border: 'border-cyan-200 dark:border-cyan-800',
   },
 };
 
@@ -51,17 +73,55 @@ const DEFAULT_GROUP_COLORS = {
   border: 'border-gray-200 dark:border-gray-700',
 };
 
-const SECTION_ORDER: Record<string, number> = {
-  'siding': 1,
-  'trim': 2,
-  'corners': 3,
-  'flashing': 4,
-  'accessories': 5,
-  'fasteners': 5,
-  'openings': 6,
-  'labor': 90,
-  'overhead': 99,
-  'other': 100,
+/**
+ * Maps legacy presentation_group values to the new consolidated groups.
+ * Ensures backward compatibility with existing takeoff_line_items rows.
+ * Matches logic in exportTakeoffExcel.ts
+ */
+function mapLegacyPresentationGroup(group: string): string {
+  const normalized = group.toLowerCase().trim();
+  const legacy: Record<string, string> = {
+    'siding': 'cladding',
+    'siding & underlayment': 'cladding',
+    'trim': 'trims',
+    'trim & corners': 'trims',
+    'corners': 'trims',
+    'flashing': 'metals_flashings',
+    'flashing & weatherproofing': 'metals_flashings',
+    'fasteners': 'accessories',
+    'fasteners & accessories': 'accessories',
+    'caulk': 'accessories',
+    'caulk & sealants': 'accessories',
+    'belly_band': 'trims',
+    'belly band': 'trims',
+    'soffit_fascia': 'soffit',
+    'soffit & fascia': 'soffit',
+    'fascia': 'trims',
+    'roofing_components': 'accessories',
+    'roofing components': 'accessories',
+    'window_door_trim': 'trims',
+    'window & door trim': 'trims',
+    'architectural_details': 'accessories',
+    'architectural details': 'accessories',
+    'unmatched_items': 'accessories',
+    'unmatched items': 'accessories',
+    'other materials': 'accessories',
+    'other': 'accessories',
+    'paint': 'accessories',
+    'paint & primer': 'accessories',
+    'gutters & downspouts': 'gutters',
+  };
+  return legacy[normalized] || (normalized in SECTION_ORDER ? normalized : 'accessories');
+}
+
+const GROUP_DISPLAY_NAMES: Record<string, string> = {
+  'cladding': 'Cladding',
+  'trims': 'Trims',
+  'metals_flashings': 'Metals / Flashings',
+  'waterproofing': 'Waterproofing',
+  'accessories': 'Accessories',
+  'soffit': 'Soffit',
+  'gutters': 'Gutters & Downspouts',
 };
 
 // =============================================================================
@@ -85,18 +145,19 @@ function formatQuantity(value: number | string | null | undefined): string {
 
 function getGroupColors(group: string | undefined) {
   if (!group) return DEFAULT_GROUP_COLORS;
-  const normalized = group.toLowerCase();
-  return PRESENTATION_GROUP_COLORS[normalized] || DEFAULT_GROUP_COLORS;
+  const mapped = mapLegacyPresentationGroup(group);
+  return PRESENTATION_GROUP_COLORS[mapped] || DEFAULT_GROUP_COLORS;
 }
 
 function formatGroupName(group: string | undefined): string {
   if (!group) return 'Other';
-  return group.charAt(0).toUpperCase() + group.slice(1).toLowerCase();
+  const mapped = mapLegacyPresentationGroup(group);
+  return GROUP_DISPLAY_NAMES[mapped] || group.charAt(0).toUpperCase() + group.slice(1).toLowerCase();
 }
 
 function getSectionOrder(sectionName: string): number {
-  const normalized = sectionName.toLowerCase();
-  return SECTION_ORDER[normalized] ?? 99;
+  const mapped = mapLegacyPresentationGroup(sectionName);
+  return SECTION_ORDER[mapped] ?? 50;
 }
 
 // =============================================================================
@@ -129,13 +190,15 @@ export function MaterialsTable({ items, totalMaterialCost }: MaterialsTableProps
     }, 0);
   };
 
-  // Group line items by presentation_group and sort by section order
+  // Group line items by presentation_group (mapped to consolidated groups) and sort by section order
   const groupedLineItems = useMemo(() => {
     if (!items) return new Map<string, TakeoffLineItem[]>();
 
     const groups = new Map<string, TakeoffLineItem[]>();
     items.forEach((item) => {
-      const group = item.presentation_group || 'Other';
+      // Map legacy presentation_group values to consolidated groups
+      const rawGroup = item.presentation_group || item.category || 'accessories';
+      const group = mapLegacyPresentationGroup(rawGroup);
       if (!groups.has(group)) {
         groups.set(group, []);
       }
