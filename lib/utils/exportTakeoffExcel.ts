@@ -86,84 +86,73 @@ const COLORS = {
 };
 
 const PRESENTATION_GROUPS: Record<string, { title: string; color: string; order: number }> = {
-  // Section order: SIDING → TRIM & CORNERS → BELLY BAND → SOFFIT & FASCIA → FLASHING →
-  // FASTENERS → CAULK → ARCHITECTURAL → GUTTERS → ROOFING → OPENINGS → OTHER → OVERHEAD
-
-  // 1. Siding & Underlayment
-  'siding': { title: 'SIDING & UNDERLAYMENT', color: 'E8F5E9', order: 1 },
-  'siding & underlayment': { title: 'SIDING & UNDERLAYMENT', color: 'E8F5E9', order: 1 },
-
-  // 2. Trim & Corners (combined)
-  'trim': { title: 'TRIM & CORNERS', color: 'E3F2FD', order: 2 },
-  'trim & corners': { title: 'TRIM & CORNERS', color: 'E3F2FD', order: 2 },
-  'corners': { title: 'TRIM & CORNERS', color: 'E3F2FD', order: 2 },
-
-  // 2.5. Belly Band (dedicated section for horizontal accent trim)
-  'belly band': { title: 'BELLY BAND', color: 'FFF9C4', order: 2.5 },
-  'belly_band': { title: 'BELLY BAND', color: 'FFF9C4', order: 2.5 },
-
-  // 3. Soffit & Fascia
-  'soffit': { title: 'SOFFIT & FASCIA', color: 'B2EBF2', order: 3 },
-  'fascia': { title: 'SOFFIT & FASCIA', color: 'B2EBF2', order: 3 },
-  'soffit & fascia': { title: 'SOFFIT & FASCIA', color: 'B2EBF2', order: 3 },
-
-  // 4. Flashing & Weatherproofing (includes Tyvek, house wrap, flashing tape, penetrations)
-  'flashing': { title: 'FLASHING & WEATHERPROOFING', color: 'FFECB3', order: 4 },
-  'flashing & weatherproofing': { title: 'FLASHING & WEATHERPROOFING', color: 'FFECB3', order: 4 },
-  'weatherproofing': { title: 'FLASHING & WEATHERPROOFING', color: 'FFECB3', order: 4 },
-  'penetrations': { title: 'FLASHING & WEATHERPROOFING', color: 'FFECB3', order: 4 },
-
-  // 5. Fasteners & Accessories
-  'fasteners': { title: 'FASTENERS & ACCESSORIES', color: 'F5F5F5', order: 5 },
-  'fasteners & accessories': { title: 'FASTENERS & ACCESSORIES', color: 'F5F5F5', order: 5 },
-  'accessories': { title: 'FASTENERS & ACCESSORIES', color: 'F5F5F5', order: 5 },
-
-  // 6. Caulk & Sealants
-  'caulk': { title: 'CAULK & SEALANTS', color: 'FCE4EC', order: 6 },
-  'caulk & sealants': { title: 'CAULK & SEALANTS', color: 'FCE4EC', order: 6 },
-  'sealants': { title: 'CAULK & SEALANTS', color: 'FCE4EC', order: 6 },
-
-  // 7. Architectural Details (corbels, brackets, shutters, posts, columns)
-  'architectural': { title: 'ARCHITECTURAL DETAILS', color: 'D7CCC8', order: 7 },
-  'architectural details': { title: 'ARCHITECTURAL DETAILS', color: 'D7CCC8', order: 7 },
-  'corbel': { title: 'ARCHITECTURAL DETAILS', color: 'D7CCC8', order: 7 },
-  'bracket': { title: 'ARCHITECTURAL DETAILS', color: 'D7CCC8', order: 7 },
-  'shutter': { title: 'ARCHITECTURAL DETAILS', color: 'D7CCC8', order: 7 },
-  'post': { title: 'ARCHITECTURAL DETAILS', color: 'D7CCC8', order: 7 },
-  'column': { title: 'ARCHITECTURAL DETAILS', color: 'D7CCC8', order: 7 },
-
-  // 8. Gutters & Downspouts
-  'gutter': { title: 'GUTTERS & DOWNSPOUTS', color: 'C8E6C9', order: 8 },
-  'gutters': { title: 'GUTTERS & DOWNSPOUTS', color: 'C8E6C9', order: 8 },
-  'gutters & downspouts': { title: 'GUTTERS & DOWNSPOUTS', color: 'C8E6C9', order: 8 },
-  'downspout': { title: 'GUTTERS & DOWNSPOUTS', color: 'C8E6C9', order: 8 },
-
-  // 9. Roofing Components (for roofing trade)
-  'eave': { title: 'ROOFING COMPONENTS', color: 'FFCCBC', order: 9 },
-  'rake': { title: 'ROOFING COMPONENTS', color: 'FFCCBC', order: 9 },
-  'ridge': { title: 'ROOFING COMPONENTS', color: 'FFCCBC', order: 9 },
-  'valley': { title: 'ROOFING COMPONENTS', color: 'FFCCBC', order: 9 },
-  'roofing': { title: 'ROOFING COMPONENTS', color: 'FFCCBC', order: 9 },
-  'roofing components': { title: 'ROOFING COMPONENTS', color: 'FFCCBC', order: 9 },
-
-  // 10. Window & Door Trim
-  'openings': { title: 'WINDOW & DOOR TRIM', color: 'E1BEE7', order: 10 },
-  'window & door trim': { title: 'WINDOW & DOOR TRIM', color: 'E1BEE7', order: 10 },
-
-  // 11. Paint & Primer
-  'paint & primer': { title: 'PAINT & PRIMER', color: 'F3E5F5', order: 11 },
-
-  // 98. Other Materials
-  'other': { title: 'OTHER MATERIALS', color: 'EEEEEE', order: 98 },
-  'other materials': { title: 'OTHER MATERIALS', color: 'EEEEEE', order: 98 },
-
-  // 99. Overhead
-  'overhead': { title: 'OVERHEAD', color: 'E0E0E0', order: 99 },
-
-  // 100. Unmatched Items (Bluebeam items needing pricing - always render last with warning)
-  'unmatched': { title: '⚠️ UNMATCHED ITEMS — VERIFY PRICING', color: 'FFCDD2', order: 100 },
-  'unmatched items': { title: '⚠️ UNMATCHED ITEMS — VERIFY PRICING', color: 'FFCDD2', order: 100 },
+  'cladding':         { title: 'CLADDING',              order: 1,  color: 'D6EAF8' },
+  'trims':            { title: 'TRIMS',                 order: 2,  color: 'E8DAEF' },
+  'metals_flashings': { title: 'METALS / FLASHINGS',    order: 3,  color: 'FDEBD0' },
+  'waterproofing':    { title: 'WATERPROOFING',         order: 4,  color: 'D5F5E3' },
+  'accessories':      { title: 'ACCESSORIES',           order: 5,  color: 'F2F3F4' },
+  'soffit':           { title: 'SOFFIT',                order: 6,  color: 'D1F2EB' },
+  'gutters':          { title: 'GUTTERS & DOWNSPOUTS',  order: 7,  color: 'D4EFDF' },
+  'labor':            { title: 'LABOR',                 order: 8,  color: 'FADBD8' },
+  'overhead':         { title: 'OVERHEAD',              order: 99, color: 'D5D8DC' },
 };
+
+/**
+ * Maps legacy presentation_group values to the new consolidated groups.
+ * Ensures backward compatibility with existing takeoff_line_items rows.
+ */
+function mapLegacyPresentationGroup(group: string): string {
+  const legacy: Record<string, string> = {
+    'siding': 'cladding',
+    'siding & underlayment': 'cladding',
+    'trim': 'trims',
+    'trim & corners': 'trims',
+    'flashing': 'metals_flashings',
+    'flashing & weatherproofing': 'metals_flashings',
+    'fasteners': 'accessories',
+    'fasteners & accessories': 'accessories',
+    'caulk': 'accessories',
+    'caulk & sealants': 'accessories',
+    'belly_band': 'trims',
+    'belly band': 'trims',
+    'soffit_fascia': 'soffit',
+    'soffit & fascia': 'soffit',
+    'fascia': 'soffit',
+    'roofing_components': 'accessories',
+    'roofing components': 'accessories',
+    'window_door_trim': 'trims',
+    'window & door trim': 'trims',
+    'openings': 'trims',
+    'paint_primer': 'accessories',
+    'paint & primer': 'accessories',
+    'architectural_details': 'accessories',
+    'architectural details': 'accessories',
+    'architectural': 'accessories',
+    'other': 'accessories',
+    'other materials': 'accessories',
+    'corners': 'trims',
+    'weatherproofing': 'waterproofing',
+    'penetrations': 'metals_flashings',
+    'sealants': 'accessories',
+    'corbel': 'accessories',
+    'bracket': 'accessories',
+    'shutter': 'accessories',
+    'post': 'accessories',
+    'column': 'accessories',
+    'gutter': 'gutters',
+    'gutters & downspouts': 'gutters',
+    'downspout': 'gutters',
+    'eave': 'accessories',
+    'rake': 'accessories',
+    'ridge': 'accessories',
+    'valley': 'accessories',
+    'roofing': 'accessories',
+    'unmatched': 'accessories',
+    'unmatched items': 'accessories',
+  };
+  const normalized = group?.toLowerCase().trim() || 'accessories';
+  return legacy[normalized] || (normalized in PRESENTATION_GROUPS ? normalized : 'accessories');
+}
 
 // =============================================================================
 // Helper Functions
@@ -176,8 +165,8 @@ function safeNum(value: string | number | null | undefined): number {
 }
 
 function getGroupConfig(group: string | undefined): { title: string; color: string; order: number } {
-  const key = (group || 'other').toLowerCase();
-  return PRESENTATION_GROUPS[key] || PRESENTATION_GROUPS['other'];
+  const mappedKey = mapLegacyPresentationGroup(group || 'accessories');
+  return PRESENTATION_GROUPS[mappedKey] || PRESENTATION_GROUPS['accessories'];
 }
 
 function extractSize(item: TakeoffLineItem): string {
@@ -844,7 +833,7 @@ export async function exportTakeoffToExcel(data: TakeoffData, filename?: string)
 
   const groupedMaterials: Record<string, TakeoffLineItem[]> = {};
   materialItems.forEach(item => {
-    const group = item.presentation_group || item.category || 'other';
+    const group = mapLegacyPresentationGroup(item.presentation_group || item.category || 'accessories');
     if (!groupedMaterials[group]) groupedMaterials[group] = [];
     groupedMaterials[group].push(item);
   });
@@ -1085,7 +1074,7 @@ export async function exportVendorTakeoff(data: TakeoffData, filename?: string):
   // Group materials
   const groupedMaterials: Record<string, TakeoffLineItem[]> = {};
   materialItems.forEach(item => {
-    const group = item.presentation_group || item.category || 'other';
+    const group = mapLegacyPresentationGroup(item.presentation_group || item.category || 'accessories');
     if (!groupedMaterials[group]) groupedMaterials[group] = [];
     groupedMaterials[group].push(item);
   });
