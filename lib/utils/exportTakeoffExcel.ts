@@ -798,26 +798,29 @@ export async function exportTakeoffToExcel(data: TakeoffData, filename?: string)
   takeoffSheet.getColumn('D').width = 8;
   takeoffSheet.getColumn('E').width = 12;
   takeoffSheet.getColumn('F').width = 14;
-  takeoffSheet.getColumn('G').width = 35;
+  takeoffSheet.getColumn('G').width = 14;  // Sub Payout Total
+  takeoffSheet.getColumn('H').width = 14;  // Sub Payout Per SQ
+  takeoffSheet.getColumn('I').width = 8;   // "Sub" label
+  takeoffSheet.getColumn('J').width = 35;  // Notes (moved from G)
 
   row = 1;
   const takeoffTitleCell = takeoffSheet.getCell(`A${row}`);
   takeoffTitleCell.value = takeoff.client_name || takeoff.project_name || 'Estimate';
   takeoffTitleCell.font = { bold: true, size: 16 };
-  takeoffSheet.mergeCells(`A${row}:G${row}`);
+  takeoffSheet.mergeCells(`A${row}:J${row}`);
   row++;
 
   takeoffSheet.getCell(`A${row}`).value = takeoff.address || '';
   takeoffSheet.getCell(`A${row}`).font = { size: 11 };
-  takeoffSheet.mergeCells(`A${row}:G${row}`);
+  takeoffSheet.mergeCells(`A${row}:J${row}`);
   row++;
 
   takeoffSheet.getCell(`A${row}`).value = `Date: ${new Date().toLocaleDateString()}`;
   takeoffSheet.getCell(`A${row}`).font = { size: 10, italic: true, color: { argb: COLORS.WARNING_TEXT } };
-  takeoffSheet.mergeCells(`A${row}:G${row}`);
+  takeoffSheet.mergeCells(`A${row}:J${row}`);
   row += 2;
 
-  ['Description', 'Size', 'QTY', 'U/M', 'Price', 'Total', 'Notes'].forEach((label, idx) => {
+  ['Description', 'Size', 'QTY', 'U/M', 'Price', 'Total', '', '', '', 'Notes'].forEach((label, idx) => {
     const cell = takeoffSheet.getCell(row, idx + 1);
     cell.value = label;
     styleHeader(cell);
@@ -828,7 +831,7 @@ export async function exportTakeoffToExcel(data: TakeoffData, filename?: string)
   const matSectionCell = takeoffSheet.getCell(`A${row}`);
   matSectionCell.value = 'MATERIALS';
   styleSectionHeader(matSectionCell, COLORS.MATERIALS_HEADER);
-  takeoffSheet.mergeCells(`A${row}:G${row}`);
+  takeoffSheet.mergeCells(`A${row}:J${row}`);
   row++;
 
   const groupedMaterials: Record<string, TakeoffLineItem[]> = {};
@@ -849,7 +852,7 @@ export async function exportTakeoffToExcel(data: TakeoffData, filename?: string)
     const groupHeaderCell = takeoffSheet.getCell(`A${row}`);
     groupHeaderCell.value = groupConfig.title;
     styleGroupHeader(groupHeaderCell, groupConfig.color);
-    takeoffSheet.mergeCells(`A${row}:G${row}`);
+    takeoffSheet.mergeCells(`A${row}:J${row}`);
     row++;
 
     const groupStartRow = row;
@@ -862,7 +865,8 @@ export async function exportTakeoffToExcel(data: TakeoffData, filename?: string)
       const unitCell = takeoffSheet.getCell(`D${row}`); unitCell.value = item.unit || 'EA'; styleDataCell(unitCell, isAltRow); unitCell.alignment = { horizontal: 'center' };
       const priceCell = takeoffSheet.getCell(`E${row}`); priceCell.value = safeNum(item.material_unit_cost); priceCell.numFmt = '"$"#,##0.00'; styleDataCell(priceCell, isAltRow);
       const totalCell = takeoffSheet.getCell(`F${row}`); totalCell.value = { formula: `C${row}*E${row}` }; totalCell.numFmt = '"$"#,##0.00'; styleDataCell(totalCell, isAltRow);
-      const notesCell = takeoffSheet.getCell(`G${row}`); notesCell.value = item.notes || item.formula_used || ''; styleDataCell(notesCell, isAltRow); notesCell.alignment = { wrapText: true }; notesCell.font = { size: 9 };
+      ['G', 'H', 'I'].forEach(col => styleDataCell(takeoffSheet.getCell(`${col}${row}`), isAltRow));
+      const notesCell = takeoffSheet.getCell(`J${row}`); notesCell.value = item.notes || item.formula_used || ''; styleDataCell(notesCell, isAltRow); notesCell.alignment = { wrapText: true }; notesCell.font = { size: 9 };
       row++;
     });
 
@@ -904,15 +908,31 @@ export async function exportTakeoffToExcel(data: TakeoffData, filename?: string)
 
   // LABOR SECTION
   let laborTotalRowNum: number | null = null;
+  let laborMarkupRowNumGlobal: number | null = null;
+  let totalSqsQtyCell: string | null = null; // Cell reference for Total SQ's quantity
   if (nonPaintLaborItems.length > 0) {
     const laborSectionCell = takeoffSheet.getCell(`A${row}`);
     laborSectionCell.value = 'INSTALLATION LABOR';
     styleSectionHeader(laborSectionCell, COLORS.LABOR_HEADER);
-    takeoffSheet.mergeCells(`A${row}:G${row}`);
+    takeoffSheet.mergeCells(`A${row}:J${row}`);
     row++;
 
+    // Separate SQ-based labor items from non-SQ items
+    const isSqUnit = (unit: string) => {
+      const u = (unit || '').toLowerCase().trim();
+      return u === 'square' || u === 'sq';
+    };
+    const sqLaborItems = nonPaintLaborItems.filter(item => isSqUnit(item.unit));
+    const nonSqLaborItems = nonPaintLaborItems.filter(item => !isSqUnit(item.unit));
+
+    // Track rows for SQ items
+    const sqItemRows: number[] = [];
+    let lastSqItemRow: number | null = null;
+
     const laborStartRow = row;
-    nonPaintLaborItems.forEach((item, idx) => {
+
+    // First, render SQ-based labor items
+    sqLaborItems.forEach((item, idx) => {
       const isAltRow = idx % 2 === 1;
       takeoffSheet.getCell(`A${row}`).value = item.description; styleDataCell(takeoffSheet.getCell(`A${row}`), isAltRow);
       styleDataCell(takeoffSheet.getCell(`B${row}`), isAltRow);
@@ -920,17 +940,62 @@ export async function exportTakeoffToExcel(data: TakeoffData, filename?: string)
       takeoffSheet.getCell(`D${row}`).value = item.unit; styleDataCell(takeoffSheet.getCell(`D${row}`), isAltRow); takeoffSheet.getCell(`D${row}`).alignment = { horizontal: 'center' };
       takeoffSheet.getCell(`E${row}`).value = item.rate; takeoffSheet.getCell(`E${row}`).numFmt = '"$"#,##0.00'; styleDataCell(takeoffSheet.getCell(`E${row}`), isAltRow);
       takeoffSheet.getCell(`F${row}`).value = { formula: `C${row}*E${row}` }; takeoffSheet.getCell(`F${row}`).numFmt = '"$"#,##0.00'; styleDataCell(takeoffSheet.getCell(`F${row}`), isAltRow);
-      takeoffSheet.getCell(`G${row}`).value = item.notes || ''; styleDataCell(takeoffSheet.getCell(`G${row}`), isAltRow); takeoffSheet.getCell(`G${row}`).font = { size: 9 };
+      ['G', 'H', 'I'].forEach(col => styleDataCell(takeoffSheet.getCell(`${col}${row}`), isAltRow));
+      takeoffSheet.getCell(`J${row}`).value = item.notes || ''; styleDataCell(takeoffSheet.getCell(`J${row}`), isAltRow); takeoffSheet.getCell(`J${row}`).font = { size: 9 };
+      sqItemRows.push(row);
+      lastSqItemRow = row;
+      row++;
+    });
+
+    // Total SQ's row (after SQ items, before non-SQ items)
+    let totalSqsRow: number | null = null;
+    if (sqItemRows.length > 0) {
+      totalSqsRow = row;
+      takeoffSheet.getCell(`A${totalSqsRow}`).value = ''; styleSubtotalRow(takeoffSheet.getCell(`A${totalSqsRow}`));
+      takeoffSheet.getCell(`B${totalSqsRow}`).value = "Total SQ's:"; takeoffSheet.getCell(`B${totalSqsRow}`).font = { bold: true }; styleSubtotalRow(takeoffSheet.getCell(`B${totalSqsRow}`));
+      // Sum of SQ quantities
+      const sqQtyFormula = sqItemRows.length === 1 ? `C${sqItemRows[0]}` : `SUM(${sqItemRows.map(r => `C${r}`).join(',')})`;
+      takeoffSheet.getCell(`C${totalSqsRow}`).value = { formula: sqQtyFormula }; takeoffSheet.getCell(`C${totalSqsRow}`).numFmt = '#,##0.00'; styleSubtotalRow(takeoffSheet.getCell(`C${totalSqsRow}`)); takeoffSheet.getCell(`C${totalSqsRow}`).alignment = { horizontal: 'right' };
+      totalSqsQtyCell = `C${totalSqsRow}`;
+      styleSubtotalRow(takeoffSheet.getCell(`D${totalSqsRow}`));
+      styleSubtotalRow(takeoffSheet.getCell(`E${totalSqsRow}`));
+      // Sum of SQ extended costs
+      const sqCostFormula = sqItemRows.length === 1 ? `F${sqItemRows[0]}` : `SUM(${sqItemRows.map(r => `F${r}`).join(',')})`;
+      takeoffSheet.getCell(`F${totalSqsRow}`).value = { formula: sqCostFormula }; takeoffSheet.getCell(`F${totalSqsRow}`).numFmt = '"$"#,##0.00'; styleSubtotalRow(takeoffSheet.getCell(`F${totalSqsRow}`));
+      ['G', 'H', 'I', 'J'].forEach(col => styleSubtotalRow(takeoffSheet.getCell(`${col}${totalSqsRow}`)));
+      row++;
+    }
+
+    // Now render non-SQ labor items (post wraps, beam wraps at EA rate, etc.)
+    // These appear AFTER the Total SQ's row
+    const nonSqStartRow = row;
+    nonSqLaborItems.forEach((item, idx) => {
+      const isAltRow = (sqLaborItems.length + idx) % 2 === 1;
+      takeoffSheet.getCell(`A${row}`).value = item.description; styleDataCell(takeoffSheet.getCell(`A${row}`), isAltRow);
+      styleDataCell(takeoffSheet.getCell(`B${row}`), isAltRow);
+      takeoffSheet.getCell(`C${row}`).value = item.quantity; takeoffSheet.getCell(`C${row}`).numFmt = '#,##0.00'; styleDataCell(takeoffSheet.getCell(`C${row}`), isAltRow); takeoffSheet.getCell(`C${row}`).alignment = { horizontal: 'right' };
+      takeoffSheet.getCell(`D${row}`).value = item.unit; styleDataCell(takeoffSheet.getCell(`D${row}`), isAltRow); takeoffSheet.getCell(`D${row}`).alignment = { horizontal: 'center' };
+      takeoffSheet.getCell(`E${row}`).value = item.rate; takeoffSheet.getCell(`E${row}`).numFmt = '"$"#,##0.00'; styleDataCell(takeoffSheet.getCell(`E${row}`), isAltRow);
+      takeoffSheet.getCell(`F${row}`).value = { formula: `C${row}*E${row}` }; takeoffSheet.getCell(`F${row}`).numFmt = '"$"#,##0.00'; styleDataCell(takeoffSheet.getCell(`F${row}`), isAltRow);
+      ['G', 'H', 'I'].forEach(col => styleDataCell(takeoffSheet.getCell(`${col}${row}`), isAltRow));
+      takeoffSheet.getCell(`J${row}`).value = item.notes || ''; styleDataCell(takeoffSheet.getCell(`J${row}`), isAltRow); takeoffSheet.getCell(`J${row}`).font = { size: 9 };
       row++;
     });
 
     const laborCostBeforeRow = row;
     takeoffSheet.getCell(`A${laborCostBeforeRow}`).value = 'Total Labor Cost before Markup'; styleSubtotalRow(takeoffSheet.getCell(`A${laborCostBeforeRow}`)); takeoffSheet.getCell(`A${laborCostBeforeRow}`).alignment = { horizontal: 'right' };
     takeoffSheet.mergeCells(`A${laborCostBeforeRow}:E${laborCostBeforeRow}`);
-    takeoffSheet.getCell(`F${laborCostBeforeRow}`).value = { formula: `SUM(F${laborStartRow}:F${row - 1})` }; takeoffSheet.getCell(`F${laborCostBeforeRow}`).numFmt = '"$"#,##0.00'; styleSubtotalRow(takeoffSheet.getCell(`F${laborCostBeforeRow}`));
+    // Sum all labor items (both SQ and non-SQ), excluding the Total SQ's summary row
+    const allLaborRows = [...sqItemRows];
+    for (let r = nonSqStartRow; r < row; r++) {
+      allLaborRows.push(r);
+    }
+    const laborSumFormula = allLaborRows.length === 1 ? `F${allLaborRows[0]}` : allLaborRows.map(r => `F${r}`).join('+');
+    takeoffSheet.getCell(`F${laborCostBeforeRow}`).value = { formula: laborSumFormula }; takeoffSheet.getCell(`F${laborCostBeforeRow}`).numFmt = '"$"#,##0.00'; styleSubtotalRow(takeoffSheet.getCell(`F${laborCostBeforeRow}`));
     row++;
 
     const laborMarkupRowNum = row;
+    laborMarkupRowNumGlobal = laborMarkupRowNum;
     takeoffSheet.getCell(`A${laborMarkupRowNum}`).value = 'Labor Markup'; styleMarkupRow(takeoffSheet.getCell(`A${laborMarkupRowNum}`)); takeoffSheet.getCell(`A${laborMarkupRowNum}`).alignment = { horizontal: 'right' };
     takeoffSheet.mergeCells(`A${laborMarkupRowNum}:D${laborMarkupRowNum}`);
     takeoffSheet.getCell(`E${laborMarkupRowNum}`).value = markupDecimal; takeoffSheet.getCell(`E${laborMarkupRowNum}`).numFmt = '0%'; styleMarkupRow(takeoffSheet.getCell(`E${laborMarkupRowNum}`));
@@ -946,20 +1011,33 @@ export async function exportTakeoffToExcel(data: TakeoffData, filename?: string)
 
   // OVERHEAD SECTION
   let overheadTotalRowNum: number | null = null;
+  let overheadMarkupRowNumGlobal: number | null = null;
+  // Track Soc/unemployment and L&I costs for Sub Payout calculation
+  let socUnemploymentCell: string | null = null;
+  let liCell: string | null = null;
   if (overheadItems.length > 0) {
     const overheadSectionCell = takeoffSheet.getCell(`A${row}`);
     overheadSectionCell.value = 'OVERHEAD COSTS';
     styleSectionHeader(overheadSectionCell, COLORS.OVERHEAD_HEADER);
-    takeoffSheet.mergeCells(`A${row}:G${row}`);
+    takeoffSheet.mergeCells(`A${row}:J${row}`);
     row++;
 
     const overheadStartRow = row;
     overheadItems.forEach((item, idx) => {
       const isAltRow = idx % 2 === 1;
+      const desc = (item.description || '').toLowerCase();
       takeoffSheet.getCell(`A${row}`).value = item.description; styleDataCell(takeoffSheet.getCell(`A${row}`), isAltRow);
       ['B', 'C', 'D', 'E'].forEach(col => styleDataCell(takeoffSheet.getCell(`${col}${row}`), isAltRow));
       takeoffSheet.getCell(`F${row}`).value = item.amount; takeoffSheet.getCell(`F${row}`).numFmt = '"$"#,##0.00'; styleDataCell(takeoffSheet.getCell(`F${row}`), isAltRow);
-      takeoffSheet.getCell(`G${row}`).value = item.notes || ''; styleDataCell(takeoffSheet.getCell(`G${row}`), isAltRow); takeoffSheet.getCell(`G${row}`).font = { size: 9 };
+      ['G', 'H', 'I'].forEach(col => styleDataCell(takeoffSheet.getCell(`${col}${row}`), isAltRow));
+      takeoffSheet.getCell(`J${row}`).value = item.notes || ''; styleDataCell(takeoffSheet.getCell(`J${row}`), isAltRow); takeoffSheet.getCell(`J${row}`).font = { size: 9 };
+      // Track Soc/unemployment and L&I rows
+      if (desc.includes('soc') || desc.includes('unemployment') || desc.includes('social security') || desc.includes('futa') || desc.includes('suta')) {
+        socUnemploymentCell = `F${row}`;
+      }
+      if (desc.includes('l&i') || desc.includes('l & i') || desc.includes('labor & industries') || desc.includes('workers comp') || desc.includes('worker comp')) {
+        liCell = `F${row}`;
+      }
       row++;
     });
 
@@ -970,6 +1048,7 @@ export async function exportTakeoffToExcel(data: TakeoffData, filename?: string)
     row++;
 
     const overheadMarkupRowNum = row;
+    overheadMarkupRowNumGlobal = overheadMarkupRowNum;
     takeoffSheet.getCell(`A${overheadMarkupRowNum}`).value = 'Overhead Markup'; styleMarkupRow(takeoffSheet.getCell(`A${overheadMarkupRowNum}`)); takeoffSheet.getCell(`A${overheadMarkupRowNum}`).alignment = { horizontal: 'right' };
     takeoffSheet.mergeCells(`A${overheadMarkupRowNum}:D${overheadMarkupRowNum}`);
     takeoffSheet.getCell(`E${overheadMarkupRowNum}`).value = markupDecimal; takeoffSheet.getCell(`E${overheadMarkupRowNum}`).numFmt = '0%'; styleMarkupRow(takeoffSheet.getCell(`E${overheadMarkupRowNum}`));
@@ -985,15 +1064,110 @@ export async function exportTakeoffToExcel(data: TakeoffData, filename?: string)
 
   // GRAND TOTAL (Materials + Labor + Overhead on this sheet; Paint is on separate tab)
   const grandTotalRowNum = row;
-  takeoffSheet.getCell(`A${grandTotalRowNum}`).value = 'PROJECT GRAND TOTAL'; styleGrandTotal(takeoffSheet.getCell(`A${grandTotalRowNum}`)); takeoffSheet.getCell(`A${grandTotalRowNum}`).alignment = { horizontal: 'right' };
+  takeoffSheet.getCell(`A${grandTotalRowNum}`).value = 'Total Sell to Customer'; styleGrandTotal(takeoffSheet.getCell(`A${grandTotalRowNum}`)); takeoffSheet.getCell(`A${grandTotalRowNum}`).alignment = { horizontal: 'right' };
   takeoffSheet.mergeCells(`A${grandTotalRowNum}:E${grandTotalRowNum}`);
   const grandTotalRefs = [`F${matTotalRowNum}`];
   if (laborTotalRowNum) grandTotalRefs.push(`F${laborTotalRowNum}`);
   if (overheadTotalRowNum) grandTotalRefs.push(`F${overheadTotalRowNum}`);
   takeoffSheet.getCell(`F${grandTotalRowNum}`).value = { formula: grandTotalRefs.join('+') }; takeoffSheet.getCell(`F${grandTotalRowNum}`).numFmt = '"$"#,##0.00'; styleGrandTotal(takeoffSheet.getCell(`F${grandTotalRowNum}`));
+  row++;
+
+  // ==========================================================================
+  // SUB PAYOUT CALCULATION (on Total SQ's row in columns G-I)
+  // Sub Payout = SQ labor costs + Soc/unemployment + L&I
+  // ==========================================================================
+  if (totalSqsQtyCell && nonPaintLaborItems.length > 0) {
+    // Find the Total SQ's row (search backwards from current position)
+    // We need to add Sub Payout to that row in columns G, H, I
+    // Build the Sub Payout formula: Total SQ labor costs + Soc/unemployment + L&I
+    const isSqUnit = (unit: string) => {
+      const u = (unit || '').toLowerCase().trim();
+      return u === 'square' || u === 'sq';
+    };
+    const sqLaborItems = nonPaintLaborItems.filter(item => isSqUnit(item.unit));
+
+    if (sqLaborItems.length > 0) {
+      // Find rows where we wrote the SQ items (need to search for Total SQ's row)
+      // The Total SQ's row was written right after SQ items
+      // totalSqsQtyCell is like "C42" - extract the row number
+      const totalSqsRowMatch = totalSqsQtyCell.match(/C(\d+)/);
+      if (totalSqsRowMatch) {
+        const totalSqsRowNum = parseInt(totalSqsRowMatch[1], 10);
+
+        // Build Sub Payout formula: Total SQ's extended cost (F column) + Soc/unemployment + L&I
+        const subPayoutParts: string[] = [`F${totalSqsRowNum}`]; // Total SQ labor costs
+        if (socUnemploymentCell) subPayoutParts.push(socUnemploymentCell);
+        if (liCell) subPayoutParts.push(liCell);
+
+        // Column G: Sub Payout Total
+        takeoffSheet.getCell(`G${totalSqsRowNum}`).value = { formula: subPayoutParts.join('+') };
+        takeoffSheet.getCell(`G${totalSqsRowNum}`).numFmt = '"$"#,##0.00';
+        takeoffSheet.getCell(`G${totalSqsRowNum}`).font = { bold: true };
+        styleSubtotalRow(takeoffSheet.getCell(`G${totalSqsRowNum}`));
+
+        // Column H: Sub Payout Per SQ (G / Total SQ's qty)
+        takeoffSheet.getCell(`H${totalSqsRowNum}`).value = { formula: `G${totalSqsRowNum}/${totalSqsQtyCell}` };
+        takeoffSheet.getCell(`H${totalSqsRowNum}`).numFmt = '"$"#,##0.00';
+        takeoffSheet.getCell(`H${totalSqsRowNum}`).font = { bold: true };
+        styleSubtotalRow(takeoffSheet.getCell(`H${totalSqsRowNum}`));
+
+        // Column I: "Sub" label
+        takeoffSheet.getCell(`I${totalSqsRowNum}`).value = 'Sub';
+        takeoffSheet.getCell(`I${totalSqsRowNum}`).font = { bold: true };
+        styleSubtotalRow(takeoffSheet.getCell(`I${totalSqsRowNum}`));
+      }
+    }
+  }
+
+  // ==========================================================================
+  // SUMMARY ROWS BELOW GRAND TOTAL
+  // 1. Sell Pr SQ = Grand Total / Total SQ's qty
+  // 2. Profit = Material Markup + Labor Markup + Overhead Markup
+  // 3. Margin = Profit / Grand Total (percentage)
+  // ==========================================================================
+
+  // Row 1: Sell Pr SQ
+  const sellPrSqRow = row;
+  takeoffSheet.getCell(`E${sellPrSqRow}`).value = 'Sell Pr SQ';
+  takeoffSheet.getCell(`E${sellPrSqRow}`).font = { bold: true };
+  takeoffSheet.getCell(`E${sellPrSqRow}`).alignment = { horizontal: 'right' };
+  if (totalSqsQtyCell) {
+    takeoffSheet.getCell(`F${sellPrSqRow}`).value = { formula: `F${grandTotalRowNum}/${totalSqsQtyCell}` };
+  } else if (squares > 0) {
+    takeoffSheet.getCell(`F${sellPrSqRow}`).value = { formula: `F${grandTotalRowNum}/${squares}` };
+  } else {
+    takeoffSheet.getCell(`F${sellPrSqRow}`).value = 0;
+  }
+  takeoffSheet.getCell(`F${sellPrSqRow}`).numFmt = '"$"#,##0.00';
+  takeoffSheet.getCell(`F${sellPrSqRow}`).font = { bold: true };
+  row++;
+
+  // Row 2: Profit = sum of all markup amounts
+  const profitRow = row;
+  takeoffSheet.getCell(`E${profitRow}`).value = 'Profit:';
+  takeoffSheet.getCell(`E${profitRow}`).font = { bold: true };
+  takeoffSheet.getCell(`E${profitRow}`).alignment = { horizontal: 'right' };
+  // Build profit formula from markup rows
+  const markupRefs: string[] = [`F${matMarkupRowNum}`]; // Material markup
+  if (laborMarkupRowNumGlobal) markupRefs.push(`F${laborMarkupRowNumGlobal}`);
+  if (overheadMarkupRowNumGlobal) markupRefs.push(`F${overheadMarkupRowNumGlobal}`);
+  takeoffSheet.getCell(`F${profitRow}`).value = { formula: markupRefs.join('+') };
+  takeoffSheet.getCell(`F${profitRow}`).numFmt = '"$"#,##0.00';
+  takeoffSheet.getCell(`F${profitRow}`).font = { bold: true };
+  row++;
+
+  // Row 3: Margin = Profit / Grand Total (percentage)
+  const marginRow = row;
+  takeoffSheet.getCell(`E${marginRow}`).value = 'Margin:';
+  takeoffSheet.getCell(`E${marginRow}`).font = { bold: true };
+  takeoffSheet.getCell(`E${marginRow}`).alignment = { horizontal: 'right' };
+  takeoffSheet.getCell(`F${marginRow}`).value = { formula: `F${profitRow}/F${grandTotalRowNum}` };
+  takeoffSheet.getCell(`F${marginRow}`).numFmt = '0.00%';
+  takeoffSheet.getCell(`F${marginRow}`).font = { bold: true };
   row += 2;
 
-  if (squares > 0) {
+  // Legacy price per square (if squares provided in takeoff header)
+  if (squares > 0 && !totalSqsQtyCell) {
     takeoffSheet.getCell(`A${row}`).value = `PRICE PER SQUARE (${squares.toFixed(2)} sq)`;
     takeoffSheet.getCell(`A${row}`).font = { bold: true, size: 11, italic: true };
     takeoffSheet.getCell(`A${row}`).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF0F0F0' } };
