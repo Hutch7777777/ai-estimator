@@ -1,6 +1,6 @@
 'use client';
 import React from 'react';
-import { SectionWrapper, SelectField, ToggleRow, ReadOnlyValue, InfoCallout } from './SectionWrapper';
+import { SectionWrapper, SelectField, ToggleRow, ReadOnlyValue, InfoCallout, ManualOverrideSection } from './SectionWrapper';
 import { WRB_PRODUCTS } from './defaults';
 import type { WRBSettings, WRBProductId, LayerMode } from './types';
 
@@ -24,8 +24,12 @@ export function WRBSection({ settings, onChange, facadeSF }: WRBSectionProps) {
         <>
           <SelectField label="Layer Mode" value={settings.layer_mode} options={layerModeOptions} onChange={(v) => update({ layer_mode: v as LayerMode })} />
           <ToggleRow label="Include Seam Tape" checked={settings.include_seam_tape} onChange={(v) => update({ include_seam_tape: v })} />
-          {facadeSF != null && facadeSF > 0 && <ReadOnlyValue label="Coverage Area" value={Math.round(facadeSF)} suffix="SF" />}
           {isJumboTex && <InfoCallout>JumboTex requires double-layer on lap siding areas. Labor calculated as (lapArea × 2) + nonLapArea.</InfoCallout>}
+          {facadeSF != null && facadeSF > 0 && (
+            <ManualOverrideSection label="Calculated Values">
+              <ReadOnlyValue label="Coverage Area" value={Math.round(facadeSF)} suffix="SF" />
+            </ManualOverrideSection>
+          )}
         </>
       )}
     </SectionWrapper>

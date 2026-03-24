@@ -268,9 +268,19 @@ const MarkupRow = memo(function MarkupRow({
           </td>
         );
       case 'source':
+        // Show bluebeam_content (from Bluebeam import) or marker_label
+        const sourceText = detection.bluebeam_content || detection.marker_label;
+        const sourceDisplay = sourceText
+          ? (sourceText.length > 20 ? sourceText.substring(0, 17) + '...' : sourceText)
+          : '—';
         return (
-          <td key={colId} className={`${baseClass} ${alignClass} text-gray-400`} style={{ width }} title={detection.marker_label || '—'}>
-            {detection.marker_label || '—'}
+          <td
+            key={colId}
+            className={`${baseClass} ${alignClass} text-gray-400 text-[11px]`}
+            style={{ width }}
+            title={sourceText || 'No source'}
+          >
+            {sourceDisplay}
           </td>
         );
       case 'page':
@@ -286,14 +296,19 @@ const MarkupRow = memo(function MarkupRow({
           </td>
         );
       case 'material':
+        // Show actual product name, truncated to fit column
+        const materialName = detection.assigned_material_name;
+        const displayName = materialName
+          ? (materialName.length > 25 ? materialName.substring(0, 22) + '...' : materialName)
+          : (detection.assigned_material_id ? 'Assigned' : '—');
         return (
           <td
             key={colId}
-            className={`${baseClass} ${alignClass} ${hasNoMaterial ? 'text-amber-400' : 'text-gray-400'}`}
+            className={`${baseClass} ${alignClass} ${hasNoMaterial ? 'text-amber-400' : 'text-emerald-400'} text-[11px]`}
             style={{ width }}
-            title={detection.assigned_material_id ? 'Assigned' : 'Unassigned'}
+            title={materialName || (detection.assigned_material_id ? 'Material assigned' : 'No material assigned')}
           >
-            {detection.assigned_material_id ? 'Assigned' : '—'}
+            {displayName}
           </td>
         );
       case 'status':

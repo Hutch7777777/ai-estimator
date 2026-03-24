@@ -129,9 +129,12 @@ const MarkupsListPanel = memo(function MarkupsListPanel({
   const [localCollapsed, setLocalCollapsed] = useState(() => {
     if (typeof window !== 'undefined') {
       const stored = localStorage.getItem(COLLAPSED_STORAGE_KEY);
-      return stored === 'true';
+      // If user has a saved preference, use it; otherwise default to collapsed
+      if (stored !== null) {
+        return stored === 'true';
+      }
     }
-    return false;
+    return true; // Default to collapsed so users see more of the elevation drawing
   });
 
   const isCollapsed = externalCollapsed !== undefined ? externalCollapsed : localCollapsed;

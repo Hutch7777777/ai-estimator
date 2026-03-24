@@ -1,6 +1,6 @@
 'use client';
 import React from 'react';
-import { SectionWrapper, ToggleRow, SelectField, NumberField, ReadOnlyValue } from './SectionWrapper';
+import { SectionWrapper, ToggleRow, SelectField, NumberField, ReadOnlyValue, ManualOverrideSection } from './SectionWrapper';
 import { DOOR_TRIM_MATERIALS } from './defaults';
 import type { TrimSystem, DoorTrimSettings } from './types';
 
@@ -17,9 +17,11 @@ export function DoorTrimSection({ trimSystem, settings, onChange, calculatedLF }
       {settings.include && (
         <>
           <SelectField label="Material" value={settings.material} options={materials} onChange={(v) => update({ material: v })} />
-          {calculatedLF != null && calculatedLF > 0 && <ReadOnlyValue label="Detected LF" value={Math.round(calculatedLF)} suffix="LF" />}
-          <NumberField label="Manual LF Override" value={settings.manual_lf} onChange={(v) => update({ manual_lf: v })}
-            placeholder={calculatedLF ? `Auto: ${Math.round(calculatedLF)}` : 'Enter LF'} suffix="LF" hint="Leave blank to use detected value" min={0} />
+          <ManualOverrideSection>
+            {calculatedLF != null && calculatedLF > 0 && <ReadOnlyValue label="Detected LF" value={Math.round(calculatedLF)} suffix="LF" />}
+            <NumberField label="Manual LF Override" value={settings.manual_lf} onChange={(v) => update({ manual_lf: v })}
+              placeholder={calculatedLF ? `Auto: ${Math.round(calculatedLF)}` : 'Enter LF'} suffix="LF" hint="Leave blank to use detected value" min={0} />
+          </ManualOverrideSection>
         </>
       )}
     </SectionWrapper>

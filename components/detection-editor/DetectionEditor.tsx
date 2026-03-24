@@ -2687,7 +2687,21 @@ export default function DetectionEditor({
 
       // Building/Facade class (handle both underscore and space versions)
       if (cls === 'building' || cls === 'exterior_wall' || cls === 'exterior wall' || cls === 'siding') {
-        const buildingMeasurements = calculateBuildingMeasurements(points, scaleRatio);
+        const calculatedBuilding = calculateBuildingMeasurements(points, scaleRatio);
+
+        // Prefer stored DB values, fallback to calculated with warning
+        const buildingMeasurements = {
+          area_sf: detection.area_sf ?? (() => {
+            console.warn(`Detection ${detection.id} missing area_sf, computing from pixels`);
+            return calculatedBuilding.area_sf;
+          })(),
+          perimeter_lf: detection.perimeter_lf ?? (() => {
+            console.warn(`Detection ${detection.id} missing perimeter_lf, computing from pixels`);
+            return calculatedBuilding.perimeter_lf;
+          })(),
+          level_starter_lf: calculatedBuilding.level_starter_lf, // No stored value for this
+        };
+
         totals.buildingCount++;
         totals.buildingAreaSf += buildingMeasurements.area_sf;
         totals.buildingPerimeterLf += buildingMeasurements.perimeter_lf;
@@ -2705,7 +2719,19 @@ export default function DetectionEditor({
 
       // Window/Door/Garage/Gable derived measurements
       const derived = getClassDerivedMeasurements(cls, points, scaleRatio);
-      const areaMeasurement = calculateAreaMeasurements(points, scaleRatio);
+      const calculatedArea = calculateAreaMeasurements(points, scaleRatio);
+
+      // Prefer stored DB values, fallback to calculated with warning
+      const areaMeasurement = {
+        area_sf: detection.area_sf ?? (() => {
+          console.warn(`Detection ${detection.id} missing area_sf, computing from pixels`);
+          return calculatedArea.area_sf;
+        })(),
+        perimeter_lf: detection.perimeter_lf ?? (() => {
+          console.warn(`Detection ${detection.id} missing perimeter_lf, computing from pixels`);
+          return calculatedArea.perimeter_lf;
+        })(),
+      };
 
       if (cls === 'window' && derived && 'head_lf' in derived) {
         totals.windowCount++;
@@ -2787,8 +2813,16 @@ export default function DetectionEditor({
       }
     }
 
-    // Calculate net siding (building area minus openings)
-    totals.sidingNetSf = Math.max(0, totals.buildingAreaSf - totalOpeningsSf);
+    // Calculate net siding (building area minus openings, plus gable area)
+    // Gable area added back: gable triangles are siding surface needing material.
+    // Matches backend formula in takeoff_service.py:
+    // net_siding_sf = gross_facade - windows - doors - garages + gable_area
+    // NOTE: Future change planned — gable siding will be marked as regular
+    // siding polygons, gable topout becomes a point count. When that happens,
+    // gable area will already be included in buildingAreaSf and this add-back
+    // can be removed.
+    const gableAreaSf = totals.gableAreaSf || 0;
+    totals.sidingNetSf = Math.max(0, totals.buildingAreaSf - totalOpeningsSf + gableAreaSf);
 
     // Calculate corners from exterior wall polygons
     if (exteriorWallPolygons.length > 0 && scaleRatio > 0) {
@@ -2992,6 +3026,7 @@ export default function DetectionEditor({
 
       let pageOpeningsSf = 0;
       let pageBuildingAreaSf = 0;
+      let pageGableAreaSf = 0;
 
       for (const detection of pageDetections) {
         const cls = detection.class as string;
@@ -3017,7 +3052,21 @@ export default function DetectionEditor({
 
         // Building/Facade
         if (cls === 'building' || cls === 'exterior_wall' || cls === 'exterior wall') {
-          const measurements = calculateBuildingMeasurements(points, scaleRatio);
+          const calculatedBuilding = calculateBuildingMeasurements(points, scaleRatio);
+
+          // Prefer stored DB values, fallback to calculated with warning
+          const measurements = {
+            area_sf: detection.area_sf ?? (() => {
+              console.warn(`Detection ${detection.id} missing area_sf, computing from pixels`);
+              return calculatedBuilding.area_sf;
+            })(),
+            perimeter_lf: detection.perimeter_lf ?? (() => {
+              console.warn(`Detection ${detection.id} missing perimeter_lf, computing from pixels`);
+              return calculatedBuilding.perimeter_lf;
+            })(),
+            level_starter_lf: calculatedBuilding.level_starter_lf, // No stored value for this
+          };
+
           aggregateTotals.buildingCount++;
           aggregateTotals.buildingAreaSf += measurements.area_sf;
           aggregateTotals.buildingPerimeterLf += measurements.perimeter_lf;
@@ -3027,7 +3076,19 @@ export default function DetectionEditor({
         }
 
         const derived = getClassDerivedMeasurements(cls, points, scaleRatio);
-        const areaMeasurement = calculateAreaMeasurements(points, scaleRatio);
+        const calculatedArea = calculateAreaMeasurements(points, scaleRatio);
+
+        // Prefer stored DB values, fallback to calculated with warning
+        const areaMeasurement = {
+          area_sf: detection.area_sf ?? (() => {
+            console.warn(`Detection ${detection.id} missing area_sf, computing from pixels`);
+            return calculatedArea.area_sf;
+          })(),
+          perimeter_lf: detection.perimeter_lf ?? (() => {
+            console.warn(`Detection ${detection.id} missing perimeter_lf, computing from pixels`);
+            return calculatedArea.perimeter_lf;
+          })(),
+        };
 
         if (cls === 'window' && derived && 'head_lf' in derived) {
           aggregateTotals.windowCount++;
@@ -3055,6 +3116,7 @@ export default function DetectionEditor({
           aggregateTotals.gableCount++;
           aggregateTotals.gableAreaSf += areaMeasurement.area_sf;
           aggregateTotals.gableRakeLf += derived.rake_lf;
+          pageGableAreaSf += areaMeasurement.area_sf;
         } else if (cls === 'soffit') {
           aggregateTotals.soffitCount++;
           aggregateTotals.soffitAreaSf += areaMeasurement.area_sf;
@@ -3109,8 +3171,9 @@ export default function DetectionEditor({
         }
       }
 
-      // Add page's net siding to aggregate
-      aggregateTotals.sidingNetSf += Math.max(0, pageBuildingAreaSf - pageOpeningsSf);
+      // Add page's net siding to aggregate (including gable area add-back)
+      // See liveDerivedTotals for full explanation of gable area add-back
+      aggregateTotals.sidingNetSf += Math.max(0, pageBuildingAreaSf - pageOpeningsSf + pageGableAreaSf);
     }
 
     return aggregateTotals;

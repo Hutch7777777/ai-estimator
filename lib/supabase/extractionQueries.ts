@@ -314,10 +314,17 @@ export async function getJobElevationCalcs(
 }
 
 export async function getJobTotals(jobId: string): Promise<ExtractionJobTotals | null> {
+  console.log('🟡🟡🟡 [getJobTotals] CALLED with jobId:', jobId);
   console.log('[getJobTotals] Using direct fetch for job:', jobId);
   const data = await directFetch<ExtractionJobTotals[]>(
     `extraction_job_totals?job_id=eq.${jobId}&select=*`
   );
+  console.log('[getJobTotals] Raw response:', {
+    isNull: data === null,
+    isArray: Array.isArray(data),
+    length: Array.isArray(data) ? data.length : 'N/A',
+    firstRow: Array.isArray(data) && data.length > 0 ? data[0] : null,
+  });
   return data?.[0] || null;
 }
 
@@ -433,6 +440,7 @@ function withTimeout<T>(
 export async function getFullExtractionContext(
   jobId: string
 ): Promise<FullExtractionContext> {
+  console.log('🔴🔴🔴 [getFullExtractionContext] CALLED with jobId:', jobId);
   console.log('[getFullExtractionContext] Starting fetch for jobId:', jobId);
 
   // Individual query timeout (5 seconds per query)
@@ -509,6 +517,7 @@ export async function getFullExtractionContext(
     return [] as ExtractionElevationCalcs[];
   });
 
+  console.log('🟠🟠🟠 [getFullExtractionContext] About to create jobTotalsPromise for jobId:', jobId);
   const jobTotalsPromise = withTimeout(
     getJobTotals(jobId).then(result => {
       console.log('[getFullExtractionContext] getJobTotals completed:', !!result);
@@ -520,6 +529,9 @@ export async function getFullExtractionContext(
     console.error('[getFullExtractionContext] getJobTotals failed:', err.message);
     return null;
   });
+  console.log('🟠🟠🟠 [getFullExtractionContext] jobTotalsPromise created');
+
+  console.log('🟣🟣🟣 [getFullExtractionContext] All promises created, about to Promise.all. jobTotalsPromise exists:', !!jobTotalsPromise);
 
   const [job, pages, allDetections, elevationCalcs, jobTotals] = await Promise.all([
     jobPromise,
@@ -530,6 +542,40 @@ export async function getFullExtractionContext(
   ]);
 
   console.log('[getFullExtractionContext] All queries completed (some may have timed out)');
+
+  // Batch lookup material names for detections that have assigned_material_id but no assigned_material_name
+  const idsNeedingNames = [...new Set(
+    allDetections
+      .filter(d => d.assigned_material_id && !d.assigned_material_name)
+      .map(d => d.assigned_material_id as string)
+  )];
+
+  if (idsNeedingNames.length > 0) {
+    console.log('[getFullExtractionContext] Looking up material names for', idsNeedingNames.length, 'items');
+    try {
+      const materials = await directFetch<{ id: string; product_name: string }[]>(
+        `pricing_items?select=id,product_name&id=in.(${idsNeedingNames.join(',')})`
+      );
+
+      if (materials && materials.length > 0) {
+        const nameMap = new Map(materials.map(m => [m.id, m.product_name]));
+        console.log('[getFullExtractionContext] Found names for', nameMap.size, 'materials');
+
+        // Apply names to detections
+        for (const detection of allDetections) {
+          if (detection.assigned_material_id && !detection.assigned_material_name) {
+            const name = nameMap.get(detection.assigned_material_id);
+            if (name) {
+              detection.assigned_material_name = name;
+            }
+          }
+        }
+      }
+    } catch (err) {
+      console.error('[getFullExtractionContext] Failed to lookup material names:', err);
+      // Continue without names - not critical
+    }
+  }
 
   // Group detections by page
   const detectionsByPage = new Map<string, ExtractionDetection[]>();

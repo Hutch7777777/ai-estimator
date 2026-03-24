@@ -153,6 +153,7 @@ export function useExtractionData(
     setError(null);
 
     try {
+      console.log('🔵🔵🔵 [useExtractionData] ABOUT TO CALL getFullExtractionContext for jobId:', jobId);
       console.log('[useExtractionData] Calling getFullExtractionContext...');
       const context: FullExtractionContext = await getFullExtractionContext(jobId);
       console.log('[useExtractionData] getFullExtractionContext returned:', {
@@ -161,6 +162,7 @@ export function useExtractionData(
         detectionsCount: context.detectionsByPage.size,
         hasJobTotals: !!context.jobTotals,
       });
+      console.log('🟢🟢🟢 [useExtractionData] context.jobTotals =', context.jobTotals);
 
       if (!isMountedRef.current) {
         console.log('[useExtractionData] Component unmounted during fetch, aborting');

@@ -176,9 +176,12 @@ function calculateMeasurementsFromPixels(
 
   // For standard polygons - calculate LIVE from polygon_points if available
   // This ensures measurements always match the canvas display exactly
+  // Note: This fallback is only reached when no stored area_sf exists
   if (detection.polygon_points && !isPolygonWithHoles(detection.polygon_points)) {
     const points = detection.polygon_points as PolygonPoint[];
     if (points.length >= 3 && pixelsPerFoot > 0) {
+      console.warn(`Detection ${detection.id} missing area_sf, computing from polygon_points`);
+
       // Calculate area using shoelace formula (same as canvas label)
       const areaPixelsSq = calculatePolygonArea(points);
       const areaSf = areaPixelsSq / (pixelsPerFoot * pixelsPerFoot);
@@ -203,6 +206,7 @@ function calculateMeasurementsFromPixels(
 
   // Fallback: calculate from pixel dimensions (bounding box approximation)
   // This is used when polygon_points aren't available
+  console.warn(`Detection ${detection.id} missing area_sf and polygon_points, computing from bounding box`);
   const widthFt = (detection.pixel_width || 0) / pixelsPerFoot;
   const heightFt = (detection.pixel_height || 0) / pixelsPerFoot;
   const areaSf = widthFt * heightFt;

@@ -226,11 +226,10 @@ export async function GET(request: Request) {
       console.log('[API] Filter: page_id IN [...] AND is_deleted = false');
       console.log('[API] Page IDs being queried:', pageIds);
 
-      // NOTE: extraction_detections_draft table does NOT have area_sf or perimeter_lf columns
-      // but DOES have polygon_points for accurate shape rendering
+      // Query draft detections including area_sf and perimeter_lf columns
       const { data: draftData, error: draftError } = await supabase
         .from('extraction_detections_draft')
-        .select('id, page_id, class, pixel_x, pixel_y, pixel_width, pixel_height, polygon_points, is_deleted')
+        .select('id, page_id, class, pixel_x, pixel_y, pixel_width, pixel_height, polygon_points, area_sf, perimeter_lf, is_deleted')
         .in('page_id', pageIds)
         .eq('is_deleted', false);
 
@@ -251,11 +250,11 @@ export async function GET(request: Request) {
         console.log(`[API] ✅ SUCCESS: Found ${draftData.length} DRAFT detections`);
         console.log('[API] Returning DRAFT data - NOT querying validated or AI');
 
-        // Normalize draft data to match DetectionRecord (add null for missing columns)
+        // Normalize draft data to match DetectionRecord (use DB values with null fallback)
         const normalizedDraftData = draftData.map((det: Record<string, unknown>) => ({
           ...det,
-          area_sf: null,
-          perimeter_lf: null,
+          area_sf: det.area_sf ?? null,
+          perimeter_lf: det.perimeter_lf ?? null,
         }));
 
         return buildResponse(normalizedDraftData as DetectionRecord[], 'draft (user edits)');

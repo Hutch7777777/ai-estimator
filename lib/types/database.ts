@@ -32,6 +32,8 @@ export type DetectionClass =
   | 'roof'
   | 'gable'
   | 'exterior_wall'
+  | 'gable_topout'
+  | 'topout'
   | '';
 
 export type PageType =

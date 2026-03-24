@@ -29,6 +29,125 @@ import {
   type RFIItem,
   type ChecklistItem,
 } from '@/lib/utils/documentGenerators';
+import type {
+  ScheduleOCRData,
+  ScheduleWindow,
+  ScheduleDoor,
+} from '@/lib/types/extraction';
+
+// =============================================================================
+// Schedule Data Conversion (Azure DI → TakeoffItem)
+// =============================================================================
+
+/**
+ * Convert Azure-extracted ScheduleWindow[] to TakeoffItem[] for Excel export.
+ */
+function scheduleWindowsToTakeoffItems(windows: ScheduleWindow[]): TakeoffItem[] {
+  return windows.map((w, i) => ({
+    item_code: w.mark || `W${i + 1}`,
+    description: w.type ? `${w.type} - ${w.mark}` : `Window ${w.mark}`,
+    manufacturer: '',
+    size: w.size || '',
+    quantity: w.quantity || 1,
+    unit: 'EA',
+    notes: w.notes || '',
+  }));
+}
+
+/**
+ * Convert Azure-extracted ScheduleDoor[] to TakeoffItem[] for Excel export.
+ */
+function scheduleDoorsToTakeoffItems(doors: ScheduleDoor[]): TakeoffItem[] {
+  return doors.map((d, i) => ({
+    item_code: d.mark || `D${i + 1}`,
+    description: d.type ? `${d.type} - ${d.mark}` : `Door ${d.mark}`,
+    manufacturer: '',
+    size: d.size || '',
+    quantity: d.quantity || 1,
+    unit: 'EA',
+    notes: d.notes || '',
+  }));
+}
+
+/**
+ * Fetch existing Azure schedule data via server-side API for pages with ocr_data.
+ * Uses fetch to avoid RLS issues with browser Supabase client.
+ * Returns aggregated ScheduleOCRData if found, or null if no schedule data exists.
+ */
+async function fetchExistingScheduleData(pageIds: string[]): Promise<ScheduleOCRData | null> {
+  console.log('[fetchExistingScheduleData] ========================================');
+  console.log('[fetchExistingScheduleData] Fetching via API for', pageIds.length, 'pages');
+
+  if (pageIds.length === 0) {
+    console.log('[fetchExistingScheduleData] No page IDs provided');
+    return null;
+  }
+
+  try {
+    const allWindows: ScheduleWindow[] = [];
+    const allDoors: ScheduleDoor[] = [];
+
+    for (const pageId of pageIds) {
+      try {
+        const res = await fetch(`/api/extraction-pages/${pageId}`);
+        if (!res.ok) {
+          console.warn(`[fetchExistingScheduleData] Failed to fetch page ${pageId}: ${res.status}`);
+          continue;
+        }
+        const data = await res.json();
+        const ocrData = data?.ocr_data as ScheduleOCRData | null;
+
+        console.log(`[fetchExistingScheduleData] Page ${data?.page_number} (${data?.page_type}):`, {
+          hasOcrData: !!ocrData,
+          windowsInOcr: ocrData?.windows?.length ?? 'N/A',
+          doorsInOcr: ocrData?.doors?.length ?? 'N/A',
+        });
+
+        if (!ocrData) continue;
+
+        if (ocrData.windows?.length) {
+          console.log(`[fetchExistingScheduleData] -> Adding ${ocrData.windows.length} windows`);
+          allWindows.push(...ocrData.windows);
+        }
+        if (ocrData.doors?.length) {
+          console.log(`[fetchExistingScheduleData] -> Adding ${ocrData.doors.length} doors`);
+          allDoors.push(...ocrData.doors);
+        }
+      } catch (e) {
+        console.warn('[fetchExistingScheduleData] Failed to fetch page', pageId, e);
+      }
+    }
+
+    console.log('[fetchExistingScheduleData] Total:', allWindows.length, 'windows,', allDoors.length, 'doors');
+
+    if (allWindows.length === 0 && allDoors.length === 0) {
+      console.log('[fetchExistingScheduleData] No windows or doors found across all pages');
+      return null;
+    }
+
+    console.log(`[fetchExistingScheduleData] SUCCESS: ${allWindows.length} windows, ${allDoors.length} doors`);
+
+    return {
+      windows: allWindows,
+      doors: allDoors,
+      skylights: [],
+      garages: [],
+      totals: {
+        windows: allWindows.length,
+        doors: allDoors.length,
+      },
+      confidence: 0.92,
+      extraction_notes: 'Aggregated from Azure Document Intelligence extraction',
+      is_schedule_page: true,
+      extracted_at: new Date().toISOString(),
+      model_used: 'azure-document-intelligence-layout-v4.0',
+      tokens_used: 0,
+    };
+  } catch (err) {
+    console.error('[fetchExistingScheduleData] ERROR:', err);
+    return null;
+  }
+}
 
 // =============================================================================
 // Types
@@ -251,6 +370,92 @@ export function useClaudeAssistant(options: UseClaudeAssistantOptions): UseClaud
       timestamp: new Date(),
     };
     setMessages(prev => [...prev, userMessage]);
+
+    // =========================================================================
+    // FAST PATH: Use existing Azure schedule data for window/door takeoffs
+    // =========================================================================
+    if (
+      detectedAction.action === 'create_takeoff' &&
+      (detectedAction.subject === 'window' || detectedAction.subject === 'windows' ||
+       detectedAction.subject === 'door' || detectedAction.subject === 'doors') &&
+      allPages && allPages.length > 0
+    ) {
+      const startTime = Date.now();
+      const isWindowTakeoff = detectedAction.subject?.startsWith('window');
+      const subjectLabel = isWindowTakeoff ? 'Window' : 'Door';
+
+      console.log(`[useClaudeAssistant] Fast path: checking for existing ${subjectLabel} schedule data...`);
+
+      // Debug: log ALL pages and their types
+      console.log('[useClaudeAssistant] All available pages:', allPages.map(p => ({
+        id: p.id?.substring(0, 8) + '...',
+        page_number: p.page_number,
+        page_type: p.page_type,
+        matchesSchedule: p.page_type?.toLowerCase().includes('schedule'),
+      })));
+
+      // Get page IDs for schedule pages
+      const schedulePageIds = allPages
+        .filter(p => p.page_type?.toLowerCase().includes('schedule'))
+        .map(p => p.id);
+
+      console.log(`[useClaudeAssistant] Found ${schedulePageIds.length} schedule pages:`, schedulePageIds.map(id => id.substring(0, 8) + '...'));
+
+      if (schedulePageIds.length > 0) {
+        const scheduleData = await fetchExistingScheduleData(schedulePageIds);
+
+        console.log('[useClaudeAssistant] Schedule data result:', {
+          hasData: !!scheduleData,
+          windowCount: scheduleData?.windows?.length ?? 0,
+          doorCount: scheduleData?.doors?.length ?? 0,
+        });
+
+        if (scheduleData) {
+          const items = isWindowTakeoff
+            ? scheduleWindowsToTakeoffItems(scheduleData.windows)
+            : scheduleDoorsToTakeoffItems(scheduleData.doors);
+
+          console.log(`[useClaudeAssistant] Converted to ${items.length} TakeoffItems for ${subjectLabel}`);
+
+          if (items.length > 0) {
+            console.log(`[useClaudeAssistant] Fast path SUCCESS: ${items.length} ${subjectLabel.toLowerCase()}s from Azure schedule data`);
+
+            try {
+              const dateStr = new Date().toISOString().split('T')[0];
+              const safeName = (projectName || 'Project').replace(/[^a-zA-Z0-9]/g, '_');
+              const filename = `${safeName}_${subjectLabel}_Takeoff_${dateStr}.xlsx`;
+
+              const buffer = await generateTakeoffSpreadsheet(items, projectName || 'Project', subjectLabel);
+              downloadFile(buffer, filename, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+
+              const elapsedMs = Date.now() - startTime;
+
+              // Build summary message
+              const itemSummary = items
+                .slice(0, 5)
+                .map(item => `• ${item.item_code}: ${item.size || 'N/A'} (qty: ${item.quantity})`)
+                .join('\n');
+              const moreItems = items.length > 5 ? `\n... and ${items.length - 5} more items` : '';
+
+              const assistantMessage: ClaudeAssistantMessage = {
+                id: uuidv4(),
+                role: 'assistant',
+                content: `## ${subjectLabel} Takeoff Generated\n\nExtracted **${items.length} ${subjectLabel.toLowerCase()}s** from the schedule:\n\n${itemSummary}${moreItems}\n\n✅ **Document Generated:** ${filename}\n\nThe file has been downloaded to your computer.\n\n*Source: Azure Document Intelligence (${elapsedMs}ms)*`,
+                timestamp: new Date(),
+                processingTimeMs: elapsedMs,
+              };
+              setMessages(prev => [...prev, assistantMessage]);
+              setIsLoading(false);
+              return; // Early return - skip Claude API call
+            } catch (docError) {
+              console.error('[useClaudeAssistant] Fast path document generation failed:', docError);
+              // Fall through to normal Claude flow
+            }
+          }
+        }
+      }
+      console.log('[useClaudeAssistant] Fast path: no existing data, falling back to Claude Vision');
+    }
 
     try {
       let selectedPages: SelectedPage[] = [];

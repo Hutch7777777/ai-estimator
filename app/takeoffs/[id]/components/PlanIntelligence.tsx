@@ -514,26 +514,25 @@ async function analyzeScheduleStructure(pageId: string, imageUrl: string): Promi
   }
 }
 
-// Pass 2: Extract schedule data (with optional structure guidance)
+// Extract schedule data using Azure Document Intelligence (single pass)
 async function extractScheduleFromPage(
   pageId: string,
   imageUrl: string,
-  jobId?: string,
-  structure?: StructureAnalysisResult
+  jobId?: string
 ): Promise<ScheduleOCRData | null> {
   try {
-    console.log(`[PlanIntelligence] Pass 2: Extracting data for page ${pageId}${structure ? ' (with structure guidance)' : ''}`);
-    const response = await fetch('/api/extract-schedule', {
+    console.log(`[PlanIntelligence] Extracting schedule data for page ${pageId} via Azure DI`);
+    const response = await fetch('/api/extract-schedule-azure', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ pageId, imageUrl, jobId, structure }),
+      body: JSON.stringify({ pageId, imageUrl, jobId }),
     });
     if (!response.ok) {
       const error = await response.json();
       throw new Error(error.error || 'Extraction failed');
     }
     const result = await response.json();
-    console.log(`[PlanIntelligence] Extraction complete. Used targeted prompt: ${result.used_targeted_prompt}`);
+    console.log(`[PlanIntelligence] Azure extraction complete. Method: ${result.method}, elapsed: ${result.elapsed_ms}ms`);
     return result.data || null;
   } catch (error) {
     console.error('Schedule extraction failed:', error);
@@ -1021,38 +1020,12 @@ export function PlanIntelligence({ takeoffId, jobId: propJobId, projectId }: Pla
         console.log(`\n[PlanIntelligence] ======= Page ${i + 1}/${schedulePages.length} (page_number: ${page.page_number}) =======`);
 
         try {
-          // PASS 1: Analyze structure
-          console.log(`[PlanIntelligence] PASS 1: Analyzing structure...`);
-          const structure = await analyzeScheduleStructure(page.id, page.image_url);
-
-          // Skip non-schedule pages early
-          if (structure && !structure.is_schedule_page) {
-            console.log(`[PlanIntelligence] Page ${page.page_number} is NOT a schedule page: ${structure.page_description}`);
-            continue;
-          }
-
-          // Log structure analysis results
-          if (structure) {
-            console.log(`[PlanIntelligence] Structure found:`);
-            console.log(`  - Schedules: ${structure.schedules_found.join(', ')}`);
-            if (structure.window_schedule?.exists) {
-              console.log(`  - Windows: ${structure.window_schedule.data_row_count} rows, size format: ${structure.window_schedule.size_format}`);
-            }
-            if (structure.door_schedule?.exists) {
-              console.log(`  - Doors: ${structure.door_schedule.data_row_count} rows, size format: ${structure.door_schedule.size_format}`);
-            }
-            if (structure.analysis_notes) {
-              console.log(`  - Notes: ${structure.analysis_notes}`);
-            }
-          }
-
-          // PASS 2: Extract data with structure guidance
-          console.log(`[PlanIntelligence] PASS 2: Extracting data${structure ? ' with structure guidance' : ''}...`);
+          // Azure Document Intelligence handles structure analysis + extraction in one pass
+          console.log(`[PlanIntelligence] Extracting schedule via Azure DI...`);
           const result = await extractScheduleFromPage(
             page.id,
             page.image_url,
-            extractionJobId || undefined,
-            structure || undefined
+            extractionJobId || undefined
           );
 
           if (result) {

@@ -252,20 +252,35 @@ export default function KonvaDetectionPolygon({
   const centroid = useMemo(() => getPolygonCentroid(localPoints), [localPoints]);
 
   // Calculate area dynamically from pixel dimensions and current scale
-  // This ensures labels update immediately after calibration without needing a data refresh
+  // During editing (dragging), calculate live from localPoints for immediate feedback
+  // When not editing, prefer stored DB value to ensure consistency with backend
   const calculatedAreaSf = useMemo(() => {
     if (scaleRatio <= 0) return 0;
 
-    // Use localPoints (current polygon shape) for calculation
+    const isEditing = isDraggingCorner || isDraggingShape || isDraggingEdge !== null;
+
+    // If we have a stored area_sf and NOT currently editing, prefer the DB value
+    if (!isEditing && detection.area_sf != null && detection.area_sf > 0) {
+      return detection.area_sf;
+    }
+
+    // Calculate live from current polygon shape (for editing feedback or when no stored value)
     if (localPoints.length >= 3) {
+      // Only warn when not editing and no stored value (to avoid console spam during drags)
+      if (!isEditing && (detection.area_sf == null || detection.area_sf <= 0)) {
+        console.warn(`Detection ${detection.id} missing area_sf, computing from pixels`);
+      }
       return calculatePolygonAreaSf(localPoints, scaleRatio);
     }
 
     // Fallback for rectangles (no polygon_points)
+    if (!isEditing) {
+      console.warn(`Detection ${detection.id} missing area_sf and polygon_points, computing from bounding box`);
+    }
     const widthFt = detection.pixel_width / scaleRatio;
     const heightFt = detection.pixel_height / scaleRatio;
     return widthFt * heightFt;
-  }, [localPoints, detection.pixel_width, detection.pixel_height, scaleRatio]);
+  }, [localPoints, detection.id, detection.area_sf, detection.pixel_width, detection.pixel_height, scaleRatio, isDraggingCorner, isDraggingShape, isDraggingEdge]);
 
   // Check if polygon is large enough to show area label
   const showAreaLabel = showArea && calculatedAreaSf > 0 && bbox.width > 40 && bbox.height > 30;

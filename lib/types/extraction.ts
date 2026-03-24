@@ -1124,7 +1124,7 @@ export interface LiveDerivedTotals {
   gutterCount: number;
   gutterLf: number;
   downspoutCount: number;
-  // SIDING (net area = building - openings)
+  // SIDING (net area = building - openings + gables)
   sidingNetSf: number;
   // COUNTS (point markers grouped by class)
   countsByClass: Record<string, number>;

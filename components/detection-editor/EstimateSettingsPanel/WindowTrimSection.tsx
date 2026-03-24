@@ -1,6 +1,6 @@
 'use client';
 import React from 'react';
-import { SectionWrapper, ToggleRow, SelectField, NumberField, ReadOnlyValue, InfoCallout } from './SectionWrapper';
+import { SectionWrapper, ToggleRow, SelectField, NumberField, ReadOnlyValue, ManualOverrideSection } from './SectionWrapper';
 import { WINDOW_TRIM_MATERIALS } from './defaults';
 import type { TrimSystem, WindowTrimSettings } from './types';
 
@@ -22,10 +22,12 @@ export function WindowTrimSection({ trimSystem, settings, onChange, calculatedLF
             <ToggleRow label="Include Slope Sill (2x3)" checked={settings.include_slope_sill}
               onChange={(v) => update({ include_slope_sill: v })} hint="Water management at window sills" />
           )}
-          {calculatedLF != null && calculatedLF > 0 && <ReadOnlyValue label="Detected LF" value={Math.round(calculatedLF)} suffix="LF" />}
-          <NumberField label="Manual LF Override" value={settings.manual_lf} onChange={(v) => update({ manual_lf: v })}
-            placeholder={calculatedLF ? `Auto: ${Math.round(calculatedLF)}` : 'Enter LF'} suffix="LF" hint="Leave blank to use detected value" min={0} />
-          {effectiveLF > 0 && <ReadOnlyValue label="Effective LF" value={Math.round(effectiveLF)} suffix="LF" />}
+          <ManualOverrideSection>
+            {calculatedLF != null && calculatedLF > 0 && <ReadOnlyValue label="Detected LF" value={Math.round(calculatedLF)} suffix="LF" />}
+            <NumberField label="Manual LF Override" value={settings.manual_lf} onChange={(v) => update({ manual_lf: v })}
+              placeholder={calculatedLF ? `Auto: ${Math.round(calculatedLF)}` : 'Enter LF'} suffix="LF" hint="Leave blank to use detected value" min={0} />
+            {effectiveLF > 0 && <ReadOnlyValue label="Effective LF" value={Math.round(effectiveLF)} suffix="LF" />}
+          </ManualOverrideSection>
         </>
       )}
     </SectionWrapper>

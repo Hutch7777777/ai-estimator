@@ -76,12 +76,22 @@ export interface DetectionToolbarProps {
 // =============================================================================
 
 const DETECTION_CLASSES: { value: DetectionClass; label: string }[] = [
+  // Area classes (polygon/rectangle tool)
   { value: 'siding', label: 'Siding' },
   { value: 'window', label: 'Window' },
   { value: 'door', label: 'Door' },
   { value: 'garage', label: 'Garage' },
   { value: 'roof', label: 'Roof' },
   { value: 'gable', label: 'Gable' },
+  // Linear classes (line tool)
+  { value: 'corner_outside', label: 'Outside Corner' },
+  { value: 'corner_inside', label: 'Inside Corner' },
+  { value: 'belly_band', label: 'Belly Band' },
+  { value: 'gable_topout', label: 'Gable Top-Out' },
+  { value: 'topout', label: 'Top-Out' },
+  { value: 'fascia', label: 'Fascia' },
+  { value: 'eave', label: 'Eave' },
+  { value: 'rake', label: 'Rake' },
 ];
 
 // =============================================================================

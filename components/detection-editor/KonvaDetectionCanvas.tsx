@@ -204,7 +204,7 @@ function snapToAngle(
 
 // Classes appropriate for linear measurements (lines) - measured in LF, not SF
 // Note: soffit is NOT included here - it uses area (SF) measurement via rectangle/polygon tool
-const LINEAR_CLASSES: DetectionClass[] = ['trim', 'fascia', 'gutter', 'eave', 'rake', 'ridge', 'valley', 'belly_band', 'corner_inside', 'corner_outside'];
+const LINEAR_CLASSES: DetectionClass[] = ['trim', 'fascia', 'gutter', 'eave', 'rake', 'ridge', 'valley', 'belly_band', 'topout', 'corner_inside', 'corner_outside'];
 
 /**
  * Get the simple points array from polygon_points (handles both formats)

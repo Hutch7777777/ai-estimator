@@ -4,6 +4,39 @@
 import React, { useState } from 'react';
 import { ChevronDown, ChevronRight } from 'lucide-react';
 
+// =============================================================================
+// Manual Override Section — Collapsible wrapper for measurement overrides
+// =============================================================================
+
+interface ManualOverrideSectionProps {
+  children: React.ReactNode;
+  label?: string;
+}
+
+export function ManualOverrideSection({ children, label = 'Manual Override' }: ManualOverrideSectionProps) {
+  const [expanded, setExpanded] = useState(false);
+  return (
+    <div className="mt-2 pt-2 border-t border-gray-800/50">
+      <button
+        onClick={() => setExpanded(!expanded)}
+        className="flex items-center gap-1 text-[10px] text-gray-500 hover:text-gray-400 transition-colors"
+      >
+        {expanded ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
+        {label}
+      </button>
+      {expanded && (
+        <div className="mt-2 pl-2 border-l-2 border-gray-800 space-y-2">
+          {children}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// =============================================================================
+// Section Wrapper — Collapsible section with badge
+// =============================================================================
+
 interface SectionWrapperProps {
   title: string;
   icon?: React.ReactNode;

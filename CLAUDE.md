@@ -376,3 +376,54 @@ npm run lint     # ESLint
 npm start        # Production server
 npx tsc --noEmit # Type check
 ```
+
+## EstimatePros Skills
+
+Custom workflow skills for the EstimatePros.ai estimation platform. Located in `.claude/skills/`.
+
+### Available Skills
+
+| Skill | Role | When to Use |
+|-------|------|-------------|
+| `/scope-review` | Product strategist | Before starting any new feature |
+| `/arch-review` | Senior engineer | Before implementing any code change |
+| `/rule-add` | Database specialist | When adding auto-scope rules |
+| `/material-onboard` | Onboarding lead | When adding new products/manufacturers |
+| `/calc-engine` | Calculation engineer | When modifying formulas or pricing logic |
+| `/takeoff-validate` | QA engineer | After any change to verify MN568 output |
+| `/pre-deploy` | Release engineer | Before every git push to main |
+| `/retro` | Team memory | After fixing bugs or completing features |
+
+### Skill Descriptions
+
+- **`/scope-review`** — Product-level planning review. Evaluates if a feature is the RIGHT thing to build. Checks MN568 impact, scope creep, and strategic priorities.
+
+- **`/arch-review`** — Engineering architecture review. Reviews proposed changes against known failure patterns: toggle ordering bugs, JSONB boolean mismatches, presentation_group filtering, manufacturer path splits, n8n template literal escaping.
+
+- **`/rule-add`** — Structured auto-scope rule insertion. Prevents common failures: wrong presentation_group, missing manufacturer_filter syntax, serial PK collisions, trigger_condition JSONB errors.
+
+- **`/material-onboard`** — Complete 10-phase manufacturer/product onboarding workflow. Covers pricing_items, auto-scope rules, labor configuration, calculation formulas, overhead costs, UI integration, verification, and testing.
+
+- **`/calc-engine`** — Safe calculation engine modification workflow. For changes to autoscope-v2.ts, orchestrator-v2.ts, pricing service, or formula evaluation. Records before/after MN568 totals.
+
+- **`/takeoff-validate`** — MN568 regression testing. Diffs current output against baseline totals by category. Catches regressions before they reach contractors.
+
+- **`/pre-deploy`** — Railway production deployment guard. Reviews diff, checks for known failure patterns, verifies database compatibility, API contracts, and env vars. No staging — every push to main auto-deploys.
+
+- **`/retro`** — Engineering retrospective. Captures lessons from debugging sessions and encodes them into appropriate skill checklists so the same bug never happens twice.
+
+### Standard Development Workflow
+
+```
+1. /scope-review     — Is this the right thing to build?
+2. /arch-review      — Will this implementation work safely?
+3. Build the feature — Use /rule-add, /material-onboard, /calc-engine as needed
+4. /takeoff-validate — Did this break anything?
+5. /pre-deploy       — Is this safe to ship?
+6. git push main     — Deploy to production
+7. /retro            — What did we learn?
+```
+
+### Self-Improving System
+
+The `/retro` skill is key: after every bug fix, it documents what happened and identifies which skill should encode the lesson. The lesson gets added as a checklist item to that skill, preventing the same bug from recurring.
