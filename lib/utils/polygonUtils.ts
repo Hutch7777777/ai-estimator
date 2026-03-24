@@ -85,7 +85,10 @@ export function rectToPolygonPoints(detection: {
  */
 export function calculatePolygonArea(points: PolygonPoint[] | PolygonWithHoles | PolygonPoints | null | undefined): number {
   const simplePoints = extractSimplePoints(points);
-  if (simplePoints.length < 3) return 0;
+  if (simplePoints.length < 3) {
+    console.warn(`[polygonUtils] Degenerate polygon: ${simplePoints.length} points, returning area=0`);
+    return 0;
+  }
 
   let area = 0;
   const n = simplePoints.length;
@@ -135,7 +138,10 @@ function distance(p1: PolygonPoint, p2: PolygonPoint): number {
  */
 export function calculatePolygonPerimeter(points: PolygonPoint[] | PolygonWithHoles | PolygonPoints | null | undefined): number {
   const simplePoints = extractSimplePoints(points);
-  if (simplePoints.length < 2) return 0;
+  if (simplePoints.length < 2) {
+    console.warn(`[polygonUtils] Degenerate polygon for perimeter: ${simplePoints.length} points, returning perimeter=0`);
+    return 0;
+  }
 
   let perimeter = 0;
   const n = simplePoints.length;
@@ -177,6 +183,7 @@ export function getPolygonBoundingBox(points: PolygonPoint[] | PolygonWithHoles 
   const simplePoints = extractSimplePoints(points);
 
   if (simplePoints.length === 0) {
+    console.warn('[polygonUtils] Empty polygon for bounding box, returning zero bbox');
     return {
       centerX: 0,
       centerY: 0,
@@ -224,6 +231,7 @@ export function getPolygonCentroid(points: PolygonPoint[] | PolygonWithHoles | P
   const simplePoints = extractSimplePoints(points);
 
   if (simplePoints.length === 0) {
+    console.warn('[polygonUtils] Empty polygon for centroid, returning origin');
     return { x: 0, y: 0 };
   }
 
@@ -306,6 +314,7 @@ export function findClosestEdge(
   clickPos: PolygonPoint
 ): { edgeIndex: number; point: PolygonPoint; distance: number } {
   if (points.length < 2) {
+    console.warn(`[polygonUtils] Degenerate polygon for findClosestEdge: ${points.length} points`);
     return { edgeIndex: 0, point: clickPos, distance: Infinity };
   }
 
@@ -614,7 +623,12 @@ export function getClassDerivedMeasurements(
   points: PolygonPoint[] | null | undefined,
   scaleRatio: number
 ): WindowDerivedMeasurements | DoorDerivedMeasurements | GarageDerivedMeasurements | GableDerivedMeasurements | null {
-  if (!points || points.length < 3 || scaleRatio <= 0) return null;
+  if (!points || points.length < 3 || scaleRatio <= 0) {
+    if (points && points.length < 3) {
+      console.warn(`[polygonUtils] Degenerate polygon for ${detectionClass}: ${points.length} points`);
+    }
+    return null;
+  }
 
   switch (detectionClass) {
     case 'window':
@@ -653,6 +667,9 @@ export function calculateBuildingMeasurements(
   scaleRatio: number
 ): BuildingDerivedMeasurements {
   if (!points || points.length < 3 || scaleRatio <= 0) {
+    if (points && points.length < 3) {
+      console.warn(`[polygonUtils] Degenerate polygon for building: ${points.length} points`);
+    }
     return { area_sf: 0, perimeter_lf: 0, level_starter_lf: 0 };
   }
 
@@ -706,6 +723,9 @@ export function calculateLineMeasurements(
   scaleRatio: number
 ): LineMeasurements {
   if (!points || points.length < 2 || scaleRatio <= 0) {
+    if (points && points.length < 2) {
+      console.warn(`[polygonUtils] Degenerate line: ${points.length} points, returning length=0`);
+    }
     return { length_lf: 0 };
   }
 
@@ -727,6 +747,9 @@ export function calculateAreaMeasurements(
   scaleRatio: number
 ): { area_sf: number; perimeter_lf: number } {
   if (!points || points.length < 3 || scaleRatio <= 0) {
+    if (points && points.length < 3) {
+      console.warn(`[polygonUtils] Degenerate polygon for area: ${points.length} points`);
+    }
     return { area_sf: 0, perimeter_lf: 0 };
   }
 
