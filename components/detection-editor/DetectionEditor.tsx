@@ -27,6 +27,8 @@ import {
   calculateBuildingMeasurements,
   calculateLineMeasurements,
   calculateAreaMeasurements,
+  calculatePolygonArea,
+  calculatePolygonPerimeterLf,
 } from '@/lib/utils/polygonUtils';
 import { renderMarkupImage } from '@/lib/utils/markupRenderer';
 import type {
@@ -990,6 +992,7 @@ export default function DetectionEditor({
 
   // Handle detection resize - receives detection object and new bounds (center coordinates)
   // Local-first: Only updates local state, no sync to server
+  // NOTE: For polygon detections, uses Shoelace formula on transformed points (not bbox area)
   const handleDetectionResize = useCallback(
     (
       detection: ExtractionDetection,
@@ -1011,12 +1014,50 @@ export default function DetectionEditor({
         scaleRatio = 64;
       }
 
-      // Calculate new real-world measurements using the derived scale_ratio
-      const measurements = calculateRealWorldMeasurements(
-        newCoords.pixel_width,
-        newCoords.pixel_height,
-        scaleRatio
-      );
+      // Check if detection has polygon points (for Shoelace area calculation)
+      const polygonPoints = getSimplePolygonPoints(detection.polygon_points);
+      const hasPolygon = polygonPoints && polygonPoints.length >= 3;
+
+      let areaSf: number;
+      let perimeterLf: number;
+      let transformedPolygonPoints: PolygonPoint[] | undefined;
+
+      if (hasPolygon) {
+        // POLYGON PATH: Transform polygon points proportionally and use Shoelace formula
+        // Calculate scale factors based on bbox change
+        const scaleX = detection.pixel_width > 0 ? newCoords.pixel_width / detection.pixel_width : 1;
+        const scaleY = detection.pixel_height > 0 ? newCoords.pixel_height / detection.pixel_height : 1;
+
+        // Calculate old and new bbox corners (top-left)
+        const oldLeft = detection.pixel_x - detection.pixel_width / 2;
+        const oldTop = detection.pixel_y - detection.pixel_height / 2;
+        const newLeft = newCoords.pixel_x - newCoords.pixel_width / 2;
+        const newTop = newCoords.pixel_y - newCoords.pixel_height / 2;
+
+        // Transform each polygon point: translate to origin, scale, translate to new position
+        transformedPolygonPoints = polygonPoints.map(pt => ({
+          x: (pt.x - oldLeft) * scaleX + newLeft,
+          y: (pt.y - oldTop) * scaleY + newTop,
+        }));
+
+        // Calculate area using Shoelace formula on transformed polygon
+        const polygonAreaPixels = calculatePolygonArea(transformedPolygonPoints);
+        areaSf = polygonAreaPixels / (scaleRatio * scaleRatio);
+        perimeterLf = calculatePolygonPerimeterLf(transformedPolygonPoints, scaleRatio);
+      } else {
+        // RECTANGLE PATH: Use bbox area calculation (width × height)
+        const bboxMeasurements = calculateRealWorldMeasurements(
+          newCoords.pixel_width,
+          newCoords.pixel_height,
+          scaleRatio
+        );
+        areaSf = bboxMeasurements.area_sf;
+        perimeterLf = bboxMeasurements.perimeter_lf;
+      }
+
+      // Calculate real-world dimensions from bbox (always needed for display)
+      const real_width_ft = newCoords.pixel_width / scaleRatio;
+      const real_height_ft = newCoords.pixel_height / scaleRatio;
 
       // Create optimistic update with measurements
       const optimistic: ExtractionDetection = {
@@ -1025,12 +1066,13 @@ export default function DetectionEditor({
         pixel_y: newCoords.pixel_y,
         pixel_width: newCoords.pixel_width,
         pixel_height: newCoords.pixel_height,
-        real_width_ft: measurements.real_width_ft,
-        real_height_ft: measurements.real_height_ft,
-        real_width_in: measurements.real_width_in,
-        real_height_in: measurements.real_height_in,
-        area_sf: measurements.area_sf,
-        perimeter_lf: measurements.perimeter_lf,
+        polygon_points: transformedPolygonPoints || detection.polygon_points,
+        real_width_ft,
+        real_height_ft,
+        real_width_in: real_width_ft * 12,
+        real_height_in: real_height_ft * 12,
+        area_sf: areaSf,
+        perimeter_lf: perimeterLf,
         status: 'edited',
         edited_at: new Date().toISOString(),
         original_bbox: detection.original_bbox || {
