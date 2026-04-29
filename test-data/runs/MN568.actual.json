@@ -1,0 +1,50 @@
+{
+  "project": {
+    "id": "MN568",
+    "name": "Siding Estimate",
+    "takeoff_id": "1cca55ae-64e4-42ee-b6fc-241cbd92df53",
+    "project_id": "f7e2fc2b-33c1-48f2-bae6-ebff37fbe346",
+    "job_id": "240e222e-0419-421c-97fa-18a691b40cdb"
+  },
+  "detection_counts": {
+    "window": 28,
+    "door": 2,
+    "garage": 2,
+    "gable": 0,
+    "corbel": 3,
+    "belly_band": 5,
+    "vent": 0,
+    "gable_topout": 2
+  },
+  "net_siding_sf": 6278,
+  "trim_lf": 95.93,
+  "siding_squares": 47.9,
+  "material_subtotal": 17058.59,
+  "labor_subtotal": 8979.72,
+  "overhead_subtotal": 4975.83,
+  "markup_percent": 10,
+  "final_total": 34115.55,
+  "line_item_count": 43,
+  "presentation_group_totals": {
+    "cladding": 10945,
+    "trims": 1880.24,
+    "metals_flashings": 799.3,
+    "waterproofing": 1352.5,
+    "accessories": 2081.55,
+    "soffit": 0,
+    "gutters": 0
+  },
+  "_meta": {
+    "status": "BASELINE",
+    "capture_date": "2026-04-27",
+    "source": "Supabase production SQL capture",
+    "reviewer": "Anthony Hutchinson",
+    "sign_off": "Reviewed as current working MN568 output baseline before Phase 1 stabilization.",
+    "notes": [
+      "Baseline captures current system behavior, not final business-correct estimating logic.",
+      "trim_lf is using belly_band detection total_perimeter_lf = 95.93.",
+      "presentation_group_totals maps Architectural Details into trims for canonical 7-group baseline.",
+      "labor and overhead are tracked separately and are not included in presentation_group_totals."
+    ]
+  }
+}

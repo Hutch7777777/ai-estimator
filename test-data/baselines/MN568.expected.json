@@ -1,0 +1,76 @@
+{
+  "_meta": {
+    "schema_version": 1,
+    "purpose": "MN568 regression baseline — the canonical expected output of the siding takeoff for the MN568 reference project. Any change to calculation, pricing, n8n workflows, or schema must be validated against this file via scripts/validate-mn568-baseline.ts before merge.",
+    "status": "BASELINE — captured 2026-04-27 from takeoff 1cca55ae-64e4-42ee-b6fc-241cbd92df53. This is a frozen snapshot of CURRENT system behavior, reviewed by Anthony Hutchinson for regression protection before Phase 1. NOT a claim of business-correctness or contractor-final approval — the values are what the system produces today, not what business logic says is right.",
+    "capture_date": "2026-04-27",
+    "source": "Supabase production SQL capture",
+    "reviewer": "Anthony Hutchinson",
+    "sign_off": "Reviewed as current working MN568 output baseline before Phase 1 stabilization. Not business-validated; regression-protection only.",
+    "takeoff_id": "1cca55ae-64e4-42ee-b6fc-241cbd92df53",
+    "project_id": "f7e2fc2b-33c1-48f2-bae6-ebff37fbe346",
+    "job_id": "240e222e-0419-421c-97fa-18a691b40cdb",
+    "notes": [
+      "Baseline captures current system behavior, not final business-correct estimating logic.",
+      "trim_lf is using belly_band detection total_perimeter_lf = 95.93.",
+      "presentation_group_totals maps Architectural Details into trims for canonical 7-group baseline.",
+      "labor and overhead are tracked separately and are not included in presentation_group_totals."
+    ],
+    "fields_documented": [
+      "project — { id, name }; identifies the project this baseline represents",
+      "detection_counts — keyed by detection class (window, door, garage, gable, corbel, ...); integer counts per class",
+      "net_siding_sf — facade_sqft − openings_sf + gable_sf, the post-deduction siding area",
+      "trim_lf — total trim linear footage across all trim categories",
+      "siding_squares — net_siding_sf / 100, rounded per the production formula",
+      "material_subtotal — sum of material_extended across all line items, before overhead and markup",
+      "labor_subtotal — sum of labor_extended across all line items, before L&I and overhead",
+      "overhead_subtotal — overhead applied (mobilization, port-a-john, insurance, L&I)",
+      "markup_percent — final markup applied (typically 0.26 from MARKUP_RATE constant)",
+      "final_total — material + labor + overhead + (markup × subtotal); the customer-facing number",
+      "line_item_count — total count of rows in takeoff_line_items for this takeoff",
+      "presentation_group_totals — total_extended summed per canonical presentation_group (7 groups)"
+    ],
+    "epsilon_policy": "Default validator epsilon is 0 (exact match required). For floating-point fields, pass --epsilon to allow tolerance (e.g. 0.01 for cent-level rounding). detection_counts and line_item_count are always integer-compared (no epsilon)."
+  },
+
+  "project": {
+    "id": "MN568",
+    "name": "Siding Estimate",
+    "takeoff_id": "1cca55ae-64e4-42ee-b6fc-241cbd92df53",
+    "project_id": "f7e2fc2b-33c1-48f2-bae6-ebff37fbe346",
+    "job_id": "240e222e-0419-421c-97fa-18a691b40cdb"
+  },
+
+  "detection_counts": {
+    "window": 28,
+    "door": 2,
+    "garage": 2,
+    "gable": 0,
+    "corbel": 3,
+    "belly_band": 5,
+    "vent": 0,
+    "gable_topout": 2
+  },
+
+  "net_siding_sf": 6278,
+  "trim_lf": 95.93,
+  "siding_squares": 47.9,
+
+  "material_subtotal": 17058.59,
+  "labor_subtotal": 8979.72,
+  "overhead_subtotal": 4975.83,
+  "markup_percent": 10,
+  "final_total": 34115.55,
+
+  "line_item_count": 43,
+
+  "presentation_group_totals": {
+    "cladding": 10945,
+    "trims": 1880.24,
+    "metals_flashings": 799.3,
+    "waterproofing": 1352.5,
+    "accessories": 2081.55,
+    "soffit": 0,
+    "gutters": 0
+  }
+}
