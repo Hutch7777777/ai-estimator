@@ -292,10 +292,6 @@ export default function DetectionEditor({
     getAllDetections,
   } = useExtractionData(jobId, { includeDeleted: true });
 
-  // Debug: Log aggregation data
-  console.log('[DetectionEditor] Job results_summary:', job?.results_summary);
-  console.log('[DetectionEditor] JobTotals:', jobTotals);
-
   // Note: In local-first mode, we only use useDetectionSync for legacy/fallback purposes
   // All edits now stay local until explicit validation
   const {

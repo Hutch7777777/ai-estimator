@@ -125,6 +125,13 @@ export interface ValidationDetection {
   labor_cost_override?: number | null;
   // User notes/comments
   notes?: string | null;
+  // Real-world dimensions + derived measurements, computed locally from scale.
+  // null means "not measured" — n8n must pass null through, never coerce to 0
+  // (see docs/N8N_VALIDATE_DETECTIONS_CHANGES.md and CONFIRMED_WORK_PLAN.md N-2)
+  real_width_ft?: number | null;
+  real_height_ft?: number | null;
+  area_sf?: number | null;
+  perimeter_lf?: number | null;
 }
 
 export interface ValidationRequest {
@@ -549,6 +556,15 @@ export async function validateDetections(
         material_cost_override: d.material_cost_override ?? null,
         labor_cost_override: d.labor_cost_override ?? null,
         notes: d.notes ?? null,
+        // Real-world dimensions + derived measurements (locally computed on
+        // edit; previously dropped here, leaving the draft-table columns
+        // permanently NULL — CONFIRMED_WORK_PLAN.md N-2). The n8n
+        // validate-detections workflow maps these into the draft-table
+        // UPDATE/INSERT: docs/N8N_VALIDATE_DETECTIONS_CHANGES.md.
+        real_width_ft: d.real_width_ft ?? null,
+        real_height_ft: d.real_height_ft ?? null,
+        area_sf: d.area_sf ?? null,
+        perimeter_lf: d.perimeter_lf ?? null,
       })),
     };
 
