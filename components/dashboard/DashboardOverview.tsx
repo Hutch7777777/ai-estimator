@@ -151,10 +151,6 @@ export function DashboardOverview() {
           title="Total Projects"
           value={stats.total}
           icon={FolderOpen}
-          trend={{
-            value: 12,
-            label: "vs last month",
-          }}
         />
         <StatCard
           title="In Progress"
@@ -173,10 +169,6 @@ export function DashboardOverview() {
           value={`${winRate}%`}
           description={`${stats.won} won, ${stats.lost} lost`}
           icon={TrendingUp}
-          trend={{
-            value: winRate - 65,
-            label: "vs target",
-          }}
         />
       </div>
 

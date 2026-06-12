@@ -80,7 +80,45 @@ function AccountSettingsContent() {
   // Loading timeout state
   const [loadingTimedOut, setLoadingTimedOut] = useState(false);
 
+  // Usage stats (org-scoped, current month) — null = not yet loaded / unavailable
+  const [usageProjects, setUsageProjects] = useState<number | null>(null);
+  const [usagePdfs, setUsagePdfs] = useState<number | null>(null);
+
   const supabase = createClient();
+
+  // Load org-scoped usage counts for the Usage tab (current month).
+  // extraction_jobs has no organization_id column — scope it via an inner
+  // join on its (nullable) project_id → projects.organization_id, so
+  // orphaned jobs without a project are excluded rather than leaking
+  // cross-org counts.
+  useEffect(() => {
+    if (!organization) return;
+
+    const loadUsageStats = async () => {
+      const monthStart = new Date();
+      monthStart.setDate(1);
+      monthStart.setHours(0, 0, 0, 0);
+      const since = monthStart.toISOString();
+
+      const [projectsRes, pdfsRes] = await Promise.all([
+        supabase
+          .from('projects')
+          .select('id', { count: 'exact', head: true })
+          .eq('organization_id', organization.id)
+          .gte('created_at', since),
+        supabase
+          .from('extraction_jobs')
+          .select('id, projects!inner(organization_id)', { count: 'exact', head: true })
+          .eq('projects.organization_id', organization.id)
+          .gte('created_at', since),
+      ]);
+
+      setUsageProjects(projectsRes.error ? null : projectsRes.count ?? 0);
+      setUsagePdfs(pdfsRes.error ? null : pdfsRes.count ?? 0);
+    };
+
+    loadUsageStats();
+  }, [organization]);
 
   // Debug loading states and add timeout
   useEffect(() => {
@@ -512,7 +550,7 @@ function AccountSettingsContent() {
             </TabsTrigger>
             <TabsTrigger value="billing" className="data-[state=active]:bg-[#f1f5f9]">
               <CreditCard className="mr-2 h-4 w-4" />
-              Billing
+              Usage
             </TabsTrigger>
           </TabsList>
 
@@ -1140,60 +1178,22 @@ function AccountSettingsContent() {
                 </form>
               </div>
 
-              <div className="bg-white border border-[#e2e8f0] rounded-lg p-6 shadow-sm space-y-4">
-                <h2 className="text-lg font-semibold text-[#0f172a]">Resources</h2>
-                <div className="space-y-3">
-                  <a
-                    href="#"
-                    className="block p-3 rounded-lg border border-[#e2e8f0] hover:border-[#00cc6a] hover:bg-[#f8fafc] transition-colors"
-                  >
-                    <p className="font-medium text-[#0f172a]">Documentation</p>
-                    <p className="text-sm text-[#64748b]">Learn how to use EstimatePros.ai</p>
-                  </a>
-                  <a
-                    href="#"
-                    className="block p-3 rounded-lg border border-[#e2e8f0] hover:border-[#00cc6a] hover:bg-[#f8fafc] transition-colors"
-                  >
-                    <p className="font-medium text-[#0f172a]">Request a Feature</p>
-                    <p className="text-sm text-[#64748b]">Tell us what you'd like to see</p>
-                  </a>
-                </div>
-              </div>
             </div>
           </TabsContent>
 
-          {/* Billing Tab */}
+          {/* Usage Tab */}
           <TabsContent value="billing">
             <div className="bg-white border border-[#e2e8f0] rounded-lg p-6 shadow-sm space-y-6">
-              <h2 className="text-lg font-semibold text-[#0f172a]">Subscription & Billing</h2>
+              <h2 className="text-lg font-semibold text-[#0f172a]">Usage This Month</h2>
 
-              <div className="p-4 rounded-lg bg-[#f8fafc] border border-[#e2e8f0]">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="font-medium text-[#0f172a]">Free Plan</p>
-                    <p className="text-sm text-[#64748b]">Basic features for getting started</p>
-                  </div>
-                  <Button variant="outline" disabled>
-                    Upgrade
-                  </Button>
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div className="p-4 rounded-lg bg-[#f8fafc] border border-[#e2e8f0]">
+                  <p className="text-2xl font-bold text-[#0f172a]">{usageProjects ?? '—'}</p>
+                  <p className="text-sm text-[#64748b]">Projects Created</p>
                 </div>
-              </div>
-
-              <div className="space-y-4">
-                <h3 className="font-medium text-[#0f172a]">Usage This Month</h3>
-                <div className="grid gap-4 sm:grid-cols-3">
-                  <div className="p-4 rounded-lg bg-[#f8fafc] border border-[#e2e8f0]">
-                    <p className="text-2xl font-bold text-[#0f172a]">0</p>
-                    <p className="text-sm text-[#64748b]">Projects Created</p>
-                  </div>
-                  <div className="p-4 rounded-lg bg-[#f8fafc] border border-[#e2e8f0]">
-                    <p className="text-2xl font-bold text-[#0f172a]">0</p>
-                    <p className="text-sm text-[#64748b]">PDFs Processed</p>
-                  </div>
-                  <div className="p-4 rounded-lg bg-[#f8fafc] border border-[#e2e8f0]">
-                    <p className="text-2xl font-bold text-[#0f172a]">0</p>
-                    <p className="text-sm text-[#64748b]">Exports Generated</p>
-                  </div>
+                <div className="p-4 rounded-lg bg-[#f8fafc] border border-[#e2e8f0]">
+                  <p className="text-2xl font-bold text-[#0f172a]">{usagePdfs ?? '—'}</p>
+                  <p className="text-sm text-[#64748b]">PDFs Processed</p>
                 </div>
               </div>
             </div>
