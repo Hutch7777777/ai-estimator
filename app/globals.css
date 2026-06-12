@@ -66,6 +66,13 @@
   --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
   --color-sidebar-primary: var(--sidebar-primary);
 
+  /* Brand tokens — bg-brand, text-brand, border-brand, ring-brand, etc.
+   * --brand is the only sanctioned source of the green; --brand-foreground
+   * is the dark-green ink used ON brand fills/tints (the bright green fails
+   * WCAG as text on light backgrounds — never use text-brand for copy). */
+  --color-brand: var(--brand);
+  --color-brand-foreground: var(--brand-foreground);
+
   /* Base Colors */
   --color-background: var(--background);
   --color-foreground: var(--foreground);
@@ -128,6 +135,10 @@
   /* Base radius for shadcn components */
   --radius: 4px;
 
+  /* Brand */
+  --brand: #00cc6a;
+  --brand-foreground: #052e16; /* dark-green ink for text on brand fills/tints */
+
   /* ============================================================================
    * SHADCN/UI THEME VARIABLES
    * Light mode only - references design tokens from @theme inline
@@ -188,7 +199,14 @@
   --sidebar-ring: var(--color-accent-primary);
 }
 
-/* Dark mode removed - light theme only */
+/* Dark mode removed - light theme only. The .dark block below keeps the
+ * brand tokens defined for both themes so any future dark theme (or the
+ * detection editor's eventual migration off raw gray-* classes) reads the
+ * same variables. */
+.dark {
+  --brand: #00cc6a;
+  --brand-foreground: #052e16;
+}
 
 @layer base {
   * {

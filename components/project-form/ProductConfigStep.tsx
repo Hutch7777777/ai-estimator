@@ -609,7 +609,7 @@ export function ProductConfigStep({ data, onUpdate, onValidationChange }: Produc
                   )}
                 </Label>
                 {isFilled && (
-                  <Check className="h-4 w-4 text-[#00cc6a]" />
+                  <Check className="h-4 w-4 text-brand-foreground" />
                 )}
               </div>
               <ColorSwatchGrid
@@ -674,7 +674,7 @@ export function ProductConfigStep({ data, onUpdate, onValidationChange }: Produc
                   </Label>
                 )}
                 {isFilled && (
-                  <Check className="h-4 w-4 text-[#00cc6a]" />
+                  <Check className="h-4 w-4 text-brand-foreground" />
                 )}
               </div>
               <SearchableSelect
@@ -684,7 +684,7 @@ export function ProductConfigStep({ data, onUpdate, onValidationChange }: Produc
                 placeholder={field.field_placeholder || `Search ${field.field_label.toLowerCase()}...`}
                 emptyText="No products found."
                 className={cn(
-                  isFilled && "border-[#00cc6a]/50 bg-[#dcfce7]/50"
+                  isFilled && "border-brand/50 bg-brand/15/50"
                 )}
               />
               {field.is_required && !isFilled && (
@@ -730,7 +730,7 @@ export function ProductConfigStep({ data, onUpdate, onValidationChange }: Produc
                 </Label>
               )}
               {isFilled && (
-                <Check className="h-4 w-4 text-[#00cc6a]" />
+                <Check className="h-4 w-4 text-brand-foreground" />
               )}
             </div>
             <Select
@@ -739,7 +739,7 @@ export function ProductConfigStep({ data, onUpdate, onValidationChange }: Produc
             >
               <SelectTrigger id={field.config_name} className={cn(
                 "min-h-11",
-                isFilled && "border-[#00cc6a]/50 bg-[#dcfce7]/50"
+                isFilled && "border-brand/50 bg-brand/15/50"
               )}>
                 <SelectValue placeholder={field.field_placeholder || `Select ${field.field_label.toLowerCase()}`} />
               </SelectTrigger>
@@ -841,7 +841,7 @@ export function ProductConfigStep({ data, onUpdate, onValidationChange }: Produc
                 </Label>
               )}
               {multiselectFilled && (
-                <Check className="h-4 w-4 text-[#00cc6a]" />
+                <Check className="h-4 w-4 text-brand-foreground" />
               )}
             </div>
             <div className="space-y-2 rounded-lg border p-4">
@@ -912,7 +912,7 @@ export function ProductConfigStep({ data, onUpdate, onValidationChange }: Produc
                   </Label>
                 )}
                 {numberFilled && (
-                  <Check className="h-4 w-4 text-[#00cc6a]" />
+                  <Check className="h-4 w-4 text-brand-foreground" />
                 )}
               </div>
               <div className="flex items-center gap-2 max-w-xs">
@@ -927,7 +927,7 @@ export function ProductConfigStep({ data, onUpdate, onValidationChange }: Produc
                   step={(field.validation_rules as any)?.step ?? 0.1}
                   className={cn(
                     "min-h-11 flex-1",
-                    numberFilled && "border-[#00cc6a]/50 bg-[#dcfce7]/50"
+                    numberFilled && "border-brand/50 bg-brand/15/50"
                   )}
                 />
                 <span className="text-lg font-medium text-gray-600 dark:text-gray-400">%</span>
@@ -970,7 +970,7 @@ export function ProductConfigStep({ data, onUpdate, onValidationChange }: Produc
                 </Label>
               )}
               {numberFilled && (
-                <Check className="h-4 w-4 text-[#00cc6a]" />
+                <Check className="h-4 w-4 text-brand-foreground" />
               )}
             </div>
             <Input
@@ -981,7 +981,7 @@ export function ProductConfigStep({ data, onUpdate, onValidationChange }: Produc
               placeholder={field.field_placeholder || `Enter ${field.field_label.toLowerCase()}`}
               className={cn(
                 "min-h-11",
-                numberFilled && "border-[#00cc6a]/50 bg-[#dcfce7]/50"
+                numberFilled && "border-brand/50 bg-brand/15/50"
               )}
             />
           </div>

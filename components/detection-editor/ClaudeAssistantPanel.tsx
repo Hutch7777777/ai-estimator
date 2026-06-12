@@ -80,7 +80,7 @@ const MessageBubble = memo(function MessageBubble({
         className={cn(
           'max-w-[95%] rounded-lg px-3 py-2 text-sm',
           isUser
-            ? 'bg-blue-600 text-white'
+            ? 'bg-primary text-primary-foreground'
             : isError
             ? 'bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-300'
             : 'bg-gray-100 dark:bg-gray-800 text-gray-900 dark:text-gray-100'

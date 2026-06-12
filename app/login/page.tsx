@@ -99,14 +99,14 @@ function LoginForm() {
 
   if (showMagicLinkSent) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-[#f8fafc] px-4">
+      <div className="flex min-h-screen items-center justify-center bg-muted px-4">
         <div className="w-full max-w-md space-y-8 text-center">
-          <div className="mx-auto h-16 w-16 rounded-lg bg-[#dcfce7] flex items-center justify-center">
-            <Mail className="h-8 w-8 text-[#00cc6a]" />
+          <div className="mx-auto h-16 w-16 rounded-lg bg-brand/15 flex items-center justify-center">
+            <Mail className="h-8 w-8 text-brand-foreground" />
           </div>
-          <h1 className="text-2xl font-bold text-[#0f172a] font-heading">Check your email</h1>
-          <p className="text-[#475569]">
-            We sent a login link to <span className="font-medium text-[#0f172a]">{email}</span>
+          <h1 className="text-2xl font-bold text-foreground font-heading">Check your email</h1>
+          <p className="text-muted-foreground">
+            We sent a login link to <span className="font-medium text-foreground">{email}</span>
           </p>
           <Button variant="outline" onClick={() => setShowMagicLinkSent(false)} className="mt-4">
             Back to login
@@ -117,20 +117,20 @@ function LoginForm() {
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-white via-white to-[#f1f5f9]/20 px-4">
+    <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-white via-white to-accent/20 px-4">
       <div className="w-full max-w-md space-y-8">
         {/* Logo */}
         <div className="text-center">
           <Link href="/" className="inline-flex items-center">
-            <span className="font-mono text-2xl font-bold text-[#0f172a]">EstimatePros</span>
-            <span className="font-mono text-2xl font-bold text-[#00cc6a]">.ai</span>
+            <span className="font-mono text-2xl font-bold text-foreground">EstimatePros</span>
+            <span className="font-mono text-2xl font-bold text-brand">.ai</span>
           </Link>
-          <h2 className="mt-6 text-xl font-semibold text-[#0f172a] font-heading">Welcome back</h2>
-          <p className="mt-2 text-sm text-[#475569]">Sign in to your account to continue</p>
+          <h2 className="mt-6 text-xl font-semibold text-foreground font-heading">Welcome back</h2>
+          <p className="mt-2 text-sm text-muted-foreground">Sign in to your account to continue</p>
         </div>
 
         {/* Card */}
-        <div className="bg-white border border-[#e2e8f0] rounded-lg p-8 shadow-sm">
+        <div className="bg-white border border-border rounded-lg p-8 shadow-sm">
           {/* Google Sign In */}
           <Button type="button" variant="outline" onClick={handleGoogleLogin} disabled={isLoading} className="w-full h-12">
             {isLoading ? (
@@ -150,10 +150,10 @@ function LoginForm() {
 
           <div className="relative my-6">
             <div className="absolute inset-0 flex items-center">
-              <span className="w-full border-t border-[#e2e8f0]" />
+              <span className="w-full border-t border-border" />
             </div>
             <div className="relative flex justify-center text-xs uppercase">
-              <span className="bg-white px-2 text-[#94a3b8]">Or continue with email</span>
+              <span className="bg-white px-2 text-muted-foreground">Or continue with email</span>
             </div>
           </div>
 
@@ -162,7 +162,7 @@ function LoginForm() {
             <div className="space-y-2">
               <Label htmlFor="email">Email</Label>
               <div className="relative">
-                <Mail className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-[#94a3b8]" />
+                <Mail className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-muted-foreground" />
                 <Input
                   id="email"
                   type="email"
@@ -178,7 +178,7 @@ function LoginForm() {
             <div className="space-y-2">
               <Label htmlFor="password">Password</Label>
               <div className="relative">
-                <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-[#94a3b8]" />
+                <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-muted-foreground" />
                 <Input
                   id="password"
                   type="password"
@@ -201,16 +201,16 @@ function LoginForm() {
               type="button"
               onClick={handleMagicLink}
               disabled={isMagicLinkLoading}
-              className="text-sm text-[#00cc6a] hover:text-[#00b35e] disabled:opacity-50"
+              className="text-sm text-brand-foreground hover:text-brand-foreground/80 disabled:opacity-50"
             >
               {isMagicLinkLoading ? 'Sending...' : 'Send me a magic link instead'}
             </button>
           </div>
         </div>
 
-        <p className="text-center text-sm text-[#475569]">
+        <p className="text-center text-sm text-muted-foreground">
           Don't have an account?{' '}
-          <Link href="/signup" className="text-[#00cc6a] hover:text-[#00b35e] font-medium">
+          <Link href="/signup" className="text-brand-foreground hover:text-brand-foreground/80 font-medium">
             Sign up
           </Link>
         </p>
@@ -222,8 +222,8 @@ function LoginForm() {
 export default function LoginPage() {
   return (
     <Suspense fallback={
-      <div className="flex min-h-screen items-center justify-center bg-[#f8fafc]">
-        <Loader2 className="h-8 w-8 animate-spin text-[#00cc6a]" />
+      <div className="flex min-h-screen items-center justify-center bg-muted">
+        <Loader2 className="h-8 w-8 animate-spin text-brand-foreground" />
       </div>
     }>
       <LoginForm />

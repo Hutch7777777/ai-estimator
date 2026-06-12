@@ -878,15 +878,15 @@ export function EstimateGrid({
   const getRowClass = useCallback((params: RowClassParams<any>) => {
     // Group header rows get darker background
     if (params.data?.isGroupHeader) {
-      return "bg-[#F3F4F6] dark:bg-gray-800 font-bold";
+      return "bg-accent dark:bg-gray-800 font-bold";
     }
     // Pinned bottom row (grand total) gets special styling
     if (params.node.rowPinned === 'bottom') {
-      return "bg-[#F3F4F6] dark:bg-gray-800 font-bold border-t-2 border-gray-300 dark:border-gray-600";
+      return "bg-accent dark:bg-gray-800 font-bold border-t-2 border-gray-300 dark:border-gray-600";
     }
     // Low confidence rows get yellow background
     if ((params.data as any)?.low_confidence) {
-      return "bg-[#FEF3C7] dark:bg-yellow-950/30";
+      return "bg-amber-100 dark:bg-yellow-950/30";
     }
     if (params.data?.isNew) return "bg-green-50 dark:bg-green-950/20";
     if (params.data?.isModified) return "bg-yellow-50 dark:bg-yellow-950/20";
@@ -1306,7 +1306,7 @@ export function EstimateGrid({
             <span>Modified</span>
           </div>
           <div className="flex items-center gap-1">
-            <div className="w-3 h-3 rounded bg-[#FEF3C7] border" />
+            <div className="w-3 h-3 rounded bg-amber-100 border" />
             <span>Low confidence</span>
           </div>
         </div>

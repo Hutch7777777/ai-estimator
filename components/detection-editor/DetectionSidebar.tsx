@@ -91,30 +91,41 @@ const TABS: { id: TabType; icon: typeof FileImage; label: string }[] = [
 /**
  * Get display label for page type
  */
+/** Title-case a raw value for display: "floor_plan" → "Floor Plan". */
+function titleCaseLabel(value: string): string {
+  return value
+    .split(/[_\s]+/)
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(' ');
+}
+
 function getPageTypeLabel(page: ExtractionPage): string {
   // If it's an elevation with a name, use that
   if (page.page_type === 'elevation' && page.elevation_name) {
-    return page.elevation_name; // "front", "rear", etc.
+    return titleCaseLabel(page.elevation_name); // "front" → "Front"
   }
 
-  // Otherwise show the page type
+  // Otherwise show the page type (display labels only — stored
+  // page_type values are never modified here)
   const typeLabels: Record<string, string> = {
-    elevation: 'elevation',
-    floor_plan: 'floor plan',
-    framing: 'framing',
-    site_plan: 'site',
-    roof_plan: 'roof',
-    details: 'details',
-    schedule: 'schedule',
-    section: 'section',
-    cover: 'cover',
-    electrical: 'electrical',
-    plumbing: 'plumbing',
-    foundation: 'foundation',
-    other: 'other',
+    elevation: 'Elevation',
+    floor_plan: 'Floor Plan',
+    framing: 'Framing',
+    site_plan: 'Site',
+    roof_plan: 'Roof',
+    details: 'Details',
+    schedule: 'Schedule',
+    section: 'Section',
+    cover: 'Cover',
+    electrical: 'Electrical',
+    plumbing: 'Plumbing',
+    foundation: 'Foundation',
+    other: 'Other',
   };
 
-  return typeLabels[page.page_type || ''] || page.page_type || 'unclassified';
+  const label = typeLabels[page.page_type || ''];
+  if (label) return label;
+  return page.page_type ? titleCaseLabel(page.page_type) : 'Unclassified';
 }
 
 /**
@@ -189,7 +200,7 @@ const PageThumbnail = memo(function PageThumbnail({
 
       {/* Page type/classification badge - shown for ALL pages */}
       <div
-        className={`absolute top-1 right-1 ${getPageTypeColor(page.page_type)} text-white text-xs px-1.5 py-0.5 rounded capitalize`}
+        className={`absolute top-1 right-1 ${getPageTypeColor(page.page_type)} text-white text-xs px-1.5 py-0.5 rounded`}
       >
         {getPageTypeLabel(page)}
       </div>
@@ -689,7 +700,7 @@ const DetectionSidebar = memo(function DetectionSidebar({
                   onClick={() => setTotalsScope('current')}
                   className={`px-2 py-1 rounded-l transition-colors ${
                     totalsScope === 'current'
-                      ? 'bg-blue-600 text-white'
+                      ? 'bg-primary text-primary-foreground'
                       : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white'
                   }`}
                 >
@@ -701,7 +712,7 @@ const DetectionSidebar = memo(function DetectionSidebar({
                   disabled={!allPagesTotals}
                   className={`px-2 py-1 rounded-r transition-colors ${
                     totalsScope === 'all'
-                      ? 'bg-blue-600 text-white'
+                      ? 'bg-primary text-primary-foreground'
                       : !allPagesTotals
                         ? 'text-gray-400 dark:text-gray-600 cursor-not-allowed'
                         : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white'

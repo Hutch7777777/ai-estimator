@@ -398,7 +398,7 @@ const DetectionToolbar = memo(function DetectionToolbar({
                 ? 'bg-green-600 text-white cursor-default'
                 : isApproving || !canApprove
                   ? 'bg-gray-200 dark:bg-gray-700 text-gray-400 dark:text-gray-500 cursor-not-allowed'
-                  : 'bg-blue-600 hover:bg-blue-700 text-white'
+                  : 'bg-primary hover:bg-primary/90 text-primary-foreground'
             }
           `}
           title={

@@ -194,7 +194,7 @@ const SAMClassPicker = memo(function SAMClassPicker({
                   >
                     <span
                       className="w-3 h-3 rounded-full flex-shrink-0"
-                      style={{ backgroundColor: DETECTION_CLASS_COLORS[cls] || '#6B7280' }}
+                      style={{ backgroundColor: DETECTION_CLASS_COLORS[cls] || 'var(--color-text-muted)' }}
                     />
                     <span className="truncate text-gray-700 dark:text-gray-300">
                       {getClassDisplayLabel(cls)}

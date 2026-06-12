@@ -110,7 +110,7 @@ export function SearchableSelect({
       </PopoverTrigger>
       <PopoverContent className="w-full p-0 bg-white" align="start">
         <Command shouldFilter={false} className="bg-white">
-          <div className="flex items-center border-b border-[#e2e8f0] px-3 focus-within:border-[#00cc6a] transition-colors">
+          <div className="flex items-center border-b border-border px-3 focus-within:border-brand transition-colors">
             <Search className="mr-2 h-4 w-4 shrink-0 opacity-50" />
             <input
               placeholder="Search..."

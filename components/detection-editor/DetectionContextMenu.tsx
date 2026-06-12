@@ -202,7 +202,7 @@ const DetectionContextMenu = memo(function DetectionContextMenu({
           >
             {CLASS_OPTIONS.map((cls) => {
               const isCurrentClass = cls === currentClass;
-              const color = DETECTION_CLASS_COLORS[cls] || '#6B7280';
+              const color = DETECTION_CLASS_COLORS[cls] || 'var(--color-text-muted)';
               return (
                 <button
                   key={cls}
@@ -262,7 +262,7 @@ const DetectionContextMenu = memo(function DetectionContextMenu({
             >
               <span
                 className="w-3 h-3 rounded-full border border-gray-300 dark:border-gray-600"
-                style={{ backgroundColor: DETECTION_CLASS_COLORS[currentClass] || '#6B7280' }}
+                style={{ backgroundColor: DETECTION_CLASS_COLORS[currentClass] || 'var(--color-text-muted)' }}
               />
               Use Default
               {!currentColor && <span className="ml-auto text-xs">✓</span>}

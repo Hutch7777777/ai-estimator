@@ -446,7 +446,7 @@ function AccountSettingsContent() {
 
   if (isUserLoading || isOrgLoading) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-[#f8fafc]">
+      <div className="flex min-h-screen items-center justify-center bg-muted">
         <div className="text-center space-y-4">
           {loadingTimedOut ? (
             <>
@@ -461,7 +461,7 @@ function AccountSettingsContent() {
             </>
           ) : (
             <>
-              <Loader2 className="h-8 w-8 animate-spin text-[#00cc6a] mx-auto" />
+              <Loader2 className="h-8 w-8 animate-spin text-brand-foreground mx-auto" />
               <div className="text-sm text-gray-500">
                 {isUserLoading && <div>Loading user...</div>}
                 {isOrgLoading && <div>Loading organization...</div>}
@@ -476,17 +476,17 @@ function AccountSettingsContent() {
   // Show no organization state
   if (hasNoOrganizations) {
     return (
-      <div className="min-h-screen bg-[#f8fafc]">
+      <div className="min-h-screen bg-muted">
         <div className="mx-auto max-w-4xl px-4 py-8">
           <div className="mb-8">
             <Link
               href="/project"
-              className="inline-flex items-center text-sm text-[#64748b] hover:text-[#0f172a] transition-colors"
+              className="inline-flex items-center text-sm text-muted-foreground hover:text-foreground transition-colors"
             >
               <ArrowLeft className="mr-2 h-4 w-4" />
               Back to Dashboard
             </Link>
-            <h1 className="mt-4 text-3xl font-bold text-[#0f172a]">Account Settings</h1>
+            <h1 className="mt-4 text-3xl font-bold text-foreground">Account Settings</h1>
           </div>
           <NoOrganization />
         </div>
@@ -504,51 +504,51 @@ function AccountSettingsContent() {
   ];
 
   return (
-    <div className="min-h-screen bg-[#f8fafc]">
+    <div className="min-h-screen bg-muted">
       <div className="mx-auto max-w-4xl px-4 py-8">
         {/* Header */}
         <div className="mb-8">
           <Link
             href="/project"
-            className="inline-flex items-center text-sm text-[#64748b] hover:text-[#0f172a] transition-colors"
+            className="inline-flex items-center text-sm text-muted-foreground hover:text-foreground transition-colors"
           >
             <ArrowLeft className="mr-2 h-4 w-4" />
             Back to Dashboard
           </Link>
-          <h1 className="mt-4 text-3xl font-bold text-[#0f172a]">Account Settings</h1>
-          <p className="mt-2 text-[#64748b]">Manage your account, company, and team settings</p>
+          <h1 className="mt-4 text-3xl font-bold text-foreground">Account Settings</h1>
+          <p className="mt-2 text-muted-foreground">Manage your account, company, and team settings</p>
         </div>
 
         {/* Tabs */}
         <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
-          <TabsList className="bg-white border border-[#e2e8f0] p-1 h-auto flex-wrap">
-            <TabsTrigger value="profile" className="data-[state=active]:bg-[#f1f5f9]">
+          <TabsList className="bg-white border border-border p-1 h-auto flex-wrap">
+            <TabsTrigger value="profile" className="data-[state=active]:bg-accent">
               <User className="mr-2 h-4 w-4" />
               Profile
             </TabsTrigger>
             {isAdmin && (
-              <TabsTrigger value="company" className="data-[state=active]:bg-[#f1f5f9]">
+              <TabsTrigger value="company" className="data-[state=active]:bg-accent">
                 <Building2 className="mr-2 h-4 w-4" />
                 Company
               </TabsTrigger>
             )}
             {isAdmin && (
-              <TabsTrigger value="materials" className="data-[state=active]:bg-[#f1f5f9]">
+              <TabsTrigger value="materials" className="data-[state=active]:bg-accent">
                 <Package className="mr-2 h-4 w-4" />
                 Materials
               </TabsTrigger>
             )}
             {isAdmin && (
-              <TabsTrigger value="team" className="data-[state=active]:bg-[#f1f5f9]">
+              <TabsTrigger value="team" className="data-[state=active]:bg-accent">
                 <Users className="mr-2 h-4 w-4" />
                 Team
               </TabsTrigger>
             )}
-            <TabsTrigger value="support" className="data-[state=active]:bg-[#f1f5f9]">
+            <TabsTrigger value="support" className="data-[state=active]:bg-accent">
               <HelpCircle className="mr-2 h-4 w-4" />
               Support
             </TabsTrigger>
-            <TabsTrigger value="billing" className="data-[state=active]:bg-[#f1f5f9]">
+            <TabsTrigger value="billing" className="data-[state=active]:bg-accent">
               <CreditCard className="mr-2 h-4 w-4" />
               Usage
             </TabsTrigger>
@@ -556,8 +556,8 @@ function AccountSettingsContent() {
 
           {/* Profile Tab */}
           <TabsContent value="profile">
-            <div className="bg-white border border-[#e2e8f0] rounded-lg p-6 shadow-sm space-y-6">
-              <h2 className="text-lg font-semibold text-[#0f172a]">Profile Information</h2>
+            <div className="bg-white border border-border rounded-lg p-6 shadow-sm space-y-6">
+              <h2 className="text-lg font-semibold text-foreground">Profile Information</h2>
 
               <div className="grid gap-4 sm:grid-cols-2">
                 <div className="space-y-2">
@@ -575,9 +575,9 @@ function AccountSettingsContent() {
                     id="email"
                     value={user?.email || ''}
                     disabled
-                    className="bg-[#f8fafc]"
+                    className="bg-muted"
                   />
-                  <p className="text-xs text-[#94a3b8]">Email cannot be changed</p>
+                  <p className="text-xs text-muted-foreground">Email cannot be changed</p>
                 </div>
                 <div className="space-y-2 sm:col-span-2">
                   <Label htmlFor="phone">Phone Number</Label>
@@ -599,10 +599,10 @@ function AccountSettingsContent() {
               </div>
 
               {/* Password Section */}
-              <div className="border-t border-[#e2e8f0] pt-6">
+              <div className="border-t border-border pt-6">
                 <button
                   onClick={() => setShowPasswordChange(!showPasswordChange)}
-                  className="flex items-center gap-2 text-[#0f172a] font-medium hover:text-[#00cc6a] transition-colors"
+                  className="flex items-center gap-2 text-foreground font-medium hover:text-brand-foreground transition-colors"
                 >
                   {showPasswordChange ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
                   Change Password
@@ -644,12 +644,12 @@ function AccountSettingsContent() {
           <TabsContent value="company">
             <div className="space-y-6">
               {/* General Settings Section */}
-              <div className="bg-white border border-[#e2e8f0] rounded-lg p-6 shadow-sm space-y-6">
+              <div className="bg-white border border-border rounded-lg p-6 shadow-sm space-y-6">
                 <div className="flex items-center gap-2">
                   <div className="p-2 rounded-lg bg-blue-100">
                     <Building2 className="h-5 w-5 text-blue-600" />
                   </div>
-                  <h2 className="text-lg font-semibold text-[#0f172a]">General Settings</h2>
+                  <h2 className="text-lg font-semibold text-foreground">General Settings</h2>
                 </div>
 
                 <div className="grid gap-4 sm:grid-cols-2">
@@ -679,14 +679,14 @@ function AccountSettingsContent() {
               </div>
 
               {/* Pricing & Labor Rates Section */}
-              <div className="bg-white border border-[#e2e8f0] rounded-lg p-6 shadow-sm space-y-6">
+              <div className="bg-white border border-border rounded-lg p-6 shadow-sm space-y-6">
                 <div className="flex items-center gap-2">
                   <div className="p-2 rounded-lg bg-green-100">
                     <Calculator className="h-5 w-5 text-green-600" />
                   </div>
                   <div>
-                    <h2 className="text-lg font-semibold text-[#0f172a]">Pricing & Labor Rates</h2>
-                    <p className="text-sm text-[#64748b]">Configure markup and labor burden rates for estimates</p>
+                    <h2 className="text-lg font-semibold text-foreground">Pricing & Labor Rates</h2>
+                    <p className="text-sm text-muted-foreground">Configure markup and labor burden rates for estimates</p>
                   </div>
                 </div>
 
@@ -703,9 +703,9 @@ function AccountSettingsContent() {
                         placeholder="35"
                         className="pr-8"
                       />
-                      <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[#94a3b8]">%</span>
+                      <span className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground">%</span>
                     </div>
-                    <p className="text-xs text-[#94a3b8]">Applied to all estimates</p>
+                    <p className="text-xs text-muted-foreground">Applied to all estimates</p>
                   </div>
                   <div className="space-y-2">
                     <Label htmlFor="liInsuranceRate">L&I Insurance Rate (%)</Label>
@@ -719,9 +719,9 @@ function AccountSettingsContent() {
                         placeholder="12.65"
                         className="pr-8"
                       />
-                      <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[#94a3b8]">%</span>
+                      <span className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground">%</span>
                     </div>
-                    <p className="text-xs text-[#94a3b8]">Washington State L&I</p>
+                    <p className="text-xs text-muted-foreground">Washington State L&I</p>
                   </div>
                   <div className="space-y-2">
                     <Label htmlFor="unemploymentRate">Unemployment Rate (%)</Label>
@@ -735,9 +735,9 @@ function AccountSettingsContent() {
                         placeholder="6.60"
                         className="pr-8"
                       />
-                      <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[#94a3b8]">%</span>
+                      <span className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground">%</span>
                     </div>
-                    <p className="text-xs text-[#94a3b8]">State unemployment tax</p>
+                    <p className="text-xs text-muted-foreground">State unemployment tax</p>
                   </div>
                   <div className="space-y-2">
                     <Label htmlFor="wasteFactorPercent">Default Waste Factor (%)</Label>
@@ -751,9 +751,9 @@ function AccountSettingsContent() {
                         placeholder="12"
                         className="pr-8"
                       />
-                      <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[#94a3b8]">%</span>
+                      <span className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground">%</span>
                     </div>
-                    <p className="text-xs text-[#94a3b8]">Added to material quantities</p>
+                    <p className="text-xs text-muted-foreground">Added to material quantities</p>
                   </div>
                   <div className="space-y-2">
                     <Label htmlFor="overheadMultiplier">Overhead Multiplier</Label>
@@ -765,7 +765,7 @@ function AccountSettingsContent() {
                       onChange={(e) => setOverheadMultiplier(e.target.value)}
                       placeholder="1.0"
                     />
-                    <p className="text-xs text-[#94a3b8]">1.0 = no additional overhead</p>
+                    <p className="text-xs text-muted-foreground">1.0 = no additional overhead</p>
                   </div>
                 </div>
 
@@ -786,13 +786,13 @@ function AccountSettingsContent() {
                 </div>
 
                 {/* Optional Advanced Settings */}
-                <div className="border-t border-[#e2e8f0] pt-4">
-                  <p className="text-sm font-medium text-[#64748b] mb-3">Advanced Settings (Optional)</p>
+                <div className="border-t border-border pt-4">
+                  <p className="text-sm font-medium text-muted-foreground mb-3">Advanced Settings (Optional)</p>
                   <div className="grid gap-4 sm:grid-cols-2">
                     <div className="space-y-2">
                       <Label htmlFor="baseLaborRateHourly">Base Labor Rate ($/hr)</Label>
                       <div className="relative">
-                        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-[#94a3b8]">$</span>
+                        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground">$</span>
                         <Input
                           id="baseLaborRateHourly"
                           type="number"
@@ -803,7 +803,7 @@ function AccountSettingsContent() {
                           className="pl-7"
                         />
                       </div>
-                      <p className="text-xs text-[#94a3b8]">Hourly rate for labor calculations</p>
+                      <p className="text-xs text-muted-foreground">Hourly rate for labor calculations</p>
                     </div>
                     <div className="space-y-2">
                       <Label htmlFor="defaultCrewSize">Default Crew Size</Label>
@@ -816,21 +816,21 @@ function AccountSettingsContent() {
                         onChange={(e) => setDefaultCrewSize(e.target.value)}
                         placeholder="3"
                       />
-                      <p className="text-xs text-[#94a3b8]">Number of workers per crew</p>
+                      <p className="text-xs text-muted-foreground">Number of workers per crew</p>
                     </div>
                   </div>
                 </div>
               </div>
 
               {/* Business Information Section */}
-              <div className="bg-white border border-[#e2e8f0] rounded-lg p-6 shadow-sm space-y-6">
+              <div className="bg-white border border-border rounded-lg p-6 shadow-sm space-y-6">
                 <div className="flex items-center gap-2">
                   <div className="p-2 rounded-lg bg-purple-100">
                     <Briefcase className="h-5 w-5 text-purple-600" />
                   </div>
                   <div>
-                    <h2 className="text-lg font-semibold text-[#0f172a]">Business Information</h2>
-                    <p className="text-sm text-[#64748b]">This information appears on proposals and contracts</p>
+                    <h2 className="text-lg font-semibold text-foreground">Business Information</h2>
+                    <p className="text-sm text-muted-foreground">This information appears on proposals and contracts</p>
                   </div>
                 </div>
 
@@ -843,7 +843,7 @@ function AccountSettingsContent() {
                       onChange={(e) => setLicenseNumber(e.target.value)}
                       placeholder="EXTERFLLC123AB"
                     />
-                    <p className="text-xs text-[#94a3b8]">Contractor license #</p>
+                    <p className="text-xs text-muted-foreground">Contractor license #</p>
                   </div>
                   <div className="space-y-2">
                     <Label htmlFor="insurancePolicyNumber">Insurance Policy Number</Label>
@@ -889,12 +889,12 @@ function AccountSettingsContent() {
                       onChange={(e) => setCompanyTagline(e.target.value)}
                       placeholder="Quality Exteriors, Built to Last"
                     />
-                    <p className="text-xs text-[#94a3b8]">Appears in proposal headers</p>
+                    <p className="text-xs text-muted-foreground">Appears in proposal headers</p>
                   </div>
                 </div>
 
-                <div className="border-t border-[#e2e8f0] pt-4">
-                  <p className="text-sm font-medium text-[#64748b] mb-3">Estimate Contact Information</p>
+                <div className="border-t border-border pt-4">
+                  <p className="text-sm font-medium text-muted-foreground mb-3">Estimate Contact Information</p>
                   <div className="grid gap-4 sm:grid-cols-2">
                     <div className="space-y-2">
                       <Label htmlFor="estimateContactPhone">Contact Phone</Label>
@@ -933,14 +933,14 @@ function AccountSettingsContent() {
           {/* Materials Tab */}
           <TabsContent value="materials">
             <div className="space-y-6">
-              <div className="bg-white border border-[#e2e8f0] rounded-lg p-6 shadow-sm space-y-6">
+              <div className="bg-white border border-border rounded-lg p-6 shadow-sm space-y-6">
                 <div className="flex items-center gap-2">
                   <div className="p-2 rounded-lg bg-orange-100">
                     <Package className="h-5 w-5 text-orange-600" />
                   </div>
                   <div>
-                    <h2 className="text-lg font-semibold text-[#0f172a]">Default Materials</h2>
-                    <p className="text-sm text-[#64748b]">
+                    <h2 className="text-lg font-semibold text-foreground">Default Materials</h2>
+                    <p className="text-sm text-muted-foreground">
                       Set default products for when no specific material is assigned to a detection.
                       These are used as fallbacks in auto-scope calculations.
                     </p>
@@ -949,7 +949,7 @@ function AccountSettingsContent() {
 
                 {/* Primary Siding Products */}
                 <div className="space-y-4">
-                  <h3 className="text-sm font-semibold text-[#0f172a] border-b border-[#e2e8f0] pb-2">
+                  <h3 className="text-sm font-semibold text-foreground border-b border-border pb-2">
                     Primary Siding
                   </h3>
                   <div className="grid gap-4 sm:grid-cols-2">
@@ -974,7 +974,7 @@ function AccountSettingsContent() {
 
                 {/* Trim & Corners */}
                 <div className="space-y-4">
-                  <h3 className="text-sm font-semibold text-[#0f172a] border-b border-[#e2e8f0] pb-2">
+                  <h3 className="text-sm font-semibold text-foreground border-b border-border pb-2">
                     Trim & Corners
                   </h3>
                   <div className="grid gap-4 sm:grid-cols-2">
@@ -999,7 +999,7 @@ function AccountSettingsContent() {
 
                 {/* Weatherproofing */}
                 <div className="space-y-4">
-                  <h3 className="text-sm font-semibold text-[#0f172a] border-b border-[#e2e8f0] pb-2">
+                  <h3 className="text-sm font-semibold text-foreground border-b border-border pb-2">
                     Weatherproofing
                   </h3>
                   <div className="grid gap-4 sm:grid-cols-2">
@@ -1024,7 +1024,7 @@ function AccountSettingsContent() {
 
                 {/* Accessories */}
                 <div className="space-y-4">
-                  <h3 className="text-sm font-semibold text-[#0f172a] border-b border-[#e2e8f0] pb-2">
+                  <h3 className="text-sm font-semibold text-foreground border-b border-border pb-2">
                     Accessories
                   </h3>
                   <div className="grid gap-4 sm:grid-cols-2">
@@ -1075,9 +1075,9 @@ function AccountSettingsContent() {
 
           {/* Team Tab */}
           <TabsContent value="team">
-            <div className="bg-white border border-[#e2e8f0] rounded-lg p-6 shadow-sm space-y-6">
+            <div className="bg-white border border-border rounded-lg p-6 shadow-sm space-y-6">
               <div className="flex items-center justify-between">
-                <h2 className="text-lg font-semibold text-[#0f172a]">Team Members</h2>
+                <h2 className="text-lg font-semibold text-foreground">Team Members</h2>
                 <Button variant="outline" disabled>
                   <Users className="h-4 w-4 mr-2" />
                   Invite Member
@@ -1086,12 +1086,12 @@ function AccountSettingsContent() {
 
               {isLoadingTeam ? (
                 <div className="flex justify-center py-8">
-                  <Loader2 className="h-6 w-6 animate-spin text-[#00cc6a]" />
+                  <Loader2 className="h-6 w-6 animate-spin text-brand-foreground" />
                 </div>
               ) : teamMembers.length === 0 ? (
-                <p className="text-center text-[#64748b] py-8">No team members found</p>
+                <p className="text-center text-muted-foreground py-8">No team members found</p>
               ) : (
-                <div className="divide-y divide-[#e2e8f0]">
+                <div className="divide-y divide-border">
                   {teamMembers.map((member) => {
                     const memberEmail = member.user?.email || 'Unknown';
                     const memberName = member.user?.full_name || memberEmail.split('@')[0];
@@ -1100,12 +1100,12 @@ function AccountSettingsContent() {
                     return (
                       <div key={member.id} className="py-4 flex items-center justify-between gap-4">
                         <div className="flex items-center gap-3 min-w-0">
-                          <div className="h-10 w-10 rounded-full bg-[#dcfce7] flex items-center justify-center text-sm font-medium text-[#00cc6a] flex-shrink-0">
+                          <div className="h-10 w-10 rounded-full bg-brand/15 flex items-center justify-center text-sm font-medium text-brand-foreground flex-shrink-0">
                             {memberName.slice(0, 2).toUpperCase()}
                           </div>
                           <div className="min-w-0">
-                            <p className="font-medium text-[#0f172a] truncate">{memberName}</p>
-                            <p className="text-sm text-[#64748b] truncate">{memberEmail}</p>
+                            <p className="font-medium text-foreground truncate">{memberName}</p>
+                            <p className="text-sm text-muted-foreground truncate">{memberEmail}</p>
                           </div>
                         </div>
                         <div className="flex items-center gap-2">
@@ -1130,7 +1130,7 @@ function AccountSettingsContent() {
                               </Button>
                             </>
                           ) : (
-                            <span className="px-3 py-1 text-sm rounded-full bg-[#f1f5f9] text-[#64748b] capitalize">
+                            <span className="px-3 py-1 text-sm rounded-full bg-accent text-muted-foreground capitalize">
                               {member.role}
                               {isCurrentUser && ' (You)'}
                             </span>
@@ -1147,8 +1147,8 @@ function AccountSettingsContent() {
           {/* Support Tab */}
           <TabsContent value="support">
             <div className="space-y-6">
-              <div className="bg-white border border-[#e2e8f0] rounded-lg p-6 shadow-sm space-y-6">
-                <h2 className="text-lg font-semibold text-[#0f172a]">Contact Support</h2>
+              <div className="bg-white border border-border rounded-lg p-6 shadow-sm space-y-6">
+                <h2 className="text-lg font-semibold text-foreground">Contact Support</h2>
                 <form onSubmit={handleSubmitSupport} className="space-y-4">
                   <div className="space-y-2">
                     <Label htmlFor="supportSubject">Subject</Label>
@@ -1183,17 +1183,17 @@ function AccountSettingsContent() {
 
           {/* Usage Tab */}
           <TabsContent value="billing">
-            <div className="bg-white border border-[#e2e8f0] rounded-lg p-6 shadow-sm space-y-6">
-              <h2 className="text-lg font-semibold text-[#0f172a]">Usage This Month</h2>
+            <div className="bg-white border border-border rounded-lg p-6 shadow-sm space-y-6">
+              <h2 className="text-lg font-semibold text-foreground">Usage This Month</h2>
 
               <div className="grid gap-4 sm:grid-cols-2">
-                <div className="p-4 rounded-lg bg-[#f8fafc] border border-[#e2e8f0]">
-                  <p className="text-2xl font-bold text-[#0f172a]">{usageProjects ?? '—'}</p>
-                  <p className="text-sm text-[#64748b]">Projects Created</p>
+                <div className="p-4 rounded-lg bg-muted border border-border">
+                  <p className="text-2xl font-bold text-foreground">{usageProjects ?? '—'}</p>
+                  <p className="text-sm text-muted-foreground">Projects Created</p>
                 </div>
-                <div className="p-4 rounded-lg bg-[#f8fafc] border border-[#e2e8f0]">
-                  <p className="text-2xl font-bold text-[#0f172a]">{usagePdfs ?? '—'}</p>
-                  <p className="text-sm text-[#64748b]">PDFs Processed</p>
+                <div className="p-4 rounded-lg bg-muted border border-border">
+                  <p className="text-2xl font-bold text-foreground">{usagePdfs ?? '—'}</p>
+                  <p className="text-sm text-muted-foreground">PDFs Processed</p>
                 </div>
               </div>
             </div>
@@ -1207,8 +1207,8 @@ function AccountSettingsContent() {
 export default function AccountSettingsPage() {
   return (
     <Suspense fallback={
-      <div className="flex min-h-screen items-center justify-center bg-[#f8fafc]">
-        <Loader2 className="h-8 w-8 animate-spin text-[#00cc6a]" />
+      <div className="flex min-h-screen items-center justify-center bg-muted">
+        <Loader2 className="h-8 w-8 animate-spin text-brand-foreground" />
       </div>
     }>
       <AccountSettingsContent />

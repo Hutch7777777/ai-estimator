@@ -39,23 +39,23 @@ export function UserMenu() {
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
         <Button variant="ghost" className="flex items-center gap-2 h-10 px-2">
-          <div className="h-8 w-8 rounded-full bg-[#dcfce7] flex items-center justify-center text-sm font-medium text-[#00cc6a]">
+          <div className="h-8 w-8 rounded-full bg-brand/15 flex items-center justify-center text-sm font-medium text-brand-foreground">
             {initials}
           </div>
           <div className="hidden sm:flex flex-col items-start text-left">
-            <span className="text-sm font-medium text-[#0f172a] truncate max-w-[120px]">{displayName}</span>
+            <span className="text-sm font-medium text-foreground truncate max-w-[120px]">{displayName}</span>
             {organization && (
-              <span className="text-xs text-[#64748b] truncate max-w-[120px]">{organization.name}</span>
+              <span className="text-xs text-muted-foreground truncate max-w-[120px]">{organization.name}</span>
             )}
           </div>
-          <ChevronDown className="h-4 w-4 text-[#64748b]" />
+          <ChevronDown className="h-4 w-4 text-muted-foreground" />
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-56">
         <DropdownMenuLabel className="font-normal">
           <div className="flex flex-col space-y-1">
-            <p className="text-sm font-medium text-[#0f172a]">{displayName}</p>
-            <p className="text-xs text-[#64748b] truncate">{user?.email}</p>
+            <p className="text-sm font-medium text-foreground">{displayName}</p>
+            <p className="text-xs text-muted-foreground truncate">{user?.email}</p>
           </div>
         </DropdownMenuLabel>
         <DropdownMenuSeparator />

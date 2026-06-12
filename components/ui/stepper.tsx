@@ -48,7 +48,7 @@ export function Stepper({
                 <div
                   className={cn(
                     "absolute left-5 top-10 h-full w-0.5 -translate-x-1/2",
-                    complete ? "bg-[#00cc6a]" : "bg-[#e2e8f0]"
+                    complete ? "bg-brand" : "bg-border"
                   )}
                   aria-hidden="true"
                 />
@@ -67,13 +67,13 @@ export function Stepper({
                   className={cn(
                     "flex h-10 w-10 shrink-0 items-center justify-center rounded-full border-2 transition-all",
                     complete &&
-                      "border-[#00cc6a] bg-[#00cc6a] text-white",
+                      "border-brand bg-brand text-white",
                     current &&
-                      "border-[#00cc6a] bg-white text-[#00cc6a] shadow-sm ring-4 ring-[#00cc6a]/10",
+                      "border-brand bg-white text-brand-foreground shadow-sm ring-4 ring-brand/10",
                     !complete &&
                       !current &&
-                      "border-[#e2e8f0] bg-white text-[#94a3b8]",
-                    clickable && "group-hover:border-[#00cc6a]/70"
+                      "border-border bg-white text-muted-foreground",
+                    clickable && "group-hover:border-brand/70"
                   )}
                 >
                   {complete ? (
@@ -90,15 +90,15 @@ export function Stepper({
                   <p
                     className={cn(
                       "text-sm font-medium transition-colors",
-                      current && "text-[#00cc6a]",
-                      complete && "text-[#0f172a]",
-                      !complete && !current && "text-[#94a3b8]"
+                      current && "text-brand-foreground",
+                      complete && "text-foreground",
+                      !complete && !current && "text-muted-foreground"
                     )}
                   >
                     {step.title}
                   </p>
                   {step.description && (
-                    <p className="mt-0.5 text-xs text-[#94a3b8]">
+                    <p className="mt-0.5 text-xs text-muted-foreground">
                       {step.description}
                     </p>
                   )}
@@ -137,7 +137,7 @@ export function Stepper({
                   <div
                     className={cn(
                       "h-full w-full transition-all",
-                      complete ? "bg-[#00cc6a]" : "bg-[#e2e8f0]"
+                      complete ? "bg-brand" : "bg-border"
                     )}
                   />
                 </div>
@@ -156,13 +156,13 @@ export function Stepper({
                   className={cn(
                     "flex h-10 w-10 shrink-0 items-center justify-center rounded-full border-2 transition-all",
                     complete &&
-                      "border-[#00cc6a] bg-[#00cc6a] text-white",
+                      "border-brand bg-brand text-white",
                     current &&
-                      "border-[#00cc6a] bg-white text-[#00cc6a] shadow-sm ring-4 ring-[#00cc6a]/10",
+                      "border-brand bg-white text-brand-foreground shadow-sm ring-4 ring-brand/10",
                     !complete &&
                       !current &&
-                      "border-[#e2e8f0] bg-white text-[#94a3b8]",
-                    clickable && "group-hover:border-[#00cc6a]/70"
+                      "border-border bg-white text-muted-foreground",
+                    clickable && "group-hover:border-brand/70"
                   )}
                 >
                   {complete ? (
@@ -179,15 +179,15 @@ export function Stepper({
                   <p
                     className={cn(
                       "text-xs font-medium transition-colors sm:text-sm",
-                      current && "text-[#00cc6a]",
-                      complete && "text-[#0f172a]",
-                      !complete && !current && "text-[#94a3b8]"
+                      current && "text-brand-foreground",
+                      complete && "text-foreground",
+                      !complete && !current && "text-muted-foreground"
                     )}
                   >
                     {step.title}
                   </p>
                   {step.description && (
-                    <p className="mt-0.5 hidden text-xs text-[#94a3b8] sm:block">
+                    <p className="mt-0.5 hidden text-xs text-muted-foreground sm:block">
                       {step.description}
                     </p>
                   )}

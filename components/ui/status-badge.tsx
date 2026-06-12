@@ -6,10 +6,10 @@ const statusBadgeVariants = cva(
   {
     variants: {
       status: {
-        draft: "bg-[#f1f5f9] text-[#64748b]",
+        draft: "bg-accent text-muted-foreground",
         pending: "bg-amber-50 text-amber-600",
         processing: "bg-blue-50 text-blue-600",
-        complete: "bg-[#dcfce7] text-[#00cc6a]",
+        complete: "bg-brand/15 text-brand-foreground",
         error: "bg-red-50 text-red-600",
       },
       size: {
@@ -39,10 +39,10 @@ export function StatusBadge({
   children
 }: StatusBadgeProps) {
   const dotColors: Record<string, string> = {
-    draft: "bg-[#94a3b8]",
+    draft: "bg-muted-foreground",
     pending: "bg-amber-500",
     processing: "bg-blue-500 animate-pulse-soft",
-    complete: "bg-[#00cc6a]",
+    complete: "bg-brand",
     error: "bg-red-500",
   }
 

@@ -68,34 +68,34 @@ export default function OnboardingPage() {
 
   if (isCheckingAuth) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-[#f8fafc]">
-        <Loader2 className="h-8 w-8 animate-spin text-[#00cc6a]" />
+      <div className="flex min-h-screen items-center justify-center bg-muted">
+        <Loader2 className="h-8 w-8 animate-spin text-brand-foreground" />
       </div>
     );
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-white via-white to-[#f1f5f9]/20 px-4">
+    <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-white via-white to-accent/20 px-4">
       <div className="w-full max-w-md space-y-8">
         <div className="text-center">
-          <div className="mx-auto h-16 w-16 rounded-lg bg-[#dcfce7] flex items-center justify-center mb-6">
-            <Sparkles className="h-8 w-8 text-[#00cc6a]" />
+          <div className="mx-auto h-16 w-16 rounded-lg bg-brand/15 flex items-center justify-center mb-6">
+            <Sparkles className="h-8 w-8 text-brand-foreground" />
           </div>
-          <h1 className="text-2xl font-bold text-[#0f172a] font-heading">
+          <h1 className="text-2xl font-bold text-foreground font-heading">
             Welcome, {user?.user_metadata?.full_name || user?.email?.split('@')[0]}!
           </h1>
-          <p className="mt-2 text-[#475569]">Let's set up your company to get started</p>
+          <p className="mt-2 text-muted-foreground">Let's set up your company to get started</p>
         </div>
 
-        <div className="bg-white border border-[#e2e8f0] rounded-lg p-8 shadow-sm">
+        <div className="bg-white border border-border rounded-lg p-8 shadow-sm">
           <form onSubmit={handleSubmit} className="space-y-6">
             <div className="space-y-2">
               <Label htmlFor="companyName">Company Name</Label>
               <div className="relative">
-                <Building2 className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-[#94a3b8]" />
+                <Building2 className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-muted-foreground" />
                 <Input id="companyName" placeholder="Acme Exteriors LLC" value={companyName} onChange={(e) => setCompanyName(e.target.value)} className="pl-10 h-12" required autoFocus />
               </div>
-              <p className="text-xs text-[#94a3b8]">This is your organization name. You can invite team members later.</p>
+              <p className="text-xs text-muted-foreground">This is your organization name. You can invite team members later.</p>
             </div>
             <Button type="submit" disabled={isLoading || !companyName.trim()} className="w-full h-12">
               {isLoading ? <Loader2 className="h-5 w-5 animate-spin" /> : <>Get Started <ArrowRight className="ml-2 h-4 w-4" /></>}
@@ -103,12 +103,12 @@ export default function OnboardingPage() {
           </form>
         </div>
 
-        <div className="bg-white border border-[#e2e8f0] rounded-lg p-6 shadow-sm">
-          <h3 className="font-medium text-[#0f172a] mb-3">What's next?</h3>
-          <ul className="space-y-3 text-sm text-[#475569]">
-            <li className="flex items-center gap-3"><span className="h-2 w-2 rounded-full bg-[#00cc6a]" />Upload your first HOVER PDF</li>
-            <li className="flex items-center gap-3"><span className="h-2 w-2 rounded-full bg-[#00cc6a]" />AI extracts all measurements</li>
-            <li className="flex items-center gap-3"><span className="h-2 w-2 rounded-full bg-[#00cc6a]" />Download professional Excel takeoff</li>
+        <div className="bg-white border border-border rounded-lg p-6 shadow-sm">
+          <h3 className="font-medium text-foreground mb-3">What's next?</h3>
+          <ul className="space-y-3 text-sm text-muted-foreground">
+            <li className="flex items-center gap-3"><span className="h-2 w-2 rounded-full bg-brand" />Upload your first HOVER PDF</li>
+            <li className="flex items-center gap-3"><span className="h-2 w-2 rounded-full bg-brand" />AI extracts all measurements</li>
+            <li className="flex items-center gap-3"><span className="h-2 w-2 rounded-full bg-brand" />Download professional Excel takeoff</li>
           </ul>
         </div>
       </div>

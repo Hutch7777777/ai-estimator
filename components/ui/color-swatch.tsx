@@ -92,8 +92,8 @@ export function ColorSwatch({ color, label, hex, selected, onClick, className }:
       className={cn(
         "group relative flex flex-col items-center gap-2 rounded-lg border-2 p-3 transition-all",
         selected
-          ? "border-[#00cc6a] bg-[#dcfce7] shadow-sm ring-2 ring-[#00cc6a]/20"
-          : "border-[#e2e8f0] hover:border-[#00cc6a]/50 hover:bg-[#f8fafc]",
+          ? "border-brand bg-brand/15 shadow-sm ring-2 ring-brand/20"
+          : "border-border hover:border-brand/50 hover:bg-muted",
         className
       )}
     >
@@ -103,10 +103,10 @@ export function ColorSwatch({ color, label, hex, selected, onClick, className }:
           className={cn(
             "h-12 w-12 rounded-full border-2 shadow-sm transition-transform group-hover:scale-105",
             selected
-              ? "border-[#00cc6a]"
+              ? "border-brand"
               : needsStrongerBorder
-                ? "border-[#94a3b8]"
-                : "border-[#e2e8f0]"
+                ? "border-muted-foreground"
+                : "border-border"
           )}
           style={{ backgroundColor: bgColor }}
         >
@@ -115,7 +115,7 @@ export function ColorSwatch({ color, label, hex, selected, onClick, className }:
               <Check
                 className={cn(
                   "h-6 w-6",
-                  isLight ? "text-[#0f172a]" : "text-white"
+                  isLight ? "text-foreground" : "text-white"
                 )}
                 strokeWidth={3}
               />
@@ -128,7 +128,7 @@ export function ColorSwatch({ color, label, hex, selected, onClick, className }:
       <span
         className={cn(
           "text-xs font-medium text-center transition-colors",
-          selected ? "text-[#00cc6a]" : "text-[#475569] group-hover:text-[#0f172a]"
+          selected ? "text-brand-foreground" : "text-muted-foreground group-hover:text-foreground"
         )}
       >
         {label}

@@ -231,7 +231,7 @@ function ErrorDisplay({ error, onRetry }: ErrorDisplayProps) {
         <button
           type="button"
           onClick={onRetry}
-          className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-md transition-colors"
+          className="flex items-center gap-2 px-4 py-2 bg-primary hover:bg-primary/90 text-primary-foreground rounded-md transition-colors"
         >
           <RefreshCw className="w-4 h-4" />
           Try Again
@@ -4693,7 +4693,7 @@ export default function DetectionEditor({
                         <div className="flex items-center gap-2">
                           <div
                             className="w-3 h-3 rounded-full"
-                            style={{ backgroundColor: '#3b82f6' }}
+                            style={{ backgroundColor: 'var(--color-status-processing)' }}
                           />
                           <span className="text-sm text-gray-700 dark:text-gray-200 capitalize">
                             {detection.class.replace('_', ' ')}
@@ -4748,7 +4748,7 @@ export default function DetectionEditor({
                       <button
                         type="button"
                         onClick={handleToggleMarkup}
-                        className="flex items-center gap-1.5 px-3 py-1.5 text-sm bg-blue-600 hover:bg-blue-700 text-white rounded-md transition-colors"
+                        className="flex items-center gap-1.5 px-3 py-1.5 text-sm bg-primary hover:bg-primary/90 text-primary-foreground rounded-md transition-colors"
                       >
                         <EyeOff className="w-4 h-4" />
                         Back to Editor
@@ -4871,7 +4871,7 @@ export default function DetectionEditor({
                 <button
                   type="button"
                   onClick={handleToggleMarkup}
-                  className="absolute top-4 right-4 flex items-center gap-2 px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg shadow-lg transition-colors z-10"
+                  className="absolute top-4 right-4 flex items-center gap-2 px-3 py-2 bg-primary hover:bg-primary/90 text-primary-foreground text-sm font-medium rounded-lg shadow-lg transition-colors z-10"
                 >
                   <Eye className="w-4 h-4" />
                   View Markup
@@ -5007,7 +5007,7 @@ export default function DetectionEditor({
               <button
                 type="button"
                 onClick={handleRestoreDrafts}
-                className="px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-md transition-colors"
+                className="px-4 py-2 text-sm font-medium text-primary-foreground bg-primary hover:bg-primary/90 rounded-md transition-colors"
               >
                 Restore
               </button>
@@ -5191,7 +5191,7 @@ export default function DetectionEditor({
                       onComplete?.();
                     }
                   }}
-                  className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors"
+                  className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-medium text-primary-foreground bg-primary hover:bg-primary/90 rounded-lg transition-colors"
                 >
                   <ExternalLink className="w-4 h-4" />
                   View Takeoff

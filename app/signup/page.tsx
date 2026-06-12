@@ -79,16 +79,16 @@ export default function SignupPage() {
 
   if (showSuccess) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-[#f8fafc] px-4">
+      <div className="flex min-h-screen items-center justify-center bg-muted px-4">
         <div className="w-full max-w-md space-y-8 text-center">
-          <div className="mx-auto h-16 w-16 rounded-lg bg-[#dcfce7] flex items-center justify-center">
-            <Check className="h-8 w-8 text-[#00cc6a]" />
+          <div className="mx-auto h-16 w-16 rounded-lg bg-brand/15 flex items-center justify-center">
+            <Check className="h-8 w-8 text-brand-foreground" />
           </div>
-          <h1 className="text-2xl font-bold text-[#0f172a] font-heading">Check your email</h1>
-          <p className="text-[#475569]">
-            We sent a confirmation link to <span className="font-medium text-[#0f172a]">{email}</span>
+          <h1 className="text-2xl font-bold text-foreground font-heading">Check your email</h1>
+          <p className="text-muted-foreground">
+            We sent a confirmation link to <span className="font-medium text-foreground">{email}</span>
           </p>
-          <p className="text-sm text-[#94a3b8]">Click the link to activate your account and set up your company.</p>
+          <p className="text-sm text-muted-foreground">Click the link to activate your account and set up your company.</p>
           <Button onClick={() => router.push('/login')} variant="outline" className="mt-4">
             Back to login
           </Button>
@@ -98,18 +98,18 @@ export default function SignupPage() {
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-white via-white to-[#f1f5f9]/20 px-4 py-8">
+    <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-white via-white to-accent/20 px-4 py-8">
       <div className="w-full max-w-md space-y-8">
         <div className="text-center">
           <Link href="/" className="inline-flex items-center">
-            <span className="font-mono text-2xl font-bold text-[#0f172a]">EstimatePros</span>
-            <span className="font-mono text-2xl font-bold text-[#00cc6a]">.ai</span>
+            <span className="font-mono text-2xl font-bold text-foreground">EstimatePros</span>
+            <span className="font-mono text-2xl font-bold text-brand">.ai</span>
           </Link>
-          <h2 className="mt-6 text-xl font-semibold text-[#0f172a] font-heading">Create your account</h2>
-          <p className="mt-2 text-sm text-[#475569]">Start estimating in minutes, not hours</p>
+          <h2 className="mt-6 text-xl font-semibold text-foreground font-heading">Create your account</h2>
+          <p className="mt-2 text-sm text-muted-foreground">Start estimating in minutes, not hours</p>
         </div>
 
-        <div className="bg-white border border-[#e2e8f0] rounded-lg p-8 shadow-sm">
+        <div className="bg-white border border-border rounded-lg p-8 shadow-sm">
           <Button type="button" variant="outline" onClick={handleGoogleSignup} disabled={isLoading} className="w-full h-12">
             {isLoading ? <Loader2 className="h-5 w-5 animate-spin" /> : (
               <>
@@ -125,9 +125,9 @@ export default function SignupPage() {
           </Button>
 
           <div className="relative my-6">
-            <div className="absolute inset-0 flex items-center"><span className="w-full border-t border-[#e2e8f0]" /></div>
+            <div className="absolute inset-0 flex items-center"><span className="w-full border-t border-border" /></div>
             <div className="relative flex justify-center text-xs uppercase">
-              <span className="bg-white px-2 text-[#94a3b8]">Or continue with email</span>
+              <span className="bg-white px-2 text-muted-foreground">Or continue with email</span>
             </div>
           </div>
 
@@ -135,21 +135,21 @@ export default function SignupPage() {
             <div className="space-y-2">
               <Label htmlFor="fullName">Full Name</Label>
               <div className="relative">
-                <User className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-[#94a3b8]" />
+                <User className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-muted-foreground" />
                 <Input id="fullName" placeholder="John Smith" value={fullName} onChange={(e) => setFullName(e.target.value)} className="pl-10 h-12" required />
               </div>
             </div>
             <div className="space-y-2">
               <Label htmlFor="email">Email</Label>
               <div className="relative">
-                <Mail className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-[#94a3b8]" />
+                <Mail className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-muted-foreground" />
                 <Input id="email" type="email" placeholder="you@company.com" value={email} onChange={(e) => setEmail(e.target.value)} className="pl-10 h-12" required />
               </div>
             </div>
             <div className="space-y-2">
               <Label htmlFor="password">Password</Label>
               <div className="relative">
-                <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-[#94a3b8]" />
+                <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-muted-foreground" />
                 <Input id="password" type="password" placeholder="Min. 8 characters" value={password} onChange={(e) => setPassword(e.target.value)} className="pl-10 h-12" minLength={8} required />
               </div>
             </div>
@@ -159,12 +159,12 @@ export default function SignupPage() {
           </form>
         </div>
 
-        <p className="text-center text-sm text-[#475569]">
+        <p className="text-center text-sm text-muted-foreground">
           Already have an account?{' '}
-          <Link href="/login" className="text-[#00cc6a] hover:text-[#00b35e] font-medium">Sign in</Link>
+          <Link href="/login" className="text-brand-foreground hover:text-brand-foreground/80 font-medium">Sign in</Link>
         </p>
-        <p className="text-center text-xs text-[#94a3b8]">
-          By signing up, you agree to our <Link href="/terms" className="hover:text-[#0f172a]">Terms</Link> and <Link href="/privacy" className="hover:text-[#0f172a]">Privacy Policy</Link>
+        <p className="text-center text-xs text-muted-foreground">
+          By signing up, you agree to our <Link href="/terms" className="hover:text-foreground">Terms</Link> and <Link href="/privacy" className="hover:text-foreground">Privacy Policy</Link>
         </p>
       </div>
     </div>

@@ -456,7 +456,7 @@ export function HoverUploadStep({ data, onUpdate }: HoverUploadStepProps) {
               <AlertDescription className="text-blue-800 dark:text-blue-200">
                 <div className="mt-3 space-y-2 text-sm">
                   <div className="flex items-center gap-2">
-                    <CheckCircle2 className="h-4 w-4 text-[#00cc6a]" />
+                    <CheckCircle2 className="h-4 w-4 text-brand-foreground" />
                     <span>Extracted measurements from HOVER PDF</span>
                   </div>
                   <div className="flex items-center gap-2">
@@ -481,12 +481,12 @@ export function HoverUploadStep({ data, onUpdate }: HoverUploadStepProps) {
 
           {/* Complete State */}
           {uploadState === 'complete' && (
-            <Alert className="border-[#00cc6a] bg-[#dcfce7]">
-              <CheckCircle2 className="h-4 w-4 text-[#00cc6a]" />
-              <AlertTitle className="text-[#0f172a]">
+            <Alert className="border-brand bg-brand/15">
+              <CheckCircle2 className="h-4 w-4 text-brand-foreground" />
+              <AlertTitle className="text-foreground">
                 Your estimate has been downloaded!
               </AlertTitle>
-              <AlertDescription className="text-[#475569]">
+              <AlertDescription className="text-muted-foreground">
                 <p>
                   Your Excel takeoff has been generated and automatically downloaded to your computer.
                   Check your Downloads folder for the file.

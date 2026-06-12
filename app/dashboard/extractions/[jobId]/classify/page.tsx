@@ -92,23 +92,23 @@ function StepItem({
   return (
     <div className="flex items-center gap-3">
       {status === 'complete' && (
-        <div className="w-8 h-8 bg-[#00cc6a] rounded-full flex items-center justify-center flex-shrink-0">
+        <div className="w-8 h-8 bg-brand rounded-full flex items-center justify-center flex-shrink-0">
           <Check className="w-4 h-4 text-white" />
         </div>
       )}
       {status === 'active' && (
-        <div className="w-8 h-8 border-2 border-[#00cc6a] rounded-full flex items-center justify-center flex-shrink-0 bg-[#dcfce7]">
-          <div className="w-2 h-2 bg-[#00cc6a] rounded-full animate-pulse" />
+        <div className="w-8 h-8 border-2 border-brand rounded-full flex items-center justify-center flex-shrink-0 bg-brand/15">
+          <div className="w-2 h-2 bg-brand rounded-full animate-pulse" />
         </div>
       )}
       {status === 'pending' && (
-        <div className="w-8 h-8 border-2 border-[#e2e8f0] rounded-full flex items-center justify-center flex-shrink-0">
-          <Icon className="w-4 h-4 text-[#94a3b8]" />
+        <div className="w-8 h-8 border-2 border-border rounded-full flex items-center justify-center flex-shrink-0">
+          <Icon className="w-4 h-4 text-muted-foreground" />
         </div>
       )}
       <div className="flex items-center gap-2">
-        <Icon className={`w-4 h-4 ${status === 'pending' ? 'text-[#94a3b8]' : 'text-[#0f172a]'}`} />
-        <span className={`text-sm ${status === 'pending' ? 'text-[#94a3b8]' : 'text-[#0f172a] font-medium'}`}>
+        <Icon className={`w-4 h-4 ${status === 'pending' ? 'text-muted-foreground' : 'text-foreground'}`} />
+        <span className={`text-sm ${status === 'pending' ? 'text-muted-foreground' : 'text-foreground font-medium'}`}>
           {label}
           {status === 'active' && '...'}
         </span>
@@ -435,22 +435,22 @@ export default function ClassificationReviewPage() {
   // Show processing overlay when detection is running
   if (isProcessing) {
     return (
-      <div className="min-h-screen bg-[#f8fafc] flex items-center justify-center p-4">
-        <div className="bg-white rounded-xl border border-[#e2e8f0] shadow-lg p-8 max-w-md w-full">
+      <div className="min-h-screen bg-muted flex items-center justify-center p-4">
+        <div className="bg-white rounded-xl border border-border shadow-lg p-8 max-w-md w-full">
           {/* Animated spinner icon */}
           <div className="mb-6 flex justify-center">
-            <div className="w-20 h-20 bg-[#dcfce7] rounded-full flex items-center justify-center">
-              <div className="w-12 h-12 border-4 border-[#00cc6a] border-t-transparent rounded-full animate-spin" />
+            <div className="w-20 h-20 bg-brand/15 rounded-full flex items-center justify-center">
+              <div className="w-12 h-12 border-4 border-brand border-t-transparent rounded-full animate-spin" />
             </div>
           </div>
 
           {/* Title */}
-          <h1 className="text-2xl font-semibold text-[#0f172a] text-center mb-2">
+          <h1 className="text-2xl font-semibold text-foreground text-center mb-2">
             Processing Your Plans
           </h1>
 
           {/* Project name */}
-          <p className="text-[#475569] text-center mb-8">
+          <p className="text-muted-foreground text-center mb-8">
             {job?.project_name || 'Untitled Project'}
           </p>
 
@@ -467,14 +467,14 @@ export default function ClassificationReviewPage() {
           </div>
 
           {/* Subtitle */}
-          <p className="text-sm text-[#94a3b8] text-center">
+          <p className="text-sm text-muted-foreground text-center">
             This usually takes 1-2 minutes
           </p>
 
           {/* Cancel button */}
           <button
             onClick={handleBack}
-            className="mt-6 w-full text-sm text-[#94a3b8] hover:text-[#475569] transition-colors py-2"
+            className="mt-6 w-full text-sm text-muted-foreground hover:text-muted-foreground transition-colors py-2"
           >
             Cancel and return to dashboard
           </button>

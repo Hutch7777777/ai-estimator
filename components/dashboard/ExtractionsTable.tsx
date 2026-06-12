@@ -546,12 +546,12 @@ export function ExtractionsTable() {
 
       {/* Upload Dialog */}
       <Dialog open={uploadDialogOpen} onOpenChange={setUploadDialogOpen}>
-        <DialogContent className="max-w-md bg-white border border-[#e2e8f0] p-6">
+        <DialogContent className="max-w-md bg-white border border-border p-6">
           <DialogHeader>
-            <DialogTitle className="text-xl font-semibold text-[#0f172a]">
+            <DialogTitle className="text-xl font-semibold text-foreground">
               Upload Construction Plans
             </DialogTitle>
-            <DialogDescription className="text-sm text-[#475569]">
+            <DialogDescription className="text-sm text-muted-foreground">
               Upload a PDF of your construction plans for AI-powered object detection
             </DialogDescription>
           </DialogHeader>

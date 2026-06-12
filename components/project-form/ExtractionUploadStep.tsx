@@ -277,20 +277,20 @@ export function ExtractionUploadStep({
           className={cn(
             "border-2 border-dashed rounded-lg p-8 text-center cursor-pointer transition-colors",
             isDragActive
-              ? "border-[#00cc6a] bg-[#dcfce7]"
-              : "border-[#e2e8f0] bg-[#f8fafc] hover:border-[#00cc6a] hover:bg-[#f1f5f9]"
+              ? "border-brand bg-brand/15"
+              : "border-border bg-muted hover:border-brand hover:bg-accent"
           )}
         >
           <input {...getInputProps()} />
-          <Upload className="mx-auto h-10 w-10 text-[#94a3b8] mb-3" />
+          <Upload className="mx-auto h-10 w-10 text-muted-foreground mb-3" />
           {isDragActive ? (
-            <p className="text-sm text-[#0f172a]">Drop the PDF here...</p>
+            <p className="text-sm text-foreground">Drop the PDF here...</p>
           ) : (
             <>
-              <p className="text-sm font-medium text-[#475569] mb-1">
+              <p className="text-sm font-medium text-muted-foreground mb-1">
                 Drop your construction plan PDF here
               </p>
-              <p className="text-xs text-[#94a3b8]">
+              <p className="text-xs text-muted-foreground">
                 or click to browse • Max {MAX_FILE_SIZE_MB}MB
               </p>
             </>
@@ -300,22 +300,22 @@ export function ExtractionUploadStep({
 
       {/* Selected file preview */}
       {selectedFile && uploadState === 'idle' && (
-        <div className="flex items-center gap-3 p-3 bg-[#f8fafc] rounded-md border border-[#e2e8f0]">
-          <div className="rounded-md bg-[#dcfce7] p-2">
-            <FileText className="h-5 w-5 text-[#00cc6a]" />
+        <div className="flex items-center gap-3 p-3 bg-muted rounded-md border border-border">
+          <div className="rounded-md bg-brand/15 p-2">
+            <FileText className="h-5 w-5 text-brand-foreground" />
           </div>
           <div className="flex-1 min-w-0">
-            <p className="text-sm font-medium text-[#0f172a] truncate">
+            <p className="text-sm font-medium text-foreground truncate">
               {selectedFile.name}
             </p>
-            <p className="text-xs text-[#94a3b8]">
+            <p className="text-xs text-muted-foreground">
               {formatFileSize(selectedFile.size)}
             </p>
           </div>
           <button
             type="button"
             onClick={handleRemoveFile}
-            className="flex-shrink-0 p-1.5 text-[#94a3b8] hover:text-[#0f172a] transition-colors"
+            className="flex-shrink-0 p-1.5 text-muted-foreground hover:text-foreground transition-colors"
           >
             <X className="h-4 w-4" />
           </button>
@@ -324,16 +324,16 @@ export function ExtractionUploadStep({
 
       {/* Uploading State */}
       {uploadState === 'uploading' && (
-        <div className="p-4 rounded-md bg-[#f8fafc] border border-[#e2e8f0]">
+        <div className="p-4 rounded-md bg-muted border border-border">
           <div className="flex items-center gap-3 mb-3">
-            <Loader2 className="h-5 w-5 animate-spin text-[#00cc6a]" />
-            <span className="text-sm font-medium text-[#0f172a]">
+            <Loader2 className="h-5 w-5 animate-spin text-brand-foreground" />
+            <span className="text-sm font-medium text-foreground">
               Uploading PDF...
             </span>
           </div>
-          <div className="h-2 bg-[#e2e8f0] rounded-full overflow-hidden">
+          <div className="h-2 bg-border rounded-full overflow-hidden">
             <div
-              className="h-full bg-[#00cc6a] transition-all duration-300"
+              className="h-full bg-brand transition-all duration-300"
               style={{ width: `${uploadProgress}%` }}
             />
           </div>
@@ -342,10 +342,10 @@ export function ExtractionUploadStep({
 
       {/* Starting Job State */}
       {uploadState === 'starting' && (
-        <div className="p-4 rounded-md bg-[#f8fafc] border border-[#e2e8f0]">
+        <div className="p-4 rounded-md bg-muted border border-border">
           <div className="flex items-center gap-3">
-            <Loader2 className="h-5 w-5 animate-spin text-[#00cc6a]" />
-            <span className="text-sm font-medium text-[#0f172a]">
+            <Loader2 className="h-5 w-5 animate-spin text-brand-foreground" />
+            <span className="text-sm font-medium text-foreground">
               Starting extraction job...
             </span>
           </div>
@@ -354,10 +354,10 @@ export function ExtractionUploadStep({
 
       {/* Started State (brief - modal will close) */}
       {uploadState === 'started' && (
-        <div className="p-4 rounded-md bg-[#dcfce7] border border-[#00cc6a]/30">
+        <div className="p-4 rounded-md bg-brand/15 border border-brand/30">
           <div className="flex items-center gap-3">
-            <CheckCircle2 className="h-5 w-5 text-[#00cc6a]" />
-            <span className="text-sm font-medium text-[#0f172a]">
+            <CheckCircle2 className="h-5 w-5 text-brand-foreground" />
+            <span className="text-sm font-medium text-foreground">
               Job started! Closing...
             </span>
           </div>
@@ -366,10 +366,10 @@ export function ExtractionUploadStep({
 
       {/* Error State */}
       {uploadState === 'error' && (
-        <div className="p-4 rounded-md bg-red-50 border border-[#ef4444]/30">
+        <div className="p-4 rounded-md bg-red-50 border border-destructive/30">
           <div className="flex items-center gap-3 mb-3">
-            <AlertCircle className="h-5 w-5 text-[#ef4444]" />
-            <span className="text-sm font-medium text-[#ef4444]">
+            <AlertCircle className="h-5 w-5 text-destructive" />
+            <span className="text-sm font-medium text-destructive">
               {errorMessage || 'Something went wrong'}
             </span>
           </div>
@@ -384,7 +384,7 @@ export function ExtractionUploadStep({
         <button
           type="button"
           onClick={handleStartExtraction}
-          className="w-full h-12 md:h-10 bg-[#00cc6a] text-white font-medium rounded-md hover:bg-[#00b35e] active:bg-[#009e52] transition-colors flex items-center justify-center gap-2"
+          className="w-full h-12 md:h-10 bg-brand text-white font-medium rounded-md hover:bg-brand-600 active:bg-brand-700 transition-colors flex items-center justify-center gap-2"
         >
           <Upload className="h-4 w-4" />
           Start AI Extraction
