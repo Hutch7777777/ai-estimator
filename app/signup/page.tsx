@@ -81,8 +81,8 @@ export default function SignupPage() {
     return (
       <div className="flex min-h-screen items-center justify-center bg-muted px-4">
         <div className="w-full max-w-md space-y-8 text-center">
-          <div className="mx-auto h-16 w-16 rounded-lg bg-brand/15 flex items-center justify-center">
-            <Check className="h-8 w-8 text-brand-foreground" />
+          <div className="mx-auto h-16 w-16 rounded-lg bg-ink/7 flex items-center justify-center">
+            <Check className="h-8 w-8 text-muted-foreground" />
           </div>
           <h1 className="text-2xl font-bold text-foreground font-heading">Check your email</h1>
           <p className="text-muted-foreground">
@@ -161,7 +161,7 @@ export default function SignupPage() {
 
         <p className="text-center text-sm text-muted-foreground">
           Already have an account?{' '}
-          <Link href="/login" className="text-brand-foreground hover:text-brand-foreground/80 font-medium">Sign in</Link>
+          <Link href="/login" className="font-medium text-foreground underline underline-offset-2 hover:text-ink">Sign in</Link>
         </p>
         <p className="text-center text-xs text-muted-foreground">
           By signing up, you agree to our <Link href="/terms" className="hover:text-foreground">Terms</Link> and <Link href="/privacy" className="hover:text-foreground">Privacy Policy</Link>

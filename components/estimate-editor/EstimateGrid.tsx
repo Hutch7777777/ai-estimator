@@ -886,7 +886,7 @@ export function EstimateGrid({
     }
     // Low confidence rows get yellow background
     if ((params.data as any)?.low_confidence) {
-      return "bg-amber-100 dark:bg-yellow-950/30";
+      return "bg-redline/8 dark:bg-redline/15";
     }
     if (params.data?.isNew) return "bg-green-50 dark:bg-green-950/20";
     if (params.data?.isModified) return "bg-yellow-50 dark:bg-yellow-950/20";
@@ -1306,7 +1306,7 @@ export function EstimateGrid({
             <span>Modified</span>
           </div>
           <div className="flex items-center gap-1">
-            <div className="w-3 h-3 rounded bg-amber-100 border" />
+            <div className="w-3 h-3 rounded bg-redline/8 border" />
             <span>Low confidence</span>
           </div>
         </div>

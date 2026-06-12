@@ -37,7 +37,7 @@ export function StatCard({
             <div className="flex items-center gap-1 pt-1">
               <span className={cn(
                 "text-xs font-medium",
-                trend.value >= 0 ? "text-brand-foreground" : "text-red-600"
+                trend.value >= 0 ? "text-muted-foreground" : "text-destructive"
               )}>
                 {trend.value >= 0 ? "+" : ""}{trend.value}%
               </span>
@@ -46,8 +46,8 @@ export function StatCard({
           )}
         </div>
         {Icon && (
-          <div className="rounded-lg bg-brand/15 p-2.5">
-            <Icon className="h-5 w-5 text-brand-foreground" />
+          <div className="rounded-lg bg-ink/7 p-2.5">
+            <Icon className="h-5 w-5 text-muted-foreground" />
           </div>
         )}
       </div>

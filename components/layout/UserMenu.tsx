@@ -39,7 +39,7 @@ export function UserMenu() {
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
         <Button variant="ghost" className="flex items-center gap-2 h-10 px-2">
-          <div className="h-8 w-8 rounded-full bg-brand/15 flex items-center justify-center text-sm font-medium text-brand-foreground">
+          <div className="h-8 w-8 rounded-full bg-ink/10 flex items-center justify-center text-sm font-medium text-ink">
             {initials}
           </div>
           <div className="hidden sm:flex flex-col items-start text-left">

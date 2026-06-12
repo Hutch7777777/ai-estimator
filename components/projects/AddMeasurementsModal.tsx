@@ -85,10 +85,10 @@ export function AddMeasurementsModal({
                 key={option.title}
                 type="button"
                 onClick={option.onSelect}
-                className="w-full flex items-center gap-3 rounded-lg border p-3 text-left hover:border-brand hover:bg-muted transition-colors"
+                className="w-full flex items-center gap-3 rounded-lg border p-3 text-left hover:border-ink/30 hover:bg-muted transition-colors"
               >
-                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-brand/15">
-                  <option.icon className="h-5 w-5 text-brand-foreground" />
+                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-ink/7">
+                  <option.icon className="h-5 w-5 text-muted-foreground" />
                 </div>
                 <div className="min-w-0 flex-1">
                   <p className="font-medium">{option.title}</p>

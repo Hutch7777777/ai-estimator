@@ -217,7 +217,7 @@ export function MaterialsTable({ items, totalMaterialCost }: MaterialsTableProps
       <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
         <div className="flex items-center gap-3">
           <div className="w-8 h-8 rounded-full bg-blue-100 dark:bg-blue-900/50 flex items-center justify-center">
-            <Package className="w-4 h-4 text-blue-600 dark:text-blue-400" />
+            <Package className="w-4 h-4 text-muted-foreground" />
           </div>
           <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
             Materials
@@ -319,7 +319,7 @@ export function MaterialsTable({ items, totalMaterialCost }: MaterialsTableProps
               >
                 Materials Total
               </td>
-              <td className="px-4 py-4 text-sm text-right font-num font-bold text-blue-600 dark:text-blue-400">
+              <td className="px-4 py-4 text-sm text-right font-num font-bold text-brand-foreground dark:text-brand">
                 {formatCurrency(totalMaterialCost)}
               </td>
             </tr>

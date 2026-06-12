@@ -1552,12 +1552,12 @@ export function PlanIntelligence({ takeoffId, jobId: propJobId, projectId }: Pla
       <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-4">
         <div className="flex items-start justify-between gap-4">
           <div className="flex items-start gap-3">
-            <Info className="w-5 h-5 text-blue-600 dark:text-blue-400 flex-shrink-0 mt-0.5" />
+            <Info className="w-5 h-5 text-foreground dark:text-gray-200 flex-shrink-0 mt-0.5" />
             <div>
               <h4 className="text-sm font-medium text-blue-800 dark:text-blue-200">
                 Plan Intelligence
               </h4>
-              <p className="text-sm text-blue-600 dark:text-blue-400 mt-1">
+              <p className="text-sm text-foreground dark:text-gray-200 mt-1">
                 {ocrData
                   ? `Extracted ${ocrData.totals.windows} windows and ${ocrData.totals.doors} doors from schedule pages.`
                   : schedulePages.length > 0
@@ -1615,7 +1615,7 @@ export function PlanIntelligence({ takeoffId, jobId: propJobId, projectId }: Pla
 
         {/* Extraction Metadata */}
         {ocrData && (
-          <div className="mt-3 flex flex-wrap gap-3 text-xs text-blue-600 dark:text-blue-400">
+          <div className="mt-3 flex flex-wrap gap-3 text-xs text-foreground dark:text-gray-200">
             <span className="flex items-center gap-1">
               <CheckCircle2 className="w-3 h-3" />
               Confidence: {Math.round((ocrData.confidence || 0) * 100)}%
@@ -1817,17 +1817,17 @@ export function PlanIntelligence({ takeoffId, jobId: propJobId, projectId }: Pla
                         ) && (
                           <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1">
                             {callout.dimensions.exposure_inches && (
-                              <span className="text-xs font-medium text-blue-600 dark:text-blue-400">
+                              <span className="text-xs font-medium text-foreground dark:text-gray-200">
                                 {callout.dimensions.exposure_inches}&quot; exposure
                               </span>
                             )}
                             {callout.dimensions.thickness_inches && (
-                              <span className="text-xs font-medium text-blue-600 dark:text-blue-400">
+                              <span className="text-xs font-medium text-foreground dark:text-gray-200">
                                 {callout.dimensions.thickness_inches}&quot; thick
                               </span>
                             )}
                             {callout.dimensions.width_inches && (
-                              <span className="text-xs font-medium text-blue-600 dark:text-blue-400">
+                              <span className="text-xs font-medium text-foreground dark:text-gray-200">
                                 {callout.dimensions.width_inches}&quot; wide
                               </span>
                             )}
@@ -1952,7 +1952,7 @@ export function PlanIntelligence({ takeoffId, jobId: propJobId, projectId }: Pla
                             <span>Total: <span className="font-medium">{assembly.totalThickness}</span></span>
                           )}
                           {assembly.insulationRValue && (
-                            <span>R-Value: <span className="font-medium text-blue-600 dark:text-blue-400">R-{assembly.insulationRValue}</span></span>
+                            <span>R-Value: <span className="font-medium text-foreground dark:text-gray-200">R-{assembly.insulationRValue}</span></span>
                           )}
                         </div>
                       </div>
@@ -2029,7 +2029,7 @@ export function PlanIntelligence({ takeoffId, jobId: propJobId, projectId }: Pla
                             </td>
                             <td className="py-2 px-3">
                               {layer.rValue ? (
-                                <span className="font-medium text-blue-600 dark:text-blue-400">
+                                <span className="font-medium text-foreground dark:text-gray-200">
                                   R-{layer.rValue}
                                 </span>
                               ) : (
@@ -2643,7 +2643,7 @@ export function PlanIntelligence({ takeoffId, jobId: propJobId, projectId }: Pla
       <CollapsibleSection
         title="Window Schedule"
         icon={Square}
-        iconColor="bg-blue-100 dark:bg-blue-900/50 text-blue-600 dark:text-blue-400"
+        iconColor="bg-blue-100 dark:bg-blue-900/50 text-foreground dark:text-gray-200"
         badge={
           windowSchedule.length > 0 && (
             <span className="text-xs bg-blue-100 dark:bg-blue-900/50 text-blue-700 dark:text-blue-300 px-2 py-0.5 rounded-full">
@@ -2969,7 +2969,7 @@ export function PlanIntelligence({ takeoffId, jobId: propJobId, projectId }: Pla
                   const info = getCategoryInfo(category);
                   const CategoryIcon = info.icon;
                   const colorClasses: Record<string, { bg: string; border: string; iconBg: string; text: string }> = {
-                    blue: { bg: 'bg-blue-50 dark:bg-blue-900/30', border: 'border-blue-200 dark:border-blue-800', iconBg: 'bg-blue-100 dark:bg-blue-900/50', text: 'text-blue-600 dark:text-blue-400' },
+                    blue: { bg: 'bg-blue-50 dark:bg-blue-900/30', border: 'border-blue-200 dark:border-blue-800', iconBg: 'bg-blue-100 dark:bg-blue-900/50', text: 'text-foreground dark:text-gray-200' },
                     cyan: { bg: 'bg-cyan-50 dark:bg-cyan-900/30', border: 'border-cyan-200 dark:border-cyan-800', iconBg: 'bg-cyan-100 dark:bg-cyan-900/50', text: 'text-cyan-600 dark:text-cyan-400' },
                     teal: { bg: 'bg-teal-50 dark:bg-teal-900/30', border: 'border-teal-200 dark:border-teal-800', iconBg: 'bg-teal-100 dark:bg-teal-900/50', text: 'text-teal-600 dark:text-teal-400' },
                     purple: { bg: 'bg-purple-50 dark:bg-purple-900/30', border: 'border-purple-200 dark:border-purple-800', iconBg: 'bg-purple-100 dark:bg-purple-900/50', text: 'text-purple-600 dark:text-purple-400' },

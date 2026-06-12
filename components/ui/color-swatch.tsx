@@ -92,7 +92,7 @@ export function ColorSwatch({ color, label, hex, selected, onClick, className }:
       className={cn(
         "group relative flex flex-col items-center gap-2 rounded-lg border-2 p-3 transition-all",
         selected
-          ? "border-brand bg-brand/15 shadow-sm ring-2 ring-brand/20"
+          ? "border-ink bg-ink/7 shadow-sm ring-2 ring-ink/15"
           : "border-border hover:border-brand/50 hover:bg-muted",
         className
       )}

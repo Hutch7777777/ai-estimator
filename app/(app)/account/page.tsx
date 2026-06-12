@@ -461,7 +461,7 @@ function AccountSettingsContent() {
             </>
           ) : (
             <>
-              <Loader2 className="h-8 w-8 animate-spin text-brand-foreground mx-auto" />
+              <Loader2 className="h-8 w-8 animate-spin text-ink mx-auto" />
               <div className="text-sm text-gray-500">
                 {isUserLoading && <div>Loading user...</div>}
                 {isOrgLoading && <div>Loading organization...</div>}
@@ -602,7 +602,7 @@ function AccountSettingsContent() {
               <div className="border-t border-border pt-6">
                 <button
                   onClick={() => setShowPasswordChange(!showPasswordChange)}
-                  className="flex items-center gap-2 text-foreground font-medium hover:text-brand-foreground transition-colors"
+                  className="flex items-center gap-2 text-foreground font-medium hover:text-ink transition-colors"
                 >
                   {showPasswordChange ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
                   Change Password
@@ -1086,7 +1086,7 @@ function AccountSettingsContent() {
 
               {isLoadingTeam ? (
                 <div className="flex justify-center py-8">
-                  <Loader2 className="h-6 w-6 animate-spin text-brand-foreground" />
+                  <Loader2 className="h-6 w-6 animate-spin text-ink" />
                 </div>
               ) : teamMembers.length === 0 ? (
                 <p className="text-center text-muted-foreground py-8">No team members found</p>
@@ -1100,7 +1100,7 @@ function AccountSettingsContent() {
                     return (
                       <div key={member.id} className="py-4 flex items-center justify-between gap-4">
                         <div className="flex items-center gap-3 min-w-0">
-                          <div className="h-10 w-10 rounded-full bg-brand/15 flex items-center justify-center text-sm font-medium text-brand-foreground flex-shrink-0">
+                          <div className="h-10 w-10 rounded-full bg-ink/10 flex items-center justify-center text-sm font-medium text-ink flex-shrink-0">
                             {memberName.slice(0, 2).toUpperCase()}
                           </div>
                           <div className="min-w-0">
@@ -1208,7 +1208,7 @@ export default function AccountSettingsPage() {
   return (
     <Suspense fallback={
       <div className="flex min-h-screen items-center justify-center bg-muted">
-        <Loader2 className="h-8 w-8 animate-spin text-brand-foreground" />
+        <Loader2 className="h-8 w-8 animate-spin text-ink" />
       </div>
     }>
       <AccountSettingsContent />

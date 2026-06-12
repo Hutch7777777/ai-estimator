@@ -60,7 +60,7 @@ export function CostSummaryCard({ totals }: CostSummaryCardProps) {
           <div className="bg-gray-50 dark:bg-gray-800/50 rounded-lg p-4 border border-gray-200 dark:border-gray-700">
             <div className="flex items-center gap-3 mb-2">
               <div className="w-8 h-8 rounded-full bg-blue-100 dark:bg-blue-900/50 flex items-center justify-center">
-                <Package className="w-4 h-4 text-blue-600 dark:text-blue-400" />
+                <Package className="w-4 h-4 text-muted-foreground" />
               </div>
               <span className="text-sm font-medium text-gray-600 dark:text-gray-400">Materials</span>
             </div>

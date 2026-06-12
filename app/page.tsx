@@ -77,15 +77,15 @@ export default function Home() {
             {/* Trust Indicators */}
             <div className="flex flex-wrap items-center justify-center gap-6 text-sm text-muted-foreground animate-fade-in-up" style={{ animationDelay: '0.6s' }}>
               <div className="flex items-center gap-2">
-                <CheckCircle2 className="h-4 w-4 text-brand-foreground" />
+                <CheckCircle2 className="h-4 w-4 text-muted-foreground" />
                 <span>No credit card required</span>
               </div>
               <div className="flex items-center gap-2">
-                <CheckCircle2 className="h-4 w-4 text-brand-foreground" />
+                <CheckCircle2 className="h-4 w-4 text-muted-foreground" />
                 <span>89% time savings</span>
               </div>
               <div className="flex items-center gap-2">
-                <CheckCircle2 className="h-4 w-4 text-brand-foreground" />
+                <CheckCircle2 className="h-4 w-4 text-muted-foreground" />
                 <span>Professional output</span>
               </div>
             </div>
@@ -145,13 +145,13 @@ export default function Home() {
 
             {/* Step 3 */}
             <Card className="hover-lift border-2 relative overflow-hidden group rounded-xl shadow-soft">
-              <div className="absolute top-0 right-0 w-32 h-32 bg-brand/5 rounded-full -mr-16 -mt-16 group-hover:scale-150 transition-transform duration-500" />
+              <div className="absolute top-0 right-0 w-32 h-32 bg-ink/5 rounded-full -mr-16 -mt-16 group-hover:scale-150 transition-transform duration-500" />
               <CardHeader className="relative">
                 <div className="mb-4 flex items-center justify-between">
                   <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-gradient-to-br from-brand to-brand-600 shadow-lg">
                     <Zap className="h-8 w-8 text-white" />
                   </div>
-                  <Badge className="text-2xl font-bold bg-brand/10 text-brand-foreground border-none px-4 py-2">03</Badge>
+                  <Badge className="text-2xl font-bold bg-ink/7 text-muted-foreground border-none px-4 py-2">03</Badge>
                 </div>
                 <CardTitle className="text-2xl mb-2 font-heading">Download Excel Takeoff</CardTitle>
                 <CardDescription className="text-base">

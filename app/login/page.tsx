@@ -101,8 +101,8 @@ function LoginForm() {
     return (
       <div className="flex min-h-screen items-center justify-center bg-muted px-4">
         <div className="w-full max-w-md space-y-8 text-center">
-          <div className="mx-auto h-16 w-16 rounded-lg bg-brand/15 flex items-center justify-center">
-            <Mail className="h-8 w-8 text-brand-foreground" />
+          <div className="mx-auto h-16 w-16 rounded-lg bg-ink/7 flex items-center justify-center">
+            <Mail className="h-8 w-8 text-muted-foreground" />
           </div>
           <h1 className="text-2xl font-bold text-foreground font-heading">Check your email</h1>
           <p className="text-muted-foreground">
@@ -201,7 +201,7 @@ function LoginForm() {
               type="button"
               onClick={handleMagicLink}
               disabled={isMagicLinkLoading}
-              className="text-sm text-brand-foreground hover:text-brand-foreground/80 disabled:opacity-50"
+              className="text-sm font-medium text-foreground underline underline-offset-2 hover:text-ink disabled:opacity-50"
             >
               {isMagicLinkLoading ? 'Sending...' : 'Send me a magic link instead'}
             </button>
@@ -210,7 +210,7 @@ function LoginForm() {
 
         <p className="text-center text-sm text-muted-foreground">
           Don't have an account?{' '}
-          <Link href="/signup" className="text-brand-foreground hover:text-brand-foreground/80 font-medium">
+          <Link href="/signup" className="font-medium text-foreground underline underline-offset-2 hover:text-ink">
             Sign up
           </Link>
         </p>
@@ -223,7 +223,7 @@ export default function LoginPage() {
   return (
     <Suspense fallback={
       <div className="flex min-h-screen items-center justify-center bg-muted">
-        <Loader2 className="h-8 w-8 animate-spin text-brand-foreground" />
+        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
       </div>
     }>
       <LoginForm />
