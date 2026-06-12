@@ -10,16 +10,13 @@ import {
   Layers,
   Plus,
   RefreshCw,
-  Upload,
-  Eye,
-  CheckSquare,
   SearchX,
 } from 'lucide-react';
 import { StatusBadge } from '@/components/ui/status-badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
-import { Stepper, type Step } from '@/components/ui/stepper';
+import { DimensionStepper } from '@/components/ui/dimension-stepper';
 import { AddMeasurementsModal } from '@/components/projects/AddMeasurementsModal';
 import { createClient } from '@/lib/supabase/client';
 import { useOrganization, isDevBypassEnabled } from '@/lib/hooks/useOrganization';
@@ -53,12 +50,10 @@ interface HubTakeoff {
 
 type HubView = 'loading' | 'error' | 'notfound' | 'ready';
 
-const STAGE_STEPS: Step[] = [
-  { id: 1, title: 'Upload', description: 'Add measurements', icon: Upload },
-  { id: 2, title: 'Review', description: 'Verify detections', icon: Eye },
-  { id: 3, title: 'Estimate', description: 'Approve & price', icon: Calculator },
-  { id: 4, title: 'Export', description: 'Takeoff & Excel', icon: CheckSquare },
-];
+function stageDate(iso?: string | null): string | null {
+  if (!iso) return null;
+  return new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+}
 
 function formatDate(iso: string): string {
   return new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
@@ -233,10 +228,19 @@ export default function ProjectHubPage() {
         </div>
       </div>
 
-      {/* Stage stepper */}
+      {/* Stage stepper — the dimension string */}
       <Card>
-        <CardContent className="pt-6">
-          <Stepper steps={STAGE_STEPS} currentStep={currentStep} />
+        <CardContent className="pt-6 px-8">
+          <DimensionStepper
+            stages={[
+              { id: 1, label: 'Upload', date: stageDate(project?.created_at) },
+              // jobs are ordered newest-first; the earliest job marks Review
+              { id: 2, label: 'Review', date: stageDate(jobs[jobs.length - 1]?.created_at) },
+              { id: 3, label: 'Estimate', date: stageDate(jobs.find((j) => j.status === 'approved')?.created_at) },
+              { id: 4, label: 'Export', date: stageDate(takeoffs[0]?.created_at) },
+            ]}
+            currentStage={currentStep}
+          />
         </CardContent>
       </Card>
 

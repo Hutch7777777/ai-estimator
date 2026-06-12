@@ -257,6 +257,27 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* Dimension stepper draw-in (components/ui/dimension-stepper.tsx) */
+@keyframes dimension-draw {
+  from {
+    transform: scaleX(0);
+  }
+  to {
+    transform: scaleX(1);
+  }
+}
+
+.dimension-span {
+  transform-origin: left center;
+  animation: dimension-draw 300ms ease-out backwards;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dimension-span {
+    animation: none;
+  }
+}
+
 @layer base {
   * {
     @apply border-border;
