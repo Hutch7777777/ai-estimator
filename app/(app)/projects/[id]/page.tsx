@@ -202,29 +202,51 @@ export default function ProjectHubPage() {
           ? 2
           : 1;
 
+  // "City, ST 55104" line for the title block: everything after the street.
+  const projectLocality = project?.address?.includes(',')
+    ? project.address.split(',').slice(1).join(',').trim()
+    : null;
+
   return (
     <div className="mx-auto w-full max-w-[1200px] px-4 py-6 sm:px-6 space-y-6">
-      {/* Header */}
-      <div className="flex flex-wrap items-start justify-between gap-4">
+      {/* Header — architectural title block: name + status left; client /
+          locality / sheet-id meta right-aligned against a 2px ink rule.
+          Typographic only. */}
+      <div className="flex flex-wrap items-start justify-between gap-x-8 gap-y-4">
         <div className="min-w-0">
-          <h1 className="text-title font-heading truncate">{displayName}</h1>
-          <div className="mt-1 flex items-center gap-3 text-sm text-muted-foreground">
-            {project?.status && <StatusBadge status={project.status} size="sm">{project.status}</StatusBadge>}
-            {project?.address && <span className="truncate">{project.address}</span>}
-            {project?.created_at && <span className="font-num">Created {formatDate(project.created_at)}</span>}
+          <div className="flex items-center gap-3">
+            <h1 className="text-title font-heading truncate">{displayName}</h1>
+            {project?.status && (
+              <StatusBadge status={project.status} size="sm">{project.status}</StatusBadge>
+            )}
           </div>
         </div>
-        <div className="flex items-center gap-2">
-          <Button variant="outline" asChild>
-            <Link href={`/projects/${projectId}/estimate`}>
-              <Calculator className="mr-2 h-4 w-4" />
-              Open Estimate
-            </Link>
-          </Button>
-          <Button onClick={() => setAddOpen(true)}>
-            <Plus className="mr-2 h-4 w-4" />
-            Add Measurements
-          </Button>
+        <div className="flex flex-col items-end gap-3">
+          <div className="border-r-2 border-ink pr-4 text-right leading-snug">
+            {project?.client_name && (
+              <p className="text-sm font-medium text-foreground">{project.client_name}</p>
+            )}
+            {projectLocality && (
+              <p className="text-xs text-muted-foreground">{projectLocality}</p>
+            )}
+            {project && (
+              <p className="font-num text-[10px] uppercase text-muted-foreground">
+                {project.id.slice(0, 8).toUpperCase()} · REV {formatDate(project.created_at)}
+              </p>
+            )}
+          </div>
+          <div className="flex items-center gap-2">
+            <Button variant="outline" asChild>
+              <Link href={`/projects/${projectId}/estimate`}>
+                <Calculator className="mr-2 h-4 w-4" />
+                Open Estimate
+              </Link>
+            </Button>
+            <Button onClick={() => setAddOpen(true)}>
+              <Plus className="mr-2 h-4 w-4" />
+              Add Measurements
+            </Button>
+          </div>
         </div>
       </div>
 
