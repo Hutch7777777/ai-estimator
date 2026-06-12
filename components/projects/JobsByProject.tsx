@@ -161,7 +161,7 @@ export function JobsByProject() {
   }
 
   const renderJobRow = (job: JobRow, project: ProjectRow | null) => (
-    <div key={job.id} className="flex items-center gap-3 py-2 pl-6">
+    <div key={job.id} className="row-hover flex items-center gap-3 py-2 pl-6 pr-2">
       <div className="min-w-0 flex-1">
         <p className="truncate text-sm font-medium">{getJobDisplayName(job, project)}</p>
         <p className="text-xs text-muted-foreground font-num">          {job.total_pages} page{job.total_pages === 1 ? '' : 's'} ·{' '}

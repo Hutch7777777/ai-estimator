@@ -283,7 +283,7 @@ export default function ProjectHubPage() {
           ) : (
             <div className="divide-y divide-border">
               {jobs.map((job) => (
-                <div key={job.id} className="flex items-center gap-4 py-3">
+                <div key={job.id} className="row-hover -mx-2 flex items-center gap-4 rounded-sm px-2 py-3">
                   <div className="min-w-0 flex-1">
                     <p className="truncate font-medium">{getJobDisplayName(job, project)}</p>
                     <p className="text-xs text-muted-foreground font-num">                      {job.total_pages} page{job.total_pages === 1 ? '' : 's'} · {formatDate(job.created_at)}
@@ -317,7 +317,7 @@ export default function ProjectHubPage() {
           ) : (
             <div className="divide-y divide-border">
               {takeoffs.map((takeoff) => (
-                <div key={takeoff.id} className="flex items-center gap-4 py-3">
+                <div key={takeoff.id} className="row-hover -mx-2 flex items-center gap-4 rounded-sm px-2 py-3">
                   <div className="min-w-0 flex-1">
                     <p className="font-medium font-num text-brand-foreground">{formatMoney(takeoff.grand_total)}</p>
                     <p className="text-xs text-muted-foreground font-num">{formatDate(takeoff.created_at)}</p>

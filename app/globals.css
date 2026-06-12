@@ -80,6 +80,7 @@
   --color-ink: var(--ink);
   --color-paper: var(--paper);
   --color-redline: var(--redline);
+  --color-row-hover: var(--row-hover);
 
   /* Base Colors */
   --color-background: var(--background);
@@ -150,6 +151,7 @@
   --ink: #101D28;      /* dark chrome: sidebar, rules, neutral-state text */
   --paper: #FBFBF9;    /* page background */
   --redline: #C2452D;  /* destructive / failed / modified-row markups */
+  --row-hover: #F5F7F6; /* table/list row hover wash */
   --brand: #00cc6a;    /* green: primary actions, money, done states ONLY */
   --brand-foreground: #052e16; /* dark-green ink for text on brand fills/tints */
 
@@ -255,6 +257,40 @@
 @utility font-num {
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
+}
+
+/* ============================================================================
+ * HOVER WARMTH (identity P7) — flat at rest, lift on hover
+ * ============================================================================ */
+
+/* Clickable cards: flat at rest (P3); on hover the border darkens, a soft
+ * two-layer shadow appears, and the card lifts 1px. */
+@utility interactive-card {
+  transition: border-color 150ms ease, box-shadow 150ms ease, transform 150ms ease;
+
+  &:hover {
+    border-color: var(--color-border-hover);
+    box-shadow:
+      0 1px 2px rgba(16, 29, 40, 0.05),
+      0 6px 18px rgba(16, 29, 40, 0.08);
+    transform: translateY(-1px);
+  }
+}
+
+/* Table/list row hover wash. */
+@utility row-hover {
+  transition: background-color 150ms ease;
+
+  &:hover {
+    background-color: var(--row-hover);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .interactive-card,
+  .interactive-card:hover {
+    transform: none;
+  }
 }
 
 /* Dimension stepper draw-in (components/ui/dimension-stepper.tsx) */

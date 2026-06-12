@@ -288,7 +288,7 @@ export function DashboardOverview() {
               recentProjects.map((project) => (
                 <div
                   key={project.id}
-                  className="flex items-center gap-4 p-4 rounded-lg border hover:bg-accent/50 transition-colors"
+                  className="interactive-card flex items-center gap-4 p-4 rounded-lg border"
                 >
                   <div className={`h-2 w-2 rounded-full ${getStatusColor(project.status)}`} />
                   <div className="flex-1 min-w-0">
