@@ -277,7 +277,7 @@ export function MaterialsTable({ items, totalMaterialCost }: MaterialsTableProps
                         </span>
                       </div>
                     </td>
-                    <td className={`px-4 py-3 text-sm font-semibold text-right font-mono ${colors.text}`}>
+                    <td className={`px-4 py-3 text-sm font-semibold text-right font-num ${colors.text}`}>
                       {formatCurrency(groupSubtotal)}
                     </td>
                   </tr>
@@ -295,13 +295,13 @@ export function MaterialsTable({ items, totalMaterialCost }: MaterialsTableProps
                           {item.description}
                         </div>
                       </td>
-                      <td className="px-4 py-3 text-sm text-right font-mono text-gray-900 dark:text-white whitespace-nowrap">
+                      <td className="px-4 py-3 text-sm text-right font-num text-gray-900 dark:text-white whitespace-nowrap">
                         {formatQuantity(item.quantity)} <span className="text-gray-500 dark:text-gray-400">{item.unit || 'EA'}</span>
                       </td>
-                      <td className="px-4 py-3 text-sm text-right font-mono text-gray-600 dark:text-gray-400">
+                      <td className="px-4 py-3 text-sm text-right font-num text-gray-600 dark:text-gray-400">
                         {formatCurrency(item.material_unit_cost)}
                       </td>
-                      <td className="px-4 py-3 text-sm text-right font-mono font-medium text-gray-900 dark:text-white">
+                      <td className="px-4 py-3 text-sm text-right font-num font-medium text-gray-900 dark:text-white">
                         {formatCurrency(item.material_extended)}
                       </td>
                     </tr>
@@ -319,7 +319,7 @@ export function MaterialsTable({ items, totalMaterialCost }: MaterialsTableProps
               >
                 Materials Total
               </td>
-              <td className="px-4 py-4 text-sm text-right font-mono font-bold text-blue-600 dark:text-blue-400">
+              <td className="px-4 py-4 text-sm text-right font-num font-bold text-blue-600 dark:text-blue-400">
                 {formatCurrency(totalMaterialCost)}
               </td>
             </tr>

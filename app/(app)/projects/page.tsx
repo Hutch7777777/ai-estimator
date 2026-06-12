@@ -19,7 +19,7 @@ export default function ProjectsListPage() {
     <div className="mx-auto w-full max-w-[1400px] px-4 py-6 sm:px-6 space-y-8">
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight font-heading">Projects</h1>
+          <h1 className="text-title font-heading">Projects</h1>
           <p className="text-muted-foreground">All projects for your organization</p>
         </div>
         <Button asChild>

@@ -170,8 +170,7 @@ export function JobsByProject() {
     <div key={job.id} className="flex items-center gap-3 py-2 pl-6">
       <div className="min-w-0 flex-1">
         <p className="truncate text-sm font-medium">{getJobDisplayName(job, project)}</p>
-        <p className="text-xs text-muted-foreground">
-          {job.total_pages} page{job.total_pages === 1 ? '' : 's'} ·{' '}
+        <p className="text-xs text-muted-foreground font-num">          {job.total_pages} page{job.total_pages === 1 ? '' : 's'} ·{' '}
           {new Date(job.created_at).toLocaleDateString()}
         </p>
       </div>

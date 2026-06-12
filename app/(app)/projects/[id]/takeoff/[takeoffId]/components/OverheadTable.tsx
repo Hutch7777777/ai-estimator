@@ -92,7 +92,7 @@ export function OverheadTable({ items, totalOverheadCost }: OverheadTableProps) 
                   <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">
                     {item.description}
                   </td>
-                  <td className="px-4 py-3 text-sm text-right font-mono font-medium text-gray-900 dark:text-white">
+                  <td className="px-4 py-3 text-sm text-right font-num font-medium text-gray-900 dark:text-white">
                     {formatCurrency(item.amount)}
                   </td>
                 </tr>
@@ -103,7 +103,7 @@ export function OverheadTable({ items, totalOverheadCost }: OverheadTableProps) 
                 <td className="px-4 py-4 text-sm font-semibold text-gray-900 dark:text-white text-right">
                   Overhead Total
                 </td>
-                <td className="px-4 py-4 text-sm text-right font-mono font-bold text-purple-600 dark:text-purple-400">
+                <td className="px-4 py-4 text-sm text-right font-num font-bold text-purple-600 dark:text-purple-400">
                   {formatCurrency(totalOverheadCost)}
                 </td>
               </tr>

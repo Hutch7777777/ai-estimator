@@ -248,7 +248,7 @@ export function PaintTable({ items, totalPaintCost }: PaintTableProps) {
                                 </span>
                               </div>
                             </td>
-                            <td className={`px-4 py-3 text-sm font-semibold text-right font-mono ${colors.text}`}>
+                            <td className={`px-4 py-3 text-sm font-semibold text-right font-num ${colors.text}`}>
                               {formatCurrency(categorySubtotal)}
                             </td>
                           </tr>
@@ -276,13 +276,13 @@ export function PaintTable({ items, totalPaintCost }: PaintTableProps) {
                                     {item.description}
                                   </div>
                                 </td>
-                                <td className="px-4 py-3 text-sm text-right font-mono text-gray-900 dark:text-white whitespace-nowrap">
+                                <td className="px-4 py-3 text-sm text-right font-num text-gray-900 dark:text-white whitespace-nowrap">
                                   {formatQuantity(item.quantity)} <span className="text-gray-500 dark:text-gray-400">{item.unit || (isLaborItem ? 'SF' : 'GAL')}</span>
                                 </td>
-                                <td className="px-4 py-3 text-sm text-right font-mono text-gray-600 dark:text-gray-400">
+                                <td className="px-4 py-3 text-sm text-right font-num text-gray-600 dark:text-gray-400">
                                   {formatCurrency(unitCost)}
                                 </td>
-                                <td className="px-4 py-3 text-sm text-right font-mono font-medium text-gray-900 dark:text-white">
+                                <td className="px-4 py-3 text-sm text-right font-num font-medium text-gray-900 dark:text-white">
                                   {formatCurrency(extended)}
                                 </td>
                               </tr>
@@ -303,7 +303,7 @@ export function PaintTable({ items, totalPaintCost }: PaintTableProps) {
                 >
                   Paint Total
                 </td>
-                <td className="px-4 py-4 text-sm text-right font-mono font-bold text-purple-600 dark:text-purple-400">
+                <td className="px-4 py-4 text-sm text-right font-num font-bold text-purple-600 dark:text-purple-400">
                   {formatCurrency(totalPaintCost)}
                 </td>
               </tr>

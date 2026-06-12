@@ -237,8 +237,7 @@ export function DashboardOverview() {
                 <div key={item.label} className="space-y-2">
                   <div className="flex items-center justify-between text-sm">
                     <span className="font-medium">{item.label}</span>
-                    <span className="text-muted-foreground">
-                      {item.count} ({Math.round(percentage)}%)
+                    <span className="text-muted-foreground font-num">                      {item.count} ({Math.round(percentage)}%)
                     </span>
                   </div>
                   <div className="h-2 w-full bg-accent rounded-full overflow-hidden">
@@ -300,12 +299,12 @@ export function DashboardOverview() {
                       </Badge>
                     </div>
                     <div className="flex items-center gap-4 mt-1 text-xs text-muted-foreground">
-                      <span className="flex items-center gap-1">
+                      <span className="flex items-center gap-1 font-num">
                         <Calendar className="h-3 w-3" />
                         {formatDate(project.created_at)}
                       </span>
                       <span>{project.client_name}</span>
-                      <span className="hidden sm:inline">
+                      <span className="hidden sm:inline font-num">
                         {project.selected_trades?.length || 0} trade(s)
                       </span>
                     </div>

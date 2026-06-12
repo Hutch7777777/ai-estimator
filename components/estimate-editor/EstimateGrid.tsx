@@ -541,7 +541,7 @@ export function EstimateGrid({
           if (value == null) return "0";
           return Number(value).toFixed(2);
         },
-        cellClass: "text-right",
+        cellClass: "text-right font-num",
       },
       {
         field: "unit",
@@ -569,7 +569,7 @@ export function EstimateGrid({
                  0;
         },
         valueFormatter: currencyFormatter,
-        cellClass: "text-right",
+        cellClass: "text-right font-num",
       },
       {
         field: "line_total",
@@ -578,7 +578,7 @@ export function EstimateGrid({
         editable: false,
         type: "numericColumn",
         valueFormatter: currencyFormatter,
-        cellClass: "text-right font-semibold bg-primary/5",
+        cellClass: "text-right font-num font-semibold bg-primary/5",
       },
       {
         headerName: "",

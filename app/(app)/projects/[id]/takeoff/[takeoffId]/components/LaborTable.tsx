@@ -104,13 +104,13 @@ export function LaborTable({ items, totalLaborCost }: LaborTableProps) {
                   <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">
                     {item.description}
                   </td>
-                  <td className="px-4 py-3 text-sm text-right font-mono text-gray-900 dark:text-white whitespace-nowrap">
+                  <td className="px-4 py-3 text-sm text-right font-num text-gray-900 dark:text-white whitespace-nowrap">
                     {formatQuantity(item.quantity)} <span className="text-gray-500 dark:text-gray-400">{item.unit || 'SQ'}</span>
                   </td>
-                  <td className="px-4 py-3 text-sm text-right font-mono text-gray-600 dark:text-gray-400">
+                  <td className="px-4 py-3 text-sm text-right font-num text-gray-600 dark:text-gray-400">
                     {formatCurrency(item.rate)}
                   </td>
-                  <td className="px-4 py-3 text-sm text-right font-mono font-medium text-gray-900 dark:text-white">
+                  <td className="px-4 py-3 text-sm text-right font-num font-medium text-gray-900 dark:text-white">
                     {formatCurrency(item.total)}
                   </td>
                 </tr>
@@ -124,7 +124,7 @@ export function LaborTable({ items, totalLaborCost }: LaborTableProps) {
                 >
                   Labor Total
                 </td>
-                <td className="px-4 py-4 text-sm text-right font-mono font-bold text-amber-600 dark:text-amber-400">
+                <td className="px-4 py-4 text-sm text-right font-num font-bold text-amber-600 dark:text-amber-400">
                   {formatCurrency(totalLaborCost)}
                 </td>
               </tr>

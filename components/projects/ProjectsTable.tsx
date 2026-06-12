@@ -409,7 +409,7 @@ export function ProjectsTable() {
                         {getStatusText(project.status)}
                       </StatusBadge>
                     </TableCell>
-                    <TableCell className="hidden sm:table-cell text-muted-foreground text-sm">
+                    <TableCell className="hidden sm:table-cell text-muted-foreground text-sm font-num">
                       {formatDate(project.created_at)}
                     </TableCell>
                     <TableCell className="text-right">

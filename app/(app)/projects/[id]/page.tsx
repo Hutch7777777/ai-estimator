@@ -218,11 +218,11 @@ export default function ProjectHubPage() {
       {/* Header */}
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div className="min-w-0">
-          <h1 className="text-2xl font-bold tracking-tight font-heading truncate">{displayName}</h1>
+          <h1 className="text-title font-heading truncate">{displayName}</h1>
           <div className="mt-1 flex items-center gap-3 text-sm text-muted-foreground">
             {project?.status && <Badge variant="outline">{project.status}</Badge>}
             {project?.address && <span className="truncate">{project.address}</span>}
-            {project?.created_at && <span>Created {formatDate(project.created_at)}</span>}
+            {project?.created_at && <span className="font-num">Created {formatDate(project.created_at)}</span>}
           </div>
         </div>
         <div className="flex items-center gap-2">
@@ -266,8 +266,7 @@ export default function ProjectHubPage() {
                 <div key={job.id} className="flex items-center gap-4 py-3">
                   <div className="min-w-0 flex-1">
                     <p className="truncate font-medium">{getJobDisplayName(job, project)}</p>
-                    <p className="text-xs text-muted-foreground">
-                      {job.total_pages} page{job.total_pages === 1 ? '' : 's'} · {formatDate(job.created_at)}
+                    <p className="text-xs text-muted-foreground font-num">                      {job.total_pages} page{job.total_pages === 1 ? '' : 's'} · {formatDate(job.created_at)}
                     </p>
                   </div>
                   <Badge className={jobStatusBadgeClass(job.status)}>{job.status}</Badge>
@@ -300,8 +299,8 @@ export default function ProjectHubPage() {
               {takeoffs.map((takeoff) => (
                 <div key={takeoff.id} className="flex items-center gap-4 py-3">
                   <div className="min-w-0 flex-1">
-                    <p className="font-medium">{formatMoney(takeoff.grand_total)}</p>
-                    <p className="text-xs text-muted-foreground">{formatDate(takeoff.created_at)}</p>
+                    <p className="font-medium font-num text-brand-foreground">{formatMoney(takeoff.grand_total)}</p>
+                    <p className="text-xs text-muted-foreground font-num">{formatDate(takeoff.created_at)}</p>
                   </div>
                   {takeoff.status && <Badge variant="outline">{takeoff.status}</Badge>}
                   <Button variant="ghost" size="sm" asChild>

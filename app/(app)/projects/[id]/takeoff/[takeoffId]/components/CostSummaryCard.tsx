@@ -64,7 +64,7 @@ export function CostSummaryCard({ totals }: CostSummaryCardProps) {
               </div>
               <span className="text-sm font-medium text-gray-600 dark:text-gray-400">Materials</span>
             </div>
-            <p className="text-2xl font-semibold text-gray-900 dark:text-white">
+            <p className="text-2xl font-semibold font-num text-gray-900 dark:text-white">
               {formatCurrency(totals.material_cost)}
             </p>
           </div>
@@ -78,7 +78,7 @@ export function CostSummaryCard({ totals }: CostSummaryCardProps) {
                 </div>
                 <span className="text-sm font-medium text-gray-600 dark:text-gray-400">Paint</span>
               </div>
-              <p className="text-2xl font-semibold text-gray-900 dark:text-white">
+              <p className="text-2xl font-semibold font-num text-gray-900 dark:text-white">
                 {formatCurrency(totals.paint_cost)}
               </p>
             </div>
@@ -92,7 +92,7 @@ export function CostSummaryCard({ totals }: CostSummaryCardProps) {
               </div>
               <span className="text-sm font-medium text-gray-600 dark:text-gray-400">Labor</span>
             </div>
-            <p className="text-2xl font-semibold text-gray-900 dark:text-white">
+            <p className="text-2xl font-semibold font-num text-gray-900 dark:text-white">
               {formatCurrency(totals.labor_cost)}
             </p>
           </div>
@@ -105,7 +105,7 @@ export function CostSummaryCard({ totals }: CostSummaryCardProps) {
               </div>
               <span className="text-sm font-medium text-gray-600 dark:text-gray-400">Overhead</span>
             </div>
-            <p className="text-2xl font-semibold text-gray-900 dark:text-white">
+            <p className="text-2xl font-semibold font-num text-gray-900 dark:text-white">
               {formatCurrency(totals.overhead_cost)}
             </p>
           </div>
@@ -115,13 +115,13 @@ export function CostSummaryCard({ totals }: CostSummaryCardProps) {
         <div className="flex flex-col sm:flex-row items-center justify-center gap-4 sm:gap-8 pt-4 border-t border-gray-200 dark:border-gray-700">
           <div className="flex items-center gap-2 text-sm">
             <span className="text-gray-500 dark:text-gray-400">Subtotal:</span>
-            <span className="font-mono font-medium text-gray-900 dark:text-white">
+            <span className="font-num font-medium text-gray-900 dark:text-white">
               {formatCurrency(totals.subtotal)}
             </span>
           </div>
           <div className="flex items-center gap-2 text-sm">
             <span className="text-gray-500 dark:text-gray-400">Markup ({totals.markup_percent || 0}%):</span>
-            <span className="font-mono font-medium text-gray-900 dark:text-white">
+            <span className="font-num font-medium text-gray-900 dark:text-white">
               {formatCurrency(markupAmount)}
             </span>
           </div>
