@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code when working with this repository.
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 ## Project Overview
 
@@ -360,22 +360,38 @@ await exportTakeoffToExcel({ takeoff, sections, lineItems, projectInfo });
 ## Important Notes
 
 - **React 19 & Next.js 16**: Latest stable versions
-- **Tailwind v4**: Uses `@theme` in CSS, not tailwind.config.js
-- **AG Grid Community**: Free version only - never import from `ag-grid-enterprise`
+- **Tailwind v4**: Uses `@theme` in CSS, not tailwind.config.js (no tailwind.config.js exists)
+- **AG Grid Community**: Free version only — never import from `ag-grid-enterprise`
 - **Konva.js**: Register before use, import CSS
-- **shadcn/ui**: Don't manually edit `/components/ui` - use CLI
+- **shadcn/ui**: Don't manually edit `/components/ui` — use CLI (`npx shadcn@latest add [component]`)
 - **Database-first**: Always query schema, never hardcode options
 - **PDF.js**: Worker must be configured for PDF rendering
+- **Path alias**: `@/*` maps to the project root (configured in tsconfig.json)
+- **Auth middleware**: `middleware.ts` redirects unauthenticated users to `/login`. Public routes: `/login`, `/signup`, `/auth/callback`, `/auth/confirm`, `/onboarding`, `/api`
 
-## Development Commands
+## Architecture Documentation
+
+Deep-dive docs live in the repo root — consult these before major changes:
+- `DATABASE_ARCHITECTURE.md` — Complete DB schema reference
+- `SYSTEM_INTEGRATION.md` — n8n webhook flows and integration architecture
+- `FRONTEND_ARCHITECTURE.md` — Component patterns and state management
+- `EXTRACTION_ARCHITECTURE_ANALYSIS.md` — Detection pipeline internals
+- `patterns/CALCULATION_AND_PRICING_ENGINE.md` — Pricing/formula engine
+- `patterns/TRADE_CONFIGURATION_SYSTEM.md` — Trade config data model
+
+## Build & Development
 
 ```bash
-npm run dev      # Start dev server
-npm run build    # Production build
-npm run lint     # ESLint
+npm run dev      # Start dev server (http://localhost:3000)
+npm run build    # Production build (note: typescript.ignoreBuildErrors is true in next.config.ts)
+npm run lint     # ESLint (flat config, ESLint v9+)
 npm start        # Production server
-npx tsc --noEmit # Type check
+npx tsc --noEmit # Type check (strict mode)
 ```
+
+**No test framework is configured.** There are no Jest/Vitest configs, no test scripts, and no `__tests__` directories.
+
+**Deployment:** Pushes to `main` auto-deploy to Railway production. There is no staging environment — use `/pre-deploy` before every push.
 
 ## EstimatePros Skills
 
