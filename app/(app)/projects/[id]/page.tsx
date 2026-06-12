@@ -118,6 +118,7 @@ export default function ProjectHubPage() {
           ])
         );
         if (projectRes.error) throw new Error(projectRes.error.message);
+        if (jobsRes.error) throw new Error(jobsRes.error.message);
         projectRow = (projectRes.data as HubProject | null) ?? null;
         jobRows = (jobsRes.data as HubJob[] | null) ?? [];
 
@@ -125,16 +126,24 @@ export default function ProjectHubPage() {
         // rather than the project id (the extraction_id = job_id confusion
         // family — CONFIRMED_WORK_PLAN.md finding #1/#3). The viewer loads by
         // takeoff id alone so it renders either way; the hub must accept both
-        // keys. Read-side fix only — no schema change.
+        // keys. Deliberately NO organization_id filter (n8n rows have it
+        // NULL; project access is org-checked upstream) and select('*')
+        // (named-column selects 400 if the hand-maintained Takeoff type has
+        // drifted from the live schema). Read-side fix only — no schema
+        // change. Errors throw to the error view — never silently empty.
         const takeoffKeys = [projectId, ...jobRows.map((j) => j.id)];
         const takeoffsRes = await withTimeout(
           supabase
             .from('takeoffs')
-            .select('id, status, grand_total, created_at')
+            .select('*')
             .in('project_id', takeoffKeys)
             .order('created_at', { ascending: false })
         );
-        takeoffRows = (takeoffsRes.data as HubTakeoff[] | null) ?? [];
+        if (takeoffsRes.error) {
+          console.error('[ProjectHub] takeoffs read failed:', takeoffsRes.error);
+          throw new Error(takeoffsRes.error.message);
+        }
+        takeoffRows = (takeoffsRes.data as unknown as HubTakeoff[] | null) ?? [];
       }
 
       setProject(projectRow);

@@ -67,18 +67,42 @@ export async function GET(request: NextRequest) {
       // Takeoffs may be keyed by the extraction job id instead of the project
       // id (extraction_id = job_id family) — accept both keys, mirroring the
       // hub's client-side query.
+      //
+      // Deliberately NO organization_id filter: n8n-created takeoff rows have
+      // organization_id = NULL, and project access is org-checked upstream.
+      // select('*') on purpose: the hand-maintained Takeoff type has drifted
+      // from the live schema, and a named-column select 400s on any missing
+      // column (which used to be swallowed into an empty array — the "hub
+      // shows no takeoffs" bug). The working viewer route also selects '*'.
       const jobRows = jobsRes.data ?? [];
       const takeoffKeys = [hubProjectId, ...jobRows.map((j: { id: string }) => j.id)];
       const takeoffsRes = await supabase
         .from('takeoffs')
-        .select('id, status, grand_total, created_at')
+        .select('*')
         .in('project_id', takeoffKeys)
         .order('created_at', { ascending: false });
+
+      // Never swallow read errors into empty arrays — log server-side and
+      // surface them in the dev payload so a curl shows the cause directly.
+      if (projectRes.error) console.error('[dev/org-data] hub project read failed:', projectRes.error);
+      if (jobsRes.error) console.error('[dev/org-data] hub jobs read failed:', jobsRes.error);
+      if (takeoffsRes.error) console.error('[dev/org-data] hub takeoffs read failed:', takeoffsRes.error);
+      const hubErrors =
+        projectRes.error || jobsRes.error || takeoffsRes.error
+          ? {
+              errors: {
+                project: projectRes.error?.message ?? null,
+                jobs: jobsRes.error?.message ?? null,
+                takeoffs: takeoffsRes.error?.message ?? null,
+              },
+            }
+          : {};
 
       return NextResponse.json({
         project: projectRes.data ?? null,
         jobs: jobRows,
         takeoffs: takeoffsRes.data ?? [],
+        ...hubErrors,
       });
     }
 
