@@ -1,5 +1,6 @@
 import type { Metadata } from 'next';
 import { createClient } from '@/lib/supabase/server';
+import { SidebarAutoCollapse } from '@/components/layout/SidebarAutoCollapse';
 
 export async function generateMetadata({
   params,
@@ -24,5 +25,11 @@ export async function generateMetadata({
 }
 
 export default function TakeoffLayout({ children }: { children: React.ReactNode }) {
-  return children;
+  // Canvas/table-heavy — start the app sidebar collapsed to icon rail.
+  return (
+    <>
+      <SidebarAutoCollapse />
+      {children}
+    </>
+  );
 }
