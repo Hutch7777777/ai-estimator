@@ -1,0 +1,2529 @@
+/**
+ * Auto-Scope V2 - PURE PORT for @estimatepros/estimating-engine
+ *
+ * Source: ~/Downloads/exterior-estimation-api-temp/src/calculations/siding/autoscope-v2.ts
+ *
+ * Behavior preserved 1:1: every formula, trigger-condition check, isFalse/isTrue
+ * helper, manufacturer grouping, override stacking, console.log line, and
+ * fallback-rules safety net is byte-identical to source.
+ *
+ * Deviations from source (the only ones):
+ * 1. Database imports removed (`getSupabaseClient`, `isDatabaseConfigured`).
+ * 2. Pricing service imports removed (`getPricingBySkus`, `getPricingByIds`).
+ *    `calculateTotalLabor` is inlined as a private helper below.
+ * 3. Three exported DB-bound functions REMOVED entirely:
+ *      - `fetchAutoScopeRules`
+ *      - `clearAutoScopeRulesCache`
+ *      - `fetchMeasurementsFromDatabase`
+ *    The module-level rules cache (`rulesCache`, `rulesCacheTimestamp`,
+ *    `RULES_CACHE_TTL_MS`) is removed with them; caching is now the caller's
+ *    concern.
+ * 4. `buildManufacturerGroups` and `generateAutoScopeItemsV2` are SYNCHRONOUS,
+ *    accept pre-fetched pricing/rules via injected inputs (refData), and
+ *    drop the now-unused `organizationId` and `extractionId` parameters.
+ *    Bodies otherwise unchanged.
+ * 5. `DbAutoScopeRule` is `export`ed (was module-private in source) so the
+ *    caller can type its `autoScopeRules` input. Body unchanged.
+ *
+ * Original schema mapping preserved (rule_id, material_sku, rule_name, active,
+ * trigger_condition jsonb).
+ */
+
+import {
+  MeasurementContext,
+  AutoScopeLineItem,
+  AutoScopeV2Result,
+  AutoScopeV2Options,
+  CadHoverMeasurements,
+  ManufacturerGroups,
+  ManufacturerMeasurements,
+  AssignedMaterial,
+  MaterialCategoryAreas,
+  EstimateSettings,
+} from '../types/autoscope';
+import { PerMaterialMeasurements } from '../types/webhook';
+import { PricingItem } from '../types/pricing';
+
+/**
+ * Inlined from `services/pricing.ts:354-358` byte-identical.
+ * Pure arithmetic; previously imported, now local to keep the engine package
+ * dependency-free.
+ *
+ * Calculate total labor cost using Mike Skjei's formula:
+ * Base + L&I (12.65%) + Unemployment (1.3%)
+ */
+function calculateTotalLabor(baseLaborCost: number): number {
+  const liRate = 0.1265;
+  const unemploymentRate = 0.013;
+  return baseLaborCost * (1 + liRate + unemploymentRate);
+}
+
+// ============================================================================
+// DATABASE RULE TYPE (matches actual siding_auto_scope_rules table)
+// ============================================================================
+
+export interface DbAutoScopeRule {
+  rule_id: number;
+  rule_name: string;
+  description: string | null;
+  material_category: string;
+  material_sku: string;
+  quantity_formula: string;
+  unit: string;
+  output_unit: string | null;
+  size_description: string | null;
+  trigger_condition: DbTriggerCondition | null;
+  presentation_group: string;
+  group_order: number;
+  item_order: number;
+  priority: number;
+  active: boolean;
+  created_at: string;
+  updated_at: string;
+  // Manufacturer filter for per-manufacturer rules
+  // null = generic rule (applies to all manufacturers using total project area)
+  // ['James Hardie'] = only applies to James Hardie products using Hardie SF
+  // ['Nichiha'] = only applies to Nichiha products using Nichiha SF
+  // ['Engage Building Products'] = only applies to FastPlank products
+  manufacturer_filter: string[] | null;
+  // Template for generating line item notes with {variable} placeholders
+  // e.g., "{facade_sqft} SF ÷ {coverage} SF/roll = {quantity} rolls"
+  calculation_notes: string | null;
+  // NEW: Exclusion conditions based on material attributes
+  // [{ "attribute": "is_colorplus", "equals": true }] - skip if material is ColorPlus
+  excludes_if_attributes?: ExcludesIfAttribute[] | null;
+}
+
+// Database uses this format for trigger conditions:
+// { "always": true } - always trigger
+// { "min_corners": 1 } - min corners count
+// { "min_openings": 1 } - min openings count
+// { "min_net_area": 500 } - min net area sqft
+// { "trim_total_lf_gt": 0 } - trigger when trim_total_lf > 0
+// NEW: Material-based triggers for SKU pattern matching
+// { "material_category": "board_batten" } - only when assigned material has this category
+// { "sku_pattern": "16OC-CP" } - only when assigned material SKU contains this pattern
+// NEW: Config field triggers for service options (e.g., paint service)
+// { "field": "paint_service_type", "equals": "in_house" } - check config field value
+interface DbTriggerCondition {
+  always?: boolean;
+  min_corners?: number;
+  min_openings?: number;
+  min_net_area?: number;
+  min_facade_area?: number;
+  min_belly_band_lf?: number;  // Trigger when belly_band_lf >= this value
+  min_gable_topout_count?: number;  // Trigger when gable_topout_count >= this value
+  min_topout_lf?: number;  // Trigger when topout_lf >= this value
+  // Trim triggers
+  min_trim_total_lf?: number;  // Trigger when trim_total_lf >= this value
+  min_trim_head_lf?: number;   // Trigger when trim_head_lf >= this value
+  min_trim_jamb_lf?: number;   // Trigger when trim_jamb_lf >= this value
+  min_trim_sill_lf?: number;   // Trigger when trim_sill_lf >= this value
+  trim_total_lf_gt?: number;   // Trigger when trim_total_lf > this value (alternative syntax)
+  trim_head_lf_gt?: number;    // Trigger when trim_head_lf > this value
+  trim_jamb_lf_gt?: number;    // Trigger when trim_jamb_lf > this value
+  trim_sill_lf_gt?: number;    // Trigger when trim_sill_lf > this value
+  // NEW: Material-based triggers (match against assigned materials)
+  material_category?: string;  // e.g., "board_batten" - matches pricing_items.category
+  sku_pattern?: string;        // e.g., "16OC-CP" - substring match against pricing_items.sku
+  // NEW: Config field triggers (check frontend config values)
+  field?: string;              // Config field name, e.g., "paint_service_type"
+  equals?: any;                // Expected value, e.g., "in_house"
+  // V9.0: Trim system toggle - controls which trim/flashing rules fire
+  // WhiteWood rules have { "trim_system": "whitewood", "always": true }
+  trim_system?: 'hardie' | 'whitewood';
+  // V10.0: Config toggle - dot-notation path into project configuration_data
+  // e.g., "consumables.include_wood_blades" resolves to configuration_data.consumables.include_wood_blades
+  // When path resolves to explicit false, rule is suppressed
+  config_toggle?: string;
+  // V10.1: Config match - string equality check against estimateSettings
+  // e.g., { "path": "flashing.window_head", "value": "z_flashing" }
+  // Rule only fires when the resolved path value equals the expected value
+  config_match?: {
+    path: string;   // Dot-notation path (e.g., "flashing.window_head")
+    value: string;  // Expected value (e.g., "z_flashing")
+  };
+}
+
+// Exclusion condition format for excludes_if_attributes
+// [{ "attribute": "is_colorplus", "equals": true }] - skip rule if material has this attribute
+interface ExcludesIfAttribute {
+  attribute: string;  // Property name on assigned material (e.g., "is_colorplus", "requires_primer")
+  equals: any;        // Value to check against
+}
+
+// NOTE: AssignedMaterial interface is imported from '../../types/autoscope'
+
+// ============================================================================
+// BOOLEAN HELPERS - Handle JSON string "true"/"false" from Supabase
+// ============================================================================
+
+/**
+ * Check if a value is explicitly false (handles both boolean false and string "false")
+ * Used for toggle checks where undefined/null means "include" (backwards compat)
+ */
+function isFalse(value: unknown): boolean {
+  return value === false || value === 'false';
+}
+
+/**
+ * Check if a value is explicitly true (handles both boolean true and string "true")
+ * Used for overhead toggles where we only add items when explicitly enabled
+ */
+function isTrue(value: unknown): boolean {
+  return value === true || value === 'true';
+}
+
+/**
+ * Resolve a dot-notation path in the project configuration JSONB.
+ * Returns: true, false, or undefined (if path doesn't exist).
+ * Used by shouldApplyRule() to check config_toggle values.
+ *
+ * @example
+ * resolveConfigToggle({ consumables: { include_wood_blades: false } }, 'consumables.include_wood_blades')
+ * // Returns: false
+ */
+export function resolveConfigToggle(
+  configData: Record<string, any> | null | undefined,
+  togglePath: string
+): boolean | undefined {
+  if (!configData || !togglePath) return undefined;
+
+  const parts = togglePath.split('.');
+  let value: any = configData;
+
+  for (const part of parts) {
+    if (value === null || value === undefined || typeof value !== 'object') {
+      return undefined;
+    }
+    value = value[part];
+  }
+
+  // Handle JSONB boolean/string type mismatches from Supabase
+  if (value === false || value === 'false') return false;
+  if (value === true || value === 'true') return true;
+  return undefined;
+}
+
+/**
+ * Resolve a dot-notation path to any value (not just booleans).
+ * Used by config_match for string equality checks.
+ *
+ * @example
+ * resolveConfigValue({ flashing: { window_head: 'z_flashing' } }, 'flashing.window_head')
+ * // Returns: 'z_flashing'
+ */
+export function resolveConfigValue(
+  configData: Record<string, unknown> | null | undefined,
+  path: string
+): unknown {
+  if (!configData || !path) return undefined;
+
+  const parts = path.split('.');
+  let current: unknown = configData;
+
+  for (const part of parts) {
+    if (current === null || current === undefined) return undefined;
+    if (typeof current !== 'object') return undefined;
+    current = (current as Record<string, unknown>)[part];
+  }
+
+  return current;
+}
+
+// ============================================================================
+// HARDIE TRIM SKU LOOKUP MAP
+// Maps width (inches) + finish to actual pricing_items SKU
+// ============================================================================
+
+// HARDIE_TRIM_SKU_MAP removed — resolved via pricing_items cache using is_colorplus + width matching.
+// Fallback SKUs used only when no DB match found:
+const HARDIE_TRIM_FALLBACK_SKU: Record<string, Record<string, string>> = {
+  '3.5': { primed: 'HT-54-35-12-PR', colorplus: 'HT-54-35-12-CP' },
+  '4':   { primed: 'CASING-5/4X4X12', colorplus: 'CASING-5/4X4X12' }, // no 4" CP in DB yet
+  '5.5': { primed: 'HT-54-55-12-PR', colorplus: 'HT-54-55-12-CP' },
+  '6':   { primed: 'JH-TRIM-BB-6-PR', colorplus: 'JH-TRIM-BB-6-CP' },
+  '7.25': { primed: 'HT-54-725-12-PR', colorplus: 'HT-54-725-12-CP' },
+};
+
+/**
+ * Resolve the correct HardieTrim SKU based on estimate_settings or config
+ * @param trimType - 'window' or 'door'
+ * @param config - Config object with window_trim_width, window_trim_finish, etc.
+ * @param estimateSettings - EstimateSettings from frontend
+ * @param defaultSku - Fallback SKU if settings not found
+ */
+function resolveHardieTrimSku(
+  trimType: 'window' | 'door',
+  config: Record<string, any> | undefined,
+  estimateSettings: EstimateSettings | null,
+  defaultSku: string,
+  pricingCache: Map<string, PricingItem>
+): { sku: string; width: string; finish: string } {
+  // Try to get width and finish from config (trade_configurations)
+  const widthKey = `${trimType}_trim_width`;
+  const finishKey = `${trimType}_trim_finish`;
+
+  let width = config?.[widthKey] || '4';  // Default to 4"
+  let finish = config?.[finishKey] || 'primed';  // Default to primed
+
+  // Also check estimateSettings.window_trim.material or door_trim.material
+  // Format is like "hardie_5/4x4" or "hardie_5/4x6"
+  const trimSettings = trimType === 'window'
+    ? estimateSettings?.window_trim
+    : estimateSettings?.door_trim;
+
+  if (trimSettings?.material) {
+    // Parse material string like "hardie_5/4x4" to extract width
+    const materialMatch = trimSettings.material.match(/(\d+\.?\d*)$/);
+    if (materialMatch) {
+      width = materialMatch[1];
+    }
+  }
+
+  // Normalize width (e.g., "3.5" vs "3.5\"" vs "3 1/2")
+  width = width.replace(/"/g, '').replace(/'/g, '').trim();
+
+  // Map common variations
+  if (width === '3 1/2' || width === '3.5"') width = '3.5';
+  if (width === '5 1/2' || width === '5.5"') width = '5.5';
+  if (width === '7 1/4' || width === '7.25"') width = '7.25';
+
+  // Normalize finish
+  finish = finish.toLowerCase();
+  if (finish === 'color plus' || finish === 'color-plus') finish = 'colorplus';
+
+  // ── DB lookup via shared pricing cache (already warm from main calculation flow) ──
+  // Match: category='trim', 5/4 thickness (HT-54 or JH-TRIM-BB or similar),
+  // is_colorplus matches finish, product_name contains the width dimension.
+  const isColorPlus = finish === 'colorplus';
+  try {
+    const widthPattern = width.replace('.', '\\.'); // e.g. "7.25" → "7\\.25"
+    const candidates = Array.from(pricingCache.values()).filter(item => {
+      if (item.category?.toLowerCase() !== 'trim') return false;
+      if (!!item.is_colorplus !== isColorPlus) return false;
+      // Match width in product_name: e.g. "5/4 x 3.5"" or "x 3.5\""
+      const name = item.product_name || '';
+      const widthNum = parseFloat(width);
+      // Try matching the width as a number appearing in the product name
+      const nameHasWidth =
+        new RegExp(`[x×]\\s*${widthPattern}[\\s"']`, 'i').test(name) ||
+        new RegExp(`\\b${widthPattern}[\\s"']`, 'i').test(name);
+      if (!nameHasWidth) return false;
+      // Prefer 5/4 thickness (HT-54 / JH-TRIM-BB) over 4/4 for trim casing
+      const sku = item.sku || '';
+      const is54 = sku.includes('HT-54') || sku.includes('JH-TRIM-BB') || sku.includes('54X') || name.includes('5/4');
+      return is54;
+    });
+
+    if (candidates.length > 0) {
+      // Prefer exact width match; if multiple, take first (most specific SKU)
+      const best = candidates[0];
+      console.log(`  🎯 Resolved ${trimType} trim: ${width}" ${finish} → ${best.sku} (DB cache, ${candidates.length} candidates)`);
+      return { sku: best.sku, width, finish };
+    }
+    console.warn(`  ⚠️ No DB match for ${trimType} trim width=${width}" finish=${finish} — trying fallback map`);
+  } catch (err: any) {
+    console.warn(`  ⚠️ fetchPricingData() failed in resolveHardieTrimSku: ${err.message}`);
+  }
+
+  // ── Fallback: static map (last resort if DB cache miss) ──
+  const widthMap = HARDIE_TRIM_FALLBACK_SKU[width];
+  if (widthMap && widthMap[finish]) {
+    console.log(`  ↩️ Fallback ${trimType} trim: ${width}" ${finish} → ${widthMap[finish]}`);
+    return { sku: widthMap[finish], width, finish };
+  }
+
+  // ── Final fallback: use supplied default SKU ──
+  console.warn(`  ⚠️ Could not resolve ${trimType} trim SKU for width=${width}, finish=${finish}. Using default: ${defaultSku}`);
+  return { sku: defaultSku, width, finish };
+}
+
+// ============================================================================
+// FETCH RULES FROM DATABASE — REMOVED IN PURE PORT
+// In source, this section defined a 5-minute rules cache plus exported
+// `fetchAutoScopeRules`, `clearAutoScopeRulesCache`, and
+// `fetchMeasurementsFromDatabase`. All three made Supabase calls. They are
+// removed here; the caller now passes `autoScopeRules` and an optional
+// `dbMeasurements` directly into `generateAutoScopeItemsV2()`. The
+// `getFallbackRules()` safety net at the bottom of this file is preserved and
+// is invoked when the caller passes an empty rules array (matching the
+// behavior the source had when the DB was unconfigured).
+// ============================================================================
+
+// ============================================================================
+// BUILD MEASUREMENT CONTEXT
+// ============================================================================
+
+export function buildMeasurementContext(
+  dbMeasurements?: CadHoverMeasurements | null,
+  webhookMeasurements?: Record<string, any>
+): MeasurementContext {
+  // Cast to any for flexible property access
+  const db: any = dbMeasurements || {};
+  const wh: any = webhookMeasurements || {};
+
+  // Helper to get value from db first, then webhook, with fallback
+  const get = (keys: string[], fallback: number = 0): number => {
+    for (const key of keys) {
+      if (db[key] !== undefined && db[key] !== null) return Number(db[key]);
+      if (wh[key] !== undefined && wh[key] !== null) return Number(wh[key]);
+    }
+    return fallback;
+  };
+
+  // =========================================================================
+  // Map ACTUAL database column names from cad_hover_measurements
+  // FIX: Added 'facade_area_sqft' which is sent by the webhook from DetectionEditor
+  // This is the authoritative pre-calculated value that already de-duplicates
+  // overlapping exterior_wall + siding polygon classes
+  // =========================================================================
+
+  // Primary areas - DB uses facade_total_sqft, webhook sends facade_area_sqft
+  // Priority: facade_area_sqft (webhook) > facade_total_sqft (DB) > facade_sqft > gross_wall_area_sqft
+  const facade_sqft = get(['facade_area_sqft', 'facade_total_sqft', 'facade_sqft', 'gross_wall_area_sqft']);
+  const net_siding_sqft = get(['net_siding_sqft', 'net_siding_area_sqft', 'net_wall_area_sqft']);
+
+  // 🎯 DEBUG: Log facade source to trace any doubling issues
+  console.log('🎯 FACADE_SOURCE:', {
+    from_webhook_facade_area_sqft: wh.facade_area_sqft,
+    from_webhook_facade_sqft: wh.facade_sqft,
+    from_db_facade_total_sqft: db.facade_total_sqft,
+    from_db_facade_sqft: db.facade_sqft,
+    using: facade_sqft,
+  });
+
+  // Openings - DB has pre-computed totals
+  const openings_area_sqft = get(['openings_area_sqft']);
+  const openings_count = get(['openings_count']);
+  const openings_perimeter_lf = get(['openings_total_perimeter_lf', 'openings_perimeter_lf']);
+
+  // Corners - DB uses corners_outside_count, corners_inside_count
+  // Webhook sends nested: corners.outside_count, corners.outside_lf, etc.
+  const outside_corners_count = get(['corners_outside_count', 'outside_corner_count', 'outside_corners_count'])
+    || Number(wh.corners?.outside_count) || 0;
+  const inside_corners_count = get(['corners_inside_count', 'inside_corner_count', 'inside_corners_count'])
+    || Number(wh.corners?.inside_count) || 0;
+  const outside_corner_lf = get(['corners_outside_lf', 'outside_corner_lf', 'outside_corners_lf'])
+    || Number(wh.corners?.outside_lf) || 0;
+  const inside_corner_lf = get(['corners_inside_lf', 'inside_corner_lf', 'inside_corners_lf'])
+    || Number(wh.corners?.inside_lf) || 0;
+
+  // Other
+  const level_starter_lf = get(['level_starter_lf']);
+  const avg_wall_height_ft = get(['avg_wall_height_ft'], 10); // Default 10ft if null
+
+  // Windows/Doors/Garages for individual calculations
+  const window_count = get(['windows_count', 'window_count']);
+  const door_count = get(['doors_count', 'door_count']);
+  const garage_count = get(['garages_count', 'garage_count']);
+
+  // Compute facade_perimeter_lf from area and height
+  const facade_perimeter_lf = avg_wall_height_ft > 0
+    ? facade_sqft / avg_wall_height_ft
+    : level_starter_lf || 0;
+
+  // =========================================================================
+  // TRIM TOTALS - Compute from payload or sum component parts
+  // Payload sends: trim.total_head_lf, trim.total_jamb_lf, trim.total_sill_lf, trim.total_trim_lf
+  // =========================================================================
+
+  // Check if webhook has a nested 'trim' object (from DetectionEditor payload)
+  const trimObj = wh.trim || {};
+
+  // Get trim values: first check trim object, then check flat fields, then compute from components
+  const trim_head_lf = Number(trimObj.total_head_lf) ||
+    get(['trim_head_lf', 'total_head_lf']) ||
+    (get(['windows_head_lf', 'window_head_lf']) + get(['doors_head_lf', 'door_head_lf']) + get(['garages_head_lf', 'garage_head_lf']));
+
+  const trim_jamb_lf = Number(trimObj.total_jamb_lf) ||
+    get(['trim_jamb_lf', 'total_jamb_lf']) ||
+    (get(['windows_jamb_lf', 'window_jamb_lf']) + get(['doors_jamb_lf', 'door_jamb_lf']) + get(['garages_jamb_lf', 'garage_jamb_lf']));
+
+  const trim_sill_lf = Number(trimObj.total_sill_lf) ||
+    get(['trim_sill_lf', 'total_sill_lf']) ||
+    get(['windows_sill_lf', 'window_sill_lf']);
+
+  const trim_total_lf = Number(trimObj.total_trim_lf) ||
+    get(['trim_total_lf', 'total_trim_lf']) ||
+    (trim_head_lf + trim_jamb_lf + trim_sill_lf);
+
+  console.log('[AutoScope] Trim totals:', { trim_total_lf, trim_head_lf, trim_jamb_lf, trim_sill_lf });
+
+  const ctx: MeasurementContext = {
+    // Primary areas
+    facade_sqft,
+    gross_wall_area_sqft: facade_sqft,
+    net_siding_area_sqft: net_siding_sqft,
+
+    // Windows
+    window_count,
+    window_area_sqft: get(['windows_area_sqft', 'window_area_sqft']),
+    window_perimeter_lf: get(['windows_perimeter_lf', 'window_perimeter_lf']),
+    window_head_lf: get(['windows_head_lf', 'window_head_lf']),
+    window_sill_lf: get(['windows_sill_lf', 'window_sill_lf']),
+    window_jamb_lf: get(['windows_jamb_lf', 'window_jamb_lf']),
+
+    // Doors
+    door_count,
+    door_area_sqft: get(['doors_area_sqft', 'door_area_sqft']),
+    door_perimeter_lf: get(['doors_perimeter_lf', 'door_perimeter_lf']),
+    door_head_lf: get(['doors_head_lf', 'door_head_lf']),
+    door_jamb_lf: get(['doors_jamb_lf', 'door_jamb_lf']),
+
+    // Garages
+    garage_count,
+    garage_area_sqft: get(['garages_area_sqft', 'garage_area_sqft']),
+    garage_perimeter_lf: get(['garages_perimeter_lf', 'garage_perimeter_lf']),
+
+    // Corners
+    outside_corner_count: outside_corners_count,
+    outside_corner_lf,
+    inside_corner_count: inside_corners_count,
+    inside_corner_lf,
+
+    // Gables
+    gable_count: get(['gables_count', 'gable_count']),
+    gable_area_sqft: get(['gables_area_sqft', 'gable_area_sqft']),
+    gable_rake_lf: get(['gables_rake_lf', 'gable_rake_lf']),
+
+    // Belly Band (from detection_counts in webhook)
+    belly_band_count: get(['belly_band_count']),
+    belly_band_lf: get(['belly_band_lf']),
+
+    // Gable Topout (count-based - point per gable peak)
+    gable_topout_count: get(['gable_topout_count']),
+
+    // Topout (from detection_counts in webhook)
+    topout_count: get(['topout_count']),
+    topout_lf: get(['topout_lf']),
+
+    // Other
+    level_starter_lf,
+    avg_wall_height_ft,
+
+    // Computed helpers
+    total_opening_perimeter_lf: openings_perimeter_lf,
+    total_corner_lf: outside_corner_lf + inside_corner_lf,
+    total_openings_area_sqft: openings_area_sqft,
+    total_openings_count: openings_count,
+
+    // =========================================================================
+    // TRIM TOTALS (computed from window + door + garage trim)
+    // =========================================================================
+    trim_total_lf,
+    trim_head_lf,
+    trim_jamb_lf,
+    trim_sill_lf,
+
+    // =========================================================================
+    // ALIASES for database formula compatibility
+    // These match the variable names used in quantity_formula
+    // =========================================================================
+    facade_area_sqft: facade_sqft,
+    openings_area_sqft: openings_area_sqft,
+    outside_corners_count: outside_corners_count,
+    inside_corners_count: inside_corners_count,
+    openings_perimeter_lf: openings_perimeter_lf,
+    openings_count: openings_count,
+    facade_perimeter_lf: facade_perimeter_lf,
+    facade_height_ft: avg_wall_height_ft,
+  };
+
+  console.log(`📊 MeasurementContext built:`, {
+    facade_area_sqft: ctx.facade_area_sqft,
+    net_siding_area_sqft: ctx.net_siding_area_sqft,
+    openings_area_sqft: ctx.openings_area_sqft,
+    openings_count: ctx.openings_count,
+    openings_perimeter_lf: ctx.openings_perimeter_lf,
+    outside_corners_count: ctx.outside_corners_count,
+    inside_corners_count: ctx.inside_corners_count,
+    facade_perimeter_lf: ctx.facade_perimeter_lf,
+    facade_height_ft: ctx.facade_height_ft,
+    level_starter_lf: ctx.level_starter_lf,
+  });
+
+  return ctx;
+}
+
+// ============================================================================
+// APPLY ESTIMATE SETTINGS OVERRIDES (Phase 2B)
+// ============================================================================
+
+/**
+ * Apply estimate_settings overrides to measurement context
+ * When frontend sends manual LF values, use those instead of computed values
+ */
+export function applyEstimateSettingsOverrides(
+  context: MeasurementContext,
+  estimateSettings: EstimateSettings | null | undefined
+): void {
+  if (!estimateSettings) return;
+
+  const overridesApplied: string[] = [];
+
+  if (estimateSettings.window_trim?.manual_lf != null) {
+    context.window_perimeter_lf = estimateSettings.window_trim.manual_lf;
+    overridesApplied.push(`window_perimeter_lf=${estimateSettings.window_trim.manual_lf}`);
+  }
+
+  if (estimateSettings.door_trim?.manual_lf != null) {
+    context.door_perimeter_lf = estimateSettings.door_trim.manual_lf;
+    overridesApplied.push(`door_perimeter_lf=${estimateSettings.door_trim.manual_lf}`);
+  }
+
+  if (estimateSettings.belly_band?.manual_lf != null) {
+    context.belly_band_lf = estimateSettings.belly_band.manual_lf;
+    overridesApplied.push(`belly_band_lf=${estimateSettings.belly_band.manual_lf}`);
+  }
+
+  if (estimateSettings.gable_topout?.manual_count != null) {
+    context.gable_topout_count = estimateSettings.gable_topout.manual_count;
+    overridesApplied.push(`gable_topout_count=${estimateSettings.gable_topout.manual_count}`);
+  }
+
+  if (estimateSettings.topout?.manual_lf != null) {
+    context.topout_lf = estimateSettings.topout.manual_lf;
+    overridesApplied.push(`topout_lf=${estimateSettings.topout.manual_lf}`);
+  }
+
+  if (estimateSettings.corners?.outside_count != null) {
+    context.outside_corner_count = estimateSettings.corners.outside_count;
+    context.outside_corners_count = estimateSettings.corners.outside_count;
+    overridesApplied.push(`outside_corner_count=${estimateSettings.corners.outside_count}`);
+  }
+
+  if (estimateSettings.corners?.outside_lf != null) {
+    context.outside_corner_lf = estimateSettings.corners.outside_lf;
+    context.total_corner_lf = context.outside_corner_lf + context.inside_corner_lf;
+    overridesApplied.push(`outside_corner_lf=${estimateSettings.corners.outside_lf}`);
+  }
+
+  if (estimateSettings.top_out?.manual_lf != null) {
+    context.facade_perimeter_lf = estimateSettings.top_out.manual_lf;
+    overridesApplied.push(`facade_perimeter_lf=${estimateSettings.top_out.manual_lf}`);
+  }
+
+  if (overridesApplied.length > 0) {
+    console.log(`⚙️ [Phase 2B] Applied estimate_settings overrides: ${overridesApplied.join(', ')}`);
+  }
+}
+
+// ============================================================================
+// MANUFACTURER GROUPING - Group material assignments by manufacturer
+// ============================================================================
+
+/**
+ * Material assignment structure for manufacturer grouping
+ */
+export interface MaterialAssignmentForGrouping {
+  pricing_item_id?: string;
+  assigned_material_id?: string;  // n8n workflow uses this field name
+  quantity: number;
+  unit: string;
+  area_sqft?: number;
+  perimeter_lf?: number;
+  detection_id?: string;
+  detection_class?: string;  // Added for class-based filtering to prevent double-counting
+}
+
+/**
+ * Group material assignments by manufacturer
+ * Enriches assignments with manufacturer info from pricing_items table
+ *
+ * V8.0: Also merges per_material_measurements from spatial containment analysis
+ * when provided, which adds per-material opening measurements (windows, doors, garages)
+ *
+ * PURE PORT: was `async` and called `getPricingByIds(ids, organizationId)` to
+ * fetch per-id pricing with org-override overlay. Now sync — caller passes a
+ * pre-overlaid `pricingByIds` map. The `organizationId` parameter is dropped
+ * because the overlay must already be applied by the caller.
+ *
+ * @param materialAssignments - Array of material assignments from Detection Editor
+ * @param pricingByIds - Pre-fetched, pre-overlaid pricing keyed by `pricing_items.id`
+ * @param perMaterialMeasurements - V8.0: Per-material measurements from spatial containment
+ * @returns ManufacturerGroups map with aggregated measurements per manufacturer
+ */
+export function buildManufacturerGroups(
+  materialAssignments: MaterialAssignmentForGrouping[],
+  pricingByIds: Map<string, PricingItem>,
+  perMaterialMeasurements?: PerMaterialMeasurements
+): ManufacturerGroups {
+  const groups: ManufacturerGroups = {};
+
+  if (!materialAssignments || materialAssignments.length === 0) {
+    console.log('[AutoScope] No material assignments to group by manufacturer');
+    return groups;
+  }
+
+  // =========================================================================
+  // CLASS-BASED FILTERING - WHITELIST APPROACH
+  // Only include explicit siding installation surface classes.
+  // Excludes: garage (opening), etc.
+  // =========================================================================
+  const SIDING_INSTALLATION_CLASSES = ['siding', 'gable', 'exterior_wall', 'exterior wall', 'building', 'facade'];
+
+  // Filter to ONLY include siding installation classes (whitelist approach)
+  const filteredAssignments = materialAssignments.filter(a => {
+    const cls = (a.detection_class || '').toLowerCase();
+
+    // Only include if class matches a siding installation class
+    const isSidingInstallation = SIDING_INSTALLATION_CLASSES.some(sc => cls.includes(sc));
+
+    if (!isSidingInstallation) {
+      console.log(`   ⏭️ [AutoScope] Skipping '${a.detection_class}' (${a.quantity?.toFixed(1) || 0} ${a.unit}) - not a siding installation area`);
+      return false;
+    }
+
+    return true;
+  });
+
+  const removedCount = materialAssignments.length - filteredAssignments.length;
+  if (removedCount > 0) {
+    const removedArea = materialAssignments
+      .filter(a => !filteredAssignments.includes(a))
+      .filter(a => (a.unit || '').toUpperCase() === 'SF')
+      .reduce((sum, a) => sum + (a.quantity || 0), 0);
+    console.log(`🏭 [AutoScope] Filtered ${materialAssignments.length} → ${filteredAssignments.length} (removed ${removedCount} non-siding classes, ${removedArea.toFixed(0)} SF excluded)`);
+  }
+
+  // Debug: Log incoming assignments to verify field names
+  console.log('[AutoScope] Material assignments received:', filteredAssignments.map(a => ({
+    pricing_item_id: a.pricing_item_id,
+    assigned_material_id: a.assigned_material_id,
+    quantity: a.quantity,
+    unit: a.unit,
+    detection_class: a.detection_class
+  })));
+
+  // Get unique pricing item IDs from FILTERED assignments (accept both field names)
+  const pricingItemIds = [...new Set(
+    filteredAssignments
+      .map(a => a.pricing_item_id || a.assigned_material_id)
+      .filter((id): id is string => Boolean(id && id.trim() !== ''))
+  )];
+
+  console.log('[AutoScope] Extracted pricing item IDs:', pricingItemIds);
+
+  if (pricingItemIds.length === 0) {
+    console.log('[AutoScope] No valid pricing item IDs in assignments');
+    return groups;
+  }
+
+  // PURE PORT: pricing is supplied by the caller, already overlaid with any
+  // organization-level overrides. We use the same `pricingMap` variable name as
+  // source so the rest of the function body stays byte-identical.
+  const pricingMap = pricingByIds;
+
+  console.log(`[AutoScope] Fetched pricing for ${pricingMap.size}/${pricingItemIds.length} items`);
+
+  // Debug: Log manufacturers found
+  const manufacturers = [...new Set([...pricingMap.values()].map(p => p.manufacturer).filter(Boolean))];
+  console.log('[AutoScope] Manufacturers found:', manufacturers);
+
+  // Group FILTERED assignments by manufacturer
+  // FIX: Ensure each area is only counted ONCE to prevent 3x inflation bug
+  for (const assignment of filteredAssignments) {
+    const itemId = assignment.pricing_item_id || assignment.assigned_material_id;
+    const pricing = itemId ? pricingMap.get(itemId) : undefined;
+
+    if (!pricing) {
+      console.warn(`[AutoScope] No pricing found for ID: ${itemId}`);
+      continue;
+    }
+
+    const manufacturer = pricing.manufacturer;
+    if (!manufacturer || manufacturer.trim() === '') {
+      console.warn(`[AutoScope] No manufacturer for SKU: ${pricing.sku}`);
+      continue;
+    }
+
+    // Initialize group if needed
+    if (!groups[manufacturer]) {
+      groups[manufacturer] = {
+        manufacturer,
+        area_sqft: 0,
+        linear_ft: 0,
+        piece_count: 0,
+        detection_ids: [],
+      };
+    }
+
+    // Aggregate based on unit type
+    // FIX: Use mutually exclusive logic to prevent double-counting
+    const unit = assignment.unit?.toUpperCase() || '';
+    const quantity = Number(assignment.quantity) || 0;
+
+    if (unit === 'SF' || unit === 'SQFT' || unit === 'SQ FT') {
+      // Unit is SF - use quantity as area
+      groups[manufacturer].area_sqft += quantity;
+      console.log(`   📐 [${manufacturer}] +${quantity.toFixed(1)} SF from quantity (unit=${unit})`);
+    } else if (unit === 'LF' || unit === 'LINEAR FT' || unit === 'LINFT') {
+      // Unit is LF - use quantity as linear feet
+      groups[manufacturer].linear_ft += quantity;
+      console.log(`   📏 [${manufacturer}] +${quantity.toFixed(1)} LF from quantity (unit=${unit})`);
+    } else if (unit === 'EA' || unit === 'EACH' || unit === 'PC' || unit === 'PIECE' || unit === 'PCS') {
+      // Unit is pieces - use quantity as count
+      groups[manufacturer].piece_count += quantity;
+      console.log(`   🔢 [${manufacturer}] +${quantity} EA from quantity (unit=${unit})`);
+    } else if (assignment.area_sqft && assignment.area_sqft > 0) {
+      // Unknown unit but area_sqft is provided - use area_sqft ONLY (not quantity)
+      groups[manufacturer].area_sqft += assignment.area_sqft;
+      console.log(`   📐 [${manufacturer}] +${assignment.area_sqft.toFixed(1)} SF from area_sqft (unknown unit='${unit}')`);
+    } else {
+      // Unknown unit, no area_sqft - assume quantity is area (fallback)
+      groups[manufacturer].area_sqft += quantity;
+      console.log(`   📐 [${manufacturer}] +${quantity.toFixed(1)} SF from quantity (fallback, unit='${unit}')`);
+    }
+
+    // FIX: REMOVED the old double-counting code that added area_sqft again:
+    // OLD CODE (was causing double-counting):
+    // if (assignment.area_sqft && unit !== 'SF') {
+    //   groups[manufacturer].area_sqft += assignment.area_sqft;
+    // }
+
+    // Add perimeter_lf only if unit is NOT already LF (prevent double-counting)
+    if (assignment.perimeter_lf && unit !== 'LF' && unit !== 'LINEAR FT' && unit !== 'LINFT') {
+      groups[manufacturer].linear_ft += assignment.perimeter_lf;
+      console.log(`   📏 [${manufacturer}] +${assignment.perimeter_lf.toFixed(1)} LF from perimeter_lf`);
+    }
+
+    // Track detection IDs for provenance
+    if (assignment.detection_id) {
+      groups[manufacturer].detection_ids.push(assignment.detection_id);
+    }
+  }
+
+  // =========================================================================
+  // V8.0: SPATIAL CONTAINMENT - Merge per-material opening measurements
+  // FIX: Do NOT add facade_sqft if manufacturer already exists from material_assignments
+  // This was causing 3x inflation: 1) quantity, 2) area_sqft, 3) facade_sqft
+  // =========================================================================
+  if (perMaterialMeasurements && Object.keys(perMaterialMeasurements).length > 0) {
+    console.log(`[AutoScope V8.0] Merging per-material measurements from spatial containment`);
+
+    for (const [materialId, perMatMeasures] of Object.entries(perMaterialMeasurements)) {
+      // Skip 'unassigned' bucket if it has no meaningful data
+      if (materialId === 'unassigned' && perMatMeasures.window_count === 0 && perMatMeasures.door_count === 0) {
+        console.log(`[AutoScope V8.0] Skipping 'unassigned' bucket (no openings)`);
+        continue;
+      }
+
+      const manufacturer = perMatMeasures.manufacturer;
+      if (!manufacturer || manufacturer.trim() === '') {
+        console.warn(`[AutoScope V8.0] No manufacturer for material ID: ${materialId}`);
+        continue;
+      }
+
+      // If this manufacturer doesn't exist in groups yet, create it
+      // (this can happen if spatial containment data includes manufacturers not in material_assignments)
+      if (!groups[manufacturer]) {
+        groups[manufacturer] = {
+          manufacturer,
+          area_sqft: perMatMeasures.facade_sqft || 0,
+          linear_ft: 0,
+          piece_count: 0,
+          detection_ids: perMatMeasures.facades || [],
+        };
+        console.log(`   📐 [${manufacturer}] Created from per_material: ${(perMatMeasures.facade_sqft || 0).toFixed(1)} SF`);
+      } else {
+        // FIX: Manufacturer already exists from material_assignments
+        // DO NOT add facade_sqft - this would cause double/triple counting!
+        // Only merge detection_ids for provenance tracking
+        console.log(`   ⏭️ [${manufacturer}] Already has ${groups[manufacturer].area_sqft.toFixed(1)} SF from assignments, skipping per_material facade_sqft (${(perMatMeasures.facade_sqft || 0).toFixed(1)} SF)`);
+
+        if (perMatMeasures.facades && perMatMeasures.facades.length > 0) {
+          groups[manufacturer].detection_ids = [
+            ...(groups[manufacturer].detection_ids || []),
+            ...perMatMeasures.facades
+          ];
+        }
+      }
+
+      const group = groups[manufacturer];
+
+      // Merge opening measurements into the manufacturer group
+      // These are the key values for spatial containment - per-material opening measurements
+      group.window_perimeter_lf = (group.window_perimeter_lf || 0) + (perMatMeasures.window_perimeter_lf || 0);
+      group.door_perimeter_lf = (group.door_perimeter_lf || 0) + (perMatMeasures.door_perimeter_lf || 0);
+      group.garage_perimeter_lf = (group.garage_perimeter_lf || 0) + (perMatMeasures.garage_perimeter_lf || 0);
+      group.window_count = (group.window_count || 0) + (perMatMeasures.window_count || 0);
+      group.door_count = (group.door_count || 0) + (perMatMeasures.door_count || 0);
+      group.garage_count = (group.garage_count || 0) + (perMatMeasures.garage_count || 0);
+      group.openings_area_sqft = (group.openings_area_sqft || 0) + (perMatMeasures.openings_area_sqft || 0);
+
+      // Compute total openings perimeter
+      group.total_openings_perimeter_lf =
+        (group.window_perimeter_lf || 0) +
+        (group.door_perimeter_lf || 0) +
+        (group.garage_perimeter_lf || 0);
+
+      // =========================================================================
+      // V8.1: Merge perimeter, corners, trim, belly band, architectural
+      // =========================================================================
+
+      // V8.1: Perimeter (for starter strips, Z-flashing)
+      if (perMatMeasures.facade_perimeter_lf !== undefined) {
+        group.facade_perimeter_lf = (group.facade_perimeter_lf || 0) + perMatMeasures.facade_perimeter_lf;
+      }
+
+      // V8.1: Corners
+      if (perMatMeasures.outside_corner_count !== undefined) {
+        group.outside_corner_count = (group.outside_corner_count || 0) + perMatMeasures.outside_corner_count;
+      }
+      if (perMatMeasures.outside_corner_lf !== undefined) {
+        group.outside_corner_lf = (group.outside_corner_lf || 0) + perMatMeasures.outside_corner_lf;
+      }
+      if (perMatMeasures.inside_corner_count !== undefined) {
+        group.inside_corner_count = (group.inside_corner_count || 0) + perMatMeasures.inside_corner_count;
+      }
+      if (perMatMeasures.inside_corner_lf !== undefined) {
+        group.inside_corner_lf = (group.inside_corner_lf || 0) + perMatMeasures.inside_corner_lf;
+      }
+      // Compute total corner LF
+      group.total_corner_lf = (group.outside_corner_lf || 0) + (group.inside_corner_lf || 0);
+
+      // V8.1: Trim
+      if (perMatMeasures.trim_head_lf !== undefined) {
+        group.trim_head_lf = (group.trim_head_lf || 0) + perMatMeasures.trim_head_lf;
+      }
+      if (perMatMeasures.trim_jamb_lf !== undefined) {
+        group.trim_jamb_lf = (group.trim_jamb_lf || 0) + perMatMeasures.trim_jamb_lf;
+      }
+      if (perMatMeasures.trim_sill_lf !== undefined) {
+        group.trim_sill_lf = (group.trim_sill_lf || 0) + perMatMeasures.trim_sill_lf;
+      }
+      if (perMatMeasures.trim_total_lf !== undefined) {
+        group.trim_total_lf = (group.trim_total_lf || 0) + perMatMeasures.trim_total_lf;
+      } else {
+        // Compute total trim LF if not provided
+        group.trim_total_lf = (group.trim_head_lf || 0) + (group.trim_jamb_lf || 0) + (group.trim_sill_lf || 0);
+      }
+
+      // V8.1: Belly band
+      if (perMatMeasures.belly_band_lf !== undefined) {
+        group.belly_band_lf = (group.belly_band_lf || 0) + perMatMeasures.belly_band_lf;
+      }
+
+      // V8.1: Architectural elements
+      if (perMatMeasures.architectural_count !== undefined) {
+        group.architectural_count = (group.architectural_count || 0) + perMatMeasures.architectural_count;
+      }
+
+      console.log(`[AutoScope V8.0] ${manufacturer}: ${group.window_count} windows (${group.window_perimeter_lf?.toFixed(1)} LF), ${group.door_count} doors (${group.door_perimeter_lf?.toFixed(1)} LF), ${group.garage_count} garages (${group.garage_perimeter_lf?.toFixed(1)} LF)`);
+    }
+
+    // Log spatial containment summary (V8.0 + V8.1)
+    console.log(`[AutoScope V8.1] ═══════════════════════════════════════════`);
+    console.log(`[AutoScope V8.1] SPATIAL CONTAINMENT SUMMARY:`);
+    for (const [mfr, group] of Object.entries(groups)) {
+      const openingLF = group.total_openings_perimeter_lf || 0;
+      const windowCount = group.window_count || 0;
+      const doorCount = group.door_count || 0;
+      const garageCount = group.garage_count || 0;
+      console.log(`[AutoScope V8.1]   ${mfr}:`);
+      console.log(`[AutoScope V8.1]     Facade: ${group.area_sqft.toFixed(1)} SF, Perimeter: ${(group.facade_perimeter_lf || 0).toFixed(1)} LF`);
+      console.log(`[AutoScope V8.1]     Openings: ${windowCount} windows + ${doorCount} doors + ${garageCount} garages = ${openingLF.toFixed(1)} LF`);
+      // V8.1 fields
+      if (group.total_corner_lf !== undefined || group.outside_corner_count !== undefined) {
+        console.log(`[AutoScope V8.1]     Corners: ${group.outside_corner_count || 0} outside (${(group.outside_corner_lf || 0).toFixed(1)} LF) + ${group.inside_corner_count || 0} inside (${(group.inside_corner_lf || 0).toFixed(1)} LF) = ${(group.total_corner_lf || 0).toFixed(1)} LF`);
+      }
+      if (group.trim_total_lf !== undefined) {
+        console.log(`[AutoScope V8.1]     Trim: head=${(group.trim_head_lf || 0).toFixed(1)} + jamb=${(group.trim_jamb_lf || 0).toFixed(1)} + sill=${(group.trim_sill_lf || 0).toFixed(1)} = ${(group.trim_total_lf || 0).toFixed(1)} LF`);
+      }
+      if (group.belly_band_lf !== undefined) {
+        console.log(`[AutoScope V8.1]     Belly Band: ${group.belly_band_lf.toFixed(1)} LF`);
+      }
+      if (group.architectural_count !== undefined) {
+        console.log(`[AutoScope V8.1]     Architectural: ${group.architectural_count} EA`);
+      }
+    }
+    console.log(`[AutoScope V8.1] ═══════════════════════════════════════════`);
+  }
+
+  // Log results
+  console.log(`[AutoScope] Built ${Object.keys(groups).length} manufacturer groups:`);
+  for (const [mfr, data] of Object.entries(groups)) {
+    console.log(`  ${mfr}:`);
+    console.log(`    - Area: ${data.area_sqft.toFixed(2)} SF`);
+    console.log(`    - Linear: ${data.linear_ft.toFixed(2)} LF`);
+    console.log(`    - Pieces: ${data.piece_count}`);
+    console.log(`    - Detections: ${data.detection_ids.length}`);
+    if (data.total_openings_perimeter_lf !== undefined) {
+      console.log(`    - Openings Perimeter: ${data.total_openings_perimeter_lf.toFixed(2)} LF (V8.0 spatial)`);
+    }
+    // V8.1 fields summary
+    if (data.total_corner_lf !== undefined) {
+      console.log(`    - Corners: ${data.total_corner_lf.toFixed(2)} LF (V8.1 spatial)`);
+    }
+    if (data.trim_total_lf !== undefined) {
+      console.log(`    - Trim: ${data.trim_total_lf.toFixed(2)} LF (V8.1 spatial)`);
+    }
+  }
+
+  // =========================================================================
+  // VALIDATION SUMMARY - Check for potential inflation issues
+  // =========================================================================
+  const totalArea = Object.values(groups).reduce((sum, g) => sum + (g.area_sqft || 0), 0);
+  const totalLinear = Object.values(groups).reduce((sum, g) => sum + (g.linear_ft || 0), 0);
+  const totalPieces = Object.values(groups).reduce((sum, g) => sum + (g.piece_count || 0), 0);
+
+  console.log(`\n🔍 MANUFACTURER GROUPS VALIDATION SUMMARY:`);
+  console.log(`   Manufacturers: ${Object.keys(groups).length}`);
+  console.log(`   Total Area: ${totalArea.toFixed(2)} SF (${(totalArea / 100).toFixed(2)} squares)`);
+  console.log(`   Total Linear: ${totalLinear.toFixed(2)} LF`);
+  console.log(`   Total Pieces: ${totalPieces}`);
+
+  // Log class filtering summary if any assignments were filtered
+  if (materialAssignments.length !== filteredAssignments.length) {
+    const skippedAssignments = materialAssignments.filter(a => !filteredAssignments.includes(a));
+    const skippedClasses = [...new Set(skippedAssignments.map(a => a.detection_class).filter(Boolean))];
+    const skippedArea = skippedAssignments
+      .filter(a => (a.unit || '').toUpperCase() === 'SF')
+      .reduce((sum, a) => sum + (a.quantity || 0), 0);
+
+    console.log(`\n🔍 CLASS FILTERING SUMMARY (Whitelist: siding, gable only):`);
+    console.log(`   Original assignments: ${materialAssignments.length}`);
+    console.log(`   After filtering: ${filteredAssignments.length}`);
+    console.log(`   Removed (non-siding classes): ${materialAssignments.length - filteredAssignments.length}`);
+    console.log(`   Skipped classes: ${skippedClasses.join(', ')}`);
+    console.log(`   SF excluded: ${skippedArea.toFixed(2)} SF`);
+  }
+
+  return groups;
+}
+
+/**
+ * Build a manufacturer-specific MeasurementContext
+ * Replaces facade_area_sqft with the manufacturer's specific area
+ * Used for evaluating manufacturer-specific auto-scope rules
+ *
+ * V8.0: If per-material opening measurements are available (from spatial containment),
+ * use them instead of scaling from total project measurements. This enables accurate
+ * per-manufacturer calculations for accessories like J-channel and caulk.
+ *
+ * V8.1: Added support for per-material perimeter, corners, trim, and belly band.
+ * These enable manufacturer-specific calculations for corner posts, trim boards,
+ * starter strips, and belly band accessories.
+ */
+export function buildManufacturerContext(
+  baseContext: MeasurementContext,
+  manufacturerData: ManufacturerMeasurements
+): MeasurementContext {
+  // Create a copy of the base context
+  const mfrContext: MeasurementContext = { ...baseContext };
+
+  // Override area-based measurements with manufacturer-specific values
+  mfrContext.facade_sqft = manufacturerData.area_sqft;
+  mfrContext.facade_area_sqft = manufacturerData.area_sqft;
+  mfrContext.gross_wall_area_sqft = manufacturerData.area_sqft;
+
+  // For net siding area, scale proportionally based on total area ratio
+  const areaRatio = baseContext.facade_sqft > 0
+    ? manufacturerData.area_sqft / baseContext.facade_sqft
+    : 1;
+  mfrContext.net_siding_area_sqft = baseContext.net_siding_area_sqft * areaRatio;
+
+  // Override linear measurements if manufacturer has them
+  if (manufacturerData.linear_ft > 0) {
+    mfrContext.level_starter_lf = manufacturerData.linear_ft;
+  }
+
+  // Scale perimeter proportionally based on area ratio
+  // Or use linear_ft if provided
+  mfrContext.facade_perimeter_lf = manufacturerData.linear_ft > 0
+    ? manufacturerData.linear_ft
+    : baseContext.facade_perimeter_lf * areaRatio;
+
+  // =========================================================================
+  // V8.0: SPATIAL CONTAINMENT - Use per-material opening measurements
+  // If spatial containment data is available, use manufacturer-specific
+  // opening measurements instead of scaling from total project measurements
+  // =========================================================================
+
+  const hasSpatialData = manufacturerData.window_perimeter_lf !== undefined ||
+                         manufacturerData.door_perimeter_lf !== undefined ||
+                         manufacturerData.garage_perimeter_lf !== undefined;
+
+  if (hasSpatialData) {
+    // Window measurements
+    if (manufacturerData.window_perimeter_lf !== undefined) {
+      mfrContext.window_perimeter_lf = manufacturerData.window_perimeter_lf;
+      mfrContext.window_count = manufacturerData.window_count || 0;
+      // Scale other window measurements proportionally based on window count ratio
+      const windowRatio = baseContext.window_count > 0
+        ? (manufacturerData.window_count || 0) / baseContext.window_count
+        : 0;
+      mfrContext.window_area_sqft = baseContext.window_area_sqft * windowRatio;
+      mfrContext.window_head_lf = baseContext.window_head_lf * windowRatio;
+      mfrContext.window_sill_lf = baseContext.window_sill_lf * windowRatio;
+      mfrContext.window_jamb_lf = baseContext.window_jamb_lf * windowRatio;
+    }
+
+    // Door measurements
+    if (manufacturerData.door_perimeter_lf !== undefined) {
+      mfrContext.door_perimeter_lf = manufacturerData.door_perimeter_lf;
+      mfrContext.door_count = manufacturerData.door_count || 0;
+      // Scale other door measurements proportionally
+      const doorRatio = baseContext.door_count > 0
+        ? (manufacturerData.door_count || 0) / baseContext.door_count
+        : 0;
+      mfrContext.door_area_sqft = baseContext.door_area_sqft * doorRatio;
+      mfrContext.door_head_lf = baseContext.door_head_lf * doorRatio;
+      mfrContext.door_jamb_lf = baseContext.door_jamb_lf * doorRatio;
+    }
+
+    // Garage measurements
+    if (manufacturerData.garage_perimeter_lf !== undefined) {
+      mfrContext.garage_perimeter_lf = manufacturerData.garage_perimeter_lf;
+      mfrContext.garage_count = manufacturerData.garage_count || 0;
+      // Scale other garage measurements proportionally
+      const garageRatio = baseContext.garage_count > 0
+        ? (manufacturerData.garage_count || 0) / baseContext.garage_count
+        : 0;
+      mfrContext.garage_area_sqft = baseContext.garage_area_sqft * garageRatio;
+    }
+
+    // Openings area
+    if (manufacturerData.openings_area_sqft !== undefined) {
+      mfrContext.openings_area_sqft = manufacturerData.openings_area_sqft;
+      mfrContext.total_openings_area_sqft = manufacturerData.openings_area_sqft;
+    }
+
+    // Recompute total openings perimeter from spatial containment data
+    if (manufacturerData.total_openings_perimeter_lf !== undefined) {
+      mfrContext.total_opening_perimeter_lf = manufacturerData.total_openings_perimeter_lf;
+      mfrContext.openings_perimeter_lf = manufacturerData.total_openings_perimeter_lf;
+    } else {
+      // Compute from individual components
+      const totalPerim =
+        (manufacturerData.window_perimeter_lf || 0) +
+        (manufacturerData.door_perimeter_lf || 0) +
+        (manufacturerData.garage_perimeter_lf || 0);
+      mfrContext.total_opening_perimeter_lf = totalPerim;
+      mfrContext.openings_perimeter_lf = totalPerim;
+    }
+
+    // Recompute total openings count
+    const totalCount =
+      (manufacturerData.window_count || 0) +
+      (manufacturerData.door_count || 0) +
+      (manufacturerData.garage_count || 0);
+    mfrContext.total_openings_count = totalCount;
+    mfrContext.openings_count = totalCount;
+
+    console.log(`[AutoScope V8.0] ${manufacturerData.manufacturer} context using spatial containment:`);
+    console.log(`[AutoScope V8.0]   openings_perimeter_lf = ${mfrContext.openings_perimeter_lf.toFixed(1)}`);
+    console.log(`[AutoScope V8.0]   openings_count = ${mfrContext.openings_count}`);
+  }
+
+  // =========================================================================
+  // V8.1: SPATIAL CONTAINMENT - Use per-material perimeter, corners, trim, belly band
+  // =========================================================================
+
+  const hasV81Data = manufacturerData.facade_perimeter_lf !== undefined ||
+                     manufacturerData.outside_corner_lf !== undefined ||
+                     manufacturerData.trim_total_lf !== undefined ||
+                     manufacturerData.belly_band_lf !== undefined;
+
+  if (hasV81Data) {
+    // V8.1: Perimeter (for starter strips, Z-flashing)
+    if (manufacturerData.facade_perimeter_lf !== undefined) {
+      mfrContext.facade_perimeter_lf = manufacturerData.facade_perimeter_lf;
+      // Also update level_starter_lf to match facade perimeter
+      mfrContext.level_starter_lf = manufacturerData.facade_perimeter_lf;
+    }
+
+    // V8.1: Corners
+    if (manufacturerData.outside_corner_count !== undefined) {
+      mfrContext.outside_corner_count = manufacturerData.outside_corner_count;
+      mfrContext.outside_corners_count = manufacturerData.outside_corner_count; // alias
+    }
+    if (manufacturerData.outside_corner_lf !== undefined) {
+      mfrContext.outside_corner_lf = manufacturerData.outside_corner_lf;
+    }
+    if (manufacturerData.inside_corner_count !== undefined) {
+      mfrContext.inside_corner_count = manufacturerData.inside_corner_count;
+      mfrContext.inside_corners_count = manufacturerData.inside_corner_count; // alias
+    }
+    if (manufacturerData.inside_corner_lf !== undefined) {
+      mfrContext.inside_corner_lf = manufacturerData.inside_corner_lf;
+    }
+    // Compute total corner LF
+    if (manufacturerData.total_corner_lf !== undefined) {
+      mfrContext.total_corner_lf = manufacturerData.total_corner_lf;
+    } else if (manufacturerData.outside_corner_lf !== undefined || manufacturerData.inside_corner_lf !== undefined) {
+      mfrContext.total_corner_lf = (manufacturerData.outside_corner_lf || 0) + (manufacturerData.inside_corner_lf || 0);
+    }
+
+    // V8.1: Trim
+    if (manufacturerData.trim_head_lf !== undefined) {
+      mfrContext.trim_head_lf = manufacturerData.trim_head_lf;
+    }
+    if (manufacturerData.trim_jamb_lf !== undefined) {
+      mfrContext.trim_jamb_lf = manufacturerData.trim_jamb_lf;
+    }
+    if (manufacturerData.trim_sill_lf !== undefined) {
+      mfrContext.trim_sill_lf = manufacturerData.trim_sill_lf;
+    }
+    if (manufacturerData.trim_total_lf !== undefined) {
+      mfrContext.trim_total_lf = manufacturerData.trim_total_lf;
+    } else if (manufacturerData.trim_head_lf !== undefined || manufacturerData.trim_jamb_lf !== undefined || manufacturerData.trim_sill_lf !== undefined) {
+      mfrContext.trim_total_lf = (manufacturerData.trim_head_lf || 0) + (manufacturerData.trim_jamb_lf || 0) + (manufacturerData.trim_sill_lf || 0);
+    }
+
+    // V8.1: Belly band
+    if (manufacturerData.belly_band_lf !== undefined) {
+      mfrContext.belly_band_lf = manufacturerData.belly_band_lf;
+    }
+
+    console.log(`[AutoScope V8.1] ${manufacturerData.manufacturer} context using spatial containment V8.1:`);
+    if (manufacturerData.facade_perimeter_lf !== undefined) {
+      console.log(`[AutoScope V8.1]   facade_perimeter_lf = ${mfrContext.facade_perimeter_lf.toFixed(1)}`);
+    }
+    if (mfrContext.total_corner_lf !== undefined) {
+      console.log(`[AutoScope V8.1]   total_corner_lf = ${mfrContext.total_corner_lf.toFixed(1)} (${mfrContext.outside_corner_count || 0} outside + ${mfrContext.inside_corner_count || 0} inside)`);
+    }
+    if (mfrContext.trim_total_lf !== undefined) {
+      console.log(`[AutoScope V8.1]   trim_total_lf = ${mfrContext.trim_total_lf.toFixed(1)}`);
+    }
+    if (mfrContext.belly_band_lf !== undefined) {
+      console.log(`[AutoScope V8.1]   belly_band_lf = ${mfrContext.belly_band_lf.toFixed(1)}`);
+    }
+  }
+
+  return mfrContext;
+}
+
+// ============================================================================
+// BUILD ASSIGNED MATERIALS FROM PRICING (for material-based triggers)
+// ============================================================================
+
+/**
+ * Build AssignedMaterial array from material assignments and pricing data
+ * This enables material_category and sku_pattern trigger conditions
+ *
+ * @param materialAssignments - Material assignments from Detection Editor
+ * @param pricingMap - Map of pricing item ID to PricingItem (from getPricingByIds)
+ * @returns Array of AssignedMaterial for trigger condition evaluation
+ */
+export function buildAssignedMaterialsFromPricing(
+  materialAssignments: MaterialAssignmentForGrouping[],
+  pricingMap: Map<string, { sku: string; category?: string; manufacturer?: string }>
+): AssignedMaterial[] {
+  const materials: AssignedMaterial[] = [];
+  const seenSkus = new Set<string>();
+
+  for (const assignment of materialAssignments) {
+    const itemId = assignment.pricing_item_id || assignment.assigned_material_id;
+    if (!itemId) continue;
+
+    const pricing = pricingMap.get(itemId);
+    if (!pricing || !pricing.sku) continue;
+
+    // Deduplicate by SKU - we only need one entry per SKU for trigger matching
+    if (seenSkus.has(pricing.sku)) continue;
+    seenSkus.add(pricing.sku);
+
+    materials.push({
+      sku: pricing.sku,
+      category: pricing.category || 'unknown',
+      manufacturer: pricing.manufacturer || 'Unknown',
+      pricing_item_id: itemId,
+    });
+  }
+
+  if (materials.length > 0) {
+    console.log(`[AutoScope] Built ${materials.length} unique assigned materials for trigger evaluation:`);
+    for (const m of materials) {
+      console.log(`  - ${m.sku} (${m.category}) [${m.manufacturer}]`);
+    }
+  }
+
+  return materials;
+}
+
+// ============================================================================
+// EVALUATE TRIGGER CONDITIONS (FIXED for actual DB format)
+// ============================================================================
+
+/**
+ * Check if a rule should be applied based on its trigger condition
+ * Database format:
+ * - { "always": true } → skip measurement-based triggers, but material/config checks still apply
+ * - { "min_corners": 1 } → trigger if corners >= 1
+ * - { "min_openings": 1 } → trigger if openings >= 1
+ * - { "min_net_area": 500 } → trigger if net_siding_area >= 500
+ * - { "material_category": "board_batten" } → only if assigned material has this category
+ * - { "sku_pattern": "16OC-CP" } → only if assigned material SKU contains this pattern
+ * - { "field": "paint_service_type", "equals": "in_house" } → check config field value
+ *
+ * Multiple conditions use AND logic - all must match for rule to apply.
+ *
+ * IMPORTANT: Material-based conditions (material_category, sku_pattern) and config field
+ * conditions are ALWAYS checked, even when "always": true is set. This means a rule like
+ * { "always": true, "material_category": "artisan" } will only apply when an artisan
+ * material is assigned, not on every project.
+ *
+ * After trigger conditions pass, excludes_if_attributes is checked to potentially skip the rule.
+ */
+export function shouldApplyRule(
+  rule: DbAutoScopeRule,
+  context: MeasurementContext,
+  assignedMaterials?: AssignedMaterial[],
+  config?: Record<string, any>,
+  trimSystem?: 'hardie' | 'whitewood',
+  estimateSettings?: EstimateSettings | null
+): { applies: boolean; reason: string } {
+  const tc = rule.trigger_condition;
+  const materials = assignedMaterials || [];
+  const currentTrimSystem = trimSystem || 'hardie';
+
+  // LOG 2: Debug WW corner rules 181-183
+  if (rule.rule_id && [181, 182, 183].includes(rule.rule_id)) {
+    console.log(`🔧 [RULE ${rule.rule_id}] ${rule.rule_name}:`, JSON.stringify({
+      trigger_condition: rule.trigger_condition,
+      trim_system_resolved: currentTrimSystem,
+      trim_system_match: currentTrimSystem === tc?.trim_system,
+      min_corners_check: (tc?.min_corners || 0) <= ((context.outside_corners_count || 0) + (context.inside_corners_count || 0)),
+      outside_corner_lf: context.outside_corner_lf,
+      inside_corner_lf: context.inside_corner_lf,
+      formula: rule.quantity_formula,
+    }));
+  }
+
+  // Track matched conditions for reason string
+  const matchedConditions: string[] = [];
+
+  // =========================================================================
+  // CONFIG TOGGLE CHECK — runs FIRST, before ALL other checks including "always"
+  // This uses dot-notation paths like "consumables.include_wood_blades" to resolve
+  // values from project_configurations.configuration_data (passed as estimateSettings)
+  // undefined/null = fire (backwards compatible), explicit false = suppress
+  // =========================================================================
+  if (tc?.config_toggle && estimateSettings) {
+    const toggleValue = resolveConfigToggle(estimateSettings as Record<string, any>, tc.config_toggle);
+    if (toggleValue === false) {
+      return {
+        applies: false,
+        reason: `config_toggle "${tc.config_toggle}" is explicitly false`
+      };
+    }
+    // If toggle is true or undefined, continue with other checks
+    if (toggleValue === true) {
+      matchedConditions.push(`toggle=${tc.config_toggle}`);
+    }
+  }
+
+  // =========================================================================
+  // PHASE 2B: ESTIMATE SETTINGS TOGGLE CHECKS
+  // Pattern: setting === false means SKIP. undefined/null = fire (backwards compat)
+  // =========================================================================
+  const es = estimateSettings || {};
+  const category = rule.material_category?.toLowerCase() || '';
+  const ruleNameLower = rule.rule_name?.toLowerCase() || '';
+
+  // Diagnostic: Log estimateSettings for consumables/flashing rules
+  if (ruleNameLower.includes('caulk') || ruleNameLower.includes('primer') ||
+      ruleNameLower.includes('spackle') || ruleNameLower.includes('blade')) {
+    console.log(`🔍 [shouldApplyRule] Rule: "${rule.rule_name}"`, {
+      estimateSettingsKeys: Object.keys(es),
+      consumables: es.consumables || 'undefined',
+    });
+  }
+
+  // --- TRIM TOGGLES ---
+  if (['window_trim', 'window_casing'].includes(category) || category.includes('window')) {
+    if (isFalse(es.window_trim?.include)) {
+      return { applies: false, reason: 'window_trim.include is false' };
+    }
+  }
+
+  if (['door_trim', 'door_casing'].includes(category) || category.includes('door')) {
+    if (isFalse(es.door_trim?.include)) {
+      return { applies: false, reason: 'door_trim.include is false' };
+    }
+  }
+
+  // --- TOP-OUT TOGGLE ---
+  // Rules 184, 185 (WhiteWood Top-Out) have material_category='frieze_board'
+  // but rule_name contains "Top-Out"
+  if (ruleNameLower.includes('top-out') || ruleNameLower.includes('topout') ||
+      category === 'top_out' || category === 'frieze' || category === 'frieze_board') {
+    if (isFalse(es.top_out?.include)) {
+      return { applies: false, reason: 'top_out.include is false' };
+    }
+  }
+
+  // --- BELLY BAND TOGGLE ---
+  if (category === 'belly_band' || category === 'band_board' || ruleNameLower.includes('belly band')) {
+    if (isFalse(es.belly_band?.include)) {
+      return { applies: false, reason: 'belly_band.include is false' };
+    }
+  }
+
+  // --- GABLE TOPOUT TOGGLE ---
+  if (['gable_topout', 'gable_topout_trim', 'gable_topout_flashing'].includes(category)) {
+    if (isFalse(es.gable_topout?.include)) {
+      return { applies: false, reason: 'gable_topout.include is false' };
+    }
+  }
+
+  // --- TOPOUT TOGGLE ---
+  if (['topout', 'topout_trim', 'topout_flashing'].includes(category)) {
+    if (isFalse(es.topout?.include)) {
+      return { applies: false, reason: 'topout.include is false' };
+    }
+  }
+
+  // --- FLASHING TOGGLES ---
+  if (ruleNameLower.includes('kickout')) {
+    if (isFalse(es.flashing?.include_kickout)) {
+      return { applies: false, reason: 'flashing.include_kickout is false' };
+    }
+  }
+
+  if (category === 'flashing_tape' || ruleNameLower.includes('joint flashing')) {
+    if (isFalse(es.flashing?.include_joint_flashing)) {
+      return { applies: false, reason: 'flashing.include_joint_flashing is false' };
+    }
+  }
+
+  if (ruleNameLower.includes('corner flashing')) {
+    if (isFalse(es.flashing?.include_corner_flashing)) {
+      return { applies: false, reason: 'flashing.include_corner_flashing is false' };
+    }
+  }
+
+  if (ruleNameLower.includes('fortiflash')) {
+    if (isFalse(es.flashing?.include_fortiflash)) {
+      return { applies: false, reason: 'flashing.include_fortiflash is false' };
+    }
+  }
+
+  if (ruleNameLower.includes('moistop')) {
+    if (isFalse(es.flashing?.include_moistop)) {
+      return { applies: false, reason: 'flashing.include_moistop is false' };
+    }
+  }
+
+  if (ruleNameLower.includes('galvanized rolled') || ruleNameLower.includes('rolled galv')) {
+    if (isFalse(es.flashing?.include_rolled_galv)) {
+      return { applies: false, reason: 'flashing.include_rolled_galv is false' };
+    }
+  }
+
+  // --- WRB TOGGLES ---
+  if (ruleNameLower.includes('seam tape')) {
+    if (isFalse(es.wrb?.include_seam_tape)) {
+      return { applies: false, reason: 'wrb.include_seam_tape is false' };
+    }
+  }
+
+  // --- CONSUMABLES TOGGLES ---
+  // Siding nails
+  if ((category === 'fasteners' || ruleNameLower.includes('siding nail') || ruleNameLower.includes('siding fastener')) &&
+      !ruleNameLower.includes('trim')) {
+    if (isFalse(es.consumables?.include_siding_nails)) {
+      return { applies: false, reason: 'consumables.include_siding_nails is false' };
+    }
+  }
+
+  // Trim nails
+  if (ruleNameLower.includes('trim nail') || ruleNameLower.includes('trim fastener')) {
+    if (isFalse(es.consumables?.include_trim_nails)) {
+      return { applies: false, reason: 'consumables.include_trim_nails is false' };
+    }
+  }
+
+  // Paintable caulk
+  if (ruleNameLower.includes('paintable caulk') || ruleNameLower.includes('paintable sealant')) {
+    console.log(`🧪 PAINTABLE CAULK CHECK: rule="${rule.rule_name}", es.consumables=${JSON.stringify(es.consumables)}`);
+    if (isFalse(es.consumables?.include_paintable_caulk)) {
+      return { applies: false, reason: 'consumables.include_paintable_caulk is false' };
+    }
+  }
+
+  // Also check for "titebond" which is a common paintable caulk brand
+  if (ruleNameLower.includes('titebond') && !ruleNameLower.includes('color')) {
+    console.log(`🧪 TITEBOND CHECK: rule="${rule.rule_name}", es.consumables=${JSON.stringify(es.consumables)}`);
+    if (isFalse(es.consumables?.include_paintable_caulk)) {
+      return { applies: false, reason: 'consumables.include_paintable_caulk is false (titebond)' };
+    }
+  }
+
+  // Color-matched caulk
+  if (ruleNameLower.includes('color-matched') || ruleNameLower.includes('color match')) {
+    console.log(`🧪 COLOR-MATCHED CAULK CHECK: rule="${rule.rule_name}", es.consumables=${JSON.stringify(es.consumables)}`);
+    if (isFalse(es.consumables?.include_color_matched_caulk)) {
+      return { applies: false, reason: 'consumables.include_color_matched_caulk is false' };
+    }
+  }
+
+  // Generic caulk/sealant rules that aren't color-matched should use paintable caulk toggle
+  // This catches rules like "Caulk and Sealant", "Hardie Caulk", etc.
+  if ((ruleNameLower.includes('caulk') || ruleNameLower.includes('sealant')) &&
+      !ruleNameLower.includes('color-matched') && !ruleNameLower.includes('color match')) {
+    console.log(`🧪 GENERIC CAULK CHECK: rule="${rule.rule_name}", es.consumables.paintable=${es.consumables?.include_paintable_caulk}`);
+    if (isFalse(es.consumables?.include_paintable_caulk)) {
+      return { applies: false, reason: 'consumables.include_paintable_caulk is false (generic caulk)' };
+    }
+  }
+
+  // Hardie blades
+  if (ruleNameLower.includes('hardie blade') || ruleNameLower.includes('fiber cement blade')) {
+    if (isFalse(es.consumables?.include_hardie_blades)) {
+      return { applies: false, reason: 'consumables.include_hardie_blades is false' };
+    }
+  }
+
+  // Wood blades
+  if (ruleNameLower.includes('wood blade')) {
+    if (isFalse(es.consumables?.include_wood_blades)) {
+      return { applies: false, reason: 'consumables.include_wood_blades is false' };
+    }
+  }
+
+  // Spackle
+  if (ruleNameLower.includes('spackle')) {
+    if (isFalse(es.consumables?.include_spackle)) {
+      return { applies: false, reason: 'consumables.include_spackle is false' };
+    }
+  }
+
+  // Primer
+  if (ruleNameLower.includes('primer')) {
+    if (isFalse(es.consumables?.include_primer_cans)) {
+      return { applies: false, reason: 'consumables.include_primer_cans is false' };
+    }
+  }
+
+  // =========================================================================
+  // TRIM SYSTEM CHECK - Must be checked first for WhiteWood rules
+  // Rules with trigger_condition.trim_system only fire when payload matches
+  // =========================================================================
+  if (tc?.trim_system !== undefined) {
+    if (tc.trim_system !== currentTrimSystem) {
+      return {
+        applies: false,
+        reason: `trim_system='${currentTrimSystem}' !== required '${tc.trim_system}'`
+      };
+    }
+    matchedConditions.push(`trim_system=${tc.trim_system}`);
+  }
+
+  // No trigger condition = always apply (but still check excludes_if_attributes)
+  if (!tc) {
+    matchedConditions.push('no condition');
+  } else {
+    // =========================================================================
+    // MATERIAL-BASED TRIGGERS - ALWAYS check these, even when always=true
+    // These filter which rules apply based on what materials are assigned.
+    // A rule with {"always": true, "material_category": "artisan"} should only
+    // apply when an artisan material is assigned, not on ALL projects.
+    // =========================================================================
+
+    // { "material_category": "board_batten" } - check if any assigned material has this category
+    if (tc.material_category !== undefined) {
+      const requiredCategory = tc.material_category.toLowerCase();
+      const hasMatchingCategory = materials.some(
+        m => m.category?.toLowerCase() === requiredCategory
+      );
+
+      if (!hasMatchingCategory) {
+        return {
+          applies: false,
+          reason: `no material with category '${tc.material_category}'`
+        };
+      }
+      matchedConditions.push(`category=${tc.material_category}`);
+    }
+
+    // { "sku_pattern": "16OC-CP" } - check if any assigned material SKU contains this pattern
+    // V9.1 FIX: When material_category is also specified, only check sku_pattern
+    // against products in that same category (prevents CP lap SKU from triggering CP B&B rules)
+    if (tc.sku_pattern !== undefined) {
+      const pattern = tc.sku_pattern.toLowerCase();
+
+      // Filter to category-specific products when material_category is specified
+      const productsToCheck = tc.material_category
+        ? materials.filter(m => {
+            const mCat = (m.category || '').toLowerCase();
+            const ruleCat = tc.material_category!.toLowerCase();
+            return mCat === ruleCat || mCat.includes(ruleCat) || ruleCat.includes(mCat);
+          })
+        : materials;
+
+      const hasMatchingSku = productsToCheck.some(
+        m => m.sku?.toLowerCase().includes(pattern)
+      );
+
+      if (!hasMatchingSku) {
+        return {
+          applies: false,
+          reason: `no material SKU matching pattern '${tc.sku_pattern}' in ${tc.material_category || 'all'} products`
+        };
+      }
+      matchedConditions.push(`sku~${tc.sku_pattern}`);
+    }
+
+    // =========================================================================
+    // CONFIG FIELD TRIGGERS - Check frontend config values
+    // Format: { "field": "paint_service_type", "equals": "in_house" }
+    // These are also always checked regardless of "always" flag.
+    // =========================================================================
+
+    if (tc.field !== undefined && tc.equals !== undefined) {
+      const configValue = config?.[tc.field];
+
+      // String comparison (case-insensitive for flexibility)
+      const matches = typeof configValue === 'string' && typeof tc.equals === 'string'
+        ? configValue.toLowerCase() === tc.equals.toLowerCase()
+        : configValue === tc.equals;
+
+      if (!matches) {
+        return {
+          applies: false,
+          reason: `config.${tc.field}='${configValue}' !== '${tc.equals}'`
+        };
+      }
+      matchedConditions.push(`config.${tc.field}=${tc.equals}`);
+    }
+
+    // =========================================================================
+    // CONFIG MATCH CHECK - String equality for config path values
+    // Format: { "config_match": { "path": "flashing.window_head", "value": "z_flashing" } }
+    // Rule only fires when the resolved path equals the expected value.
+    // This is ALWAYS checked regardless of "always" flag.
+    // =========================================================================
+    if (tc.config_match) {
+      const { path, value } = tc.config_match;
+      const actualValue = resolveConfigValue(estimateSettings as Record<string, unknown>, path);
+
+      console.log('🔍 config_match check:', {
+        rule: rule.rule_name || rule.rule_id,
+        path,
+        expected: value,
+        actual: actualValue,
+        estimateSettingsKeys: estimateSettings ? Object.keys(estimateSettings) : 'null',
+      });
+
+      if (actualValue !== undefined && actualValue !== null) {
+        if (String(actualValue) !== value) {
+          console.log(`🔀 Rule ${rule.rule_id}: ${rule.rule_name} — SKIPPED (config_match failed)`);
+          return {
+            applies: false,
+            reason: `config_match failed: ${path}=${actualValue}, expected ${value}`
+          };
+        }
+        matchedConditions.push(`config_match=${path}:${value}`);
+      }
+    }
+
+    // =========================================================================
+    // "ALWAYS" FLAG CHECK
+    // If always=true, skip measurement-based triggers below but material/config
+    // checks above have already been evaluated.
+    // =========================================================================
+    if (tc.always === true) {
+      matchedConditions.push('always=true');
+      // Skip measurement-based triggers - material conditions already checked above
+    } else {
+      // =========================================================================
+      // MEASUREMENT-BASED TRIGGERS - Only check if NOT "always=true"
+      // =========================================================================
+
+      // { "min_corners": N } - check total corners
+      if (tc.min_corners !== undefined) {
+        const totalCorners = context.outside_corners_count + context.inside_corners_count;
+        if (totalCorners < tc.min_corners) {
+          return { applies: false, reason: `corners=${totalCorners} < ${tc.min_corners}` };
+        }
+        matchedConditions.push(`corners>=${tc.min_corners}`);
+      }
+
+      // { "min_openings": N } - check total openings
+      if (tc.min_openings !== undefined) {
+        if (context.openings_count < tc.min_openings) {
+          return { applies: false, reason: `openings=${context.openings_count} < ${tc.min_openings}` };
+        }
+        matchedConditions.push(`openings>=${tc.min_openings}`);
+      }
+
+      // { "min_net_area": N } - check net siding area
+      if (tc.min_net_area !== undefined) {
+        if (context.net_siding_area_sqft < tc.min_net_area) {
+          return { applies: false, reason: `net_area=${context.net_siding_area_sqft} < ${tc.min_net_area}` };
+        }
+        matchedConditions.push(`net_area>=${tc.min_net_area}`);
+      }
+
+      // { "min_facade_area": N } - check facade area
+      if (tc.min_facade_area !== undefined) {
+        if (context.facade_area_sqft < tc.min_facade_area) {
+          return { applies: false, reason: `facade_area=${context.facade_area_sqft} < ${tc.min_facade_area}` };
+        }
+        matchedConditions.push(`facade_area>=${tc.min_facade_area}`);
+      }
+
+      // { "min_belly_band_lf": N } - check belly band linear feet
+      if (tc.min_belly_band_lf !== undefined) {
+        if (context.belly_band_lf < tc.min_belly_band_lf) {
+          return { applies: false, reason: `belly_band_lf=${context.belly_band_lf} < ${tc.min_belly_band_lf}` };
+        }
+        matchedConditions.push(`belly_band>=${tc.min_belly_band_lf}`);
+      }
+
+      // { "min_gable_topout_count": N } - check gable topout count
+      if (tc.min_gable_topout_count !== undefined) {
+        if (context.gable_topout_count < tc.min_gable_topout_count) {
+          return { applies: false, reason: `gable_topout_count=${context.gable_topout_count} < ${tc.min_gable_topout_count}` };
+        }
+        matchedConditions.push(`gable_topout>=${tc.min_gable_topout_count}`);
+      }
+
+      // { "min_topout_lf": N } - check topout linear feet
+      if (tc.min_topout_lf !== undefined) {
+        if (context.topout_lf < tc.min_topout_lf) {
+          return { applies: false, reason: `topout_lf=${context.topout_lf} < ${tc.min_topout_lf}` };
+        }
+        matchedConditions.push(`topout>=${tc.min_topout_lf}`);
+      }
+
+      // =========================================================================
+      // TRIM TRIGGERS - Check trim linear feet conditions
+      // =========================================================================
+
+      // { "min_trim_total_lf": N } - check total trim linear feet (>= comparison)
+      if (tc.min_trim_total_lf !== undefined) {
+        if (context.trim_total_lf < tc.min_trim_total_lf) {
+          return { applies: false, reason: `trim_total_lf=${context.trim_total_lf} < ${tc.min_trim_total_lf}` };
+        }
+        matchedConditions.push(`trim_total>=${tc.min_trim_total_lf}`);
+      }
+
+      // { "trim_total_lf_gt": N } - check total trim linear feet (> comparison, alternative syntax)
+      if (tc.trim_total_lf_gt !== undefined) {
+        if (context.trim_total_lf <= tc.trim_total_lf_gt) {
+          return { applies: false, reason: `trim_total_lf=${context.trim_total_lf} <= ${tc.trim_total_lf_gt}` };
+        }
+        matchedConditions.push(`trim_total>${tc.trim_total_lf_gt}`);
+      }
+
+      // { "min_trim_head_lf": N } - check head trim linear feet
+      if (tc.min_trim_head_lf !== undefined) {
+        if (context.trim_head_lf < tc.min_trim_head_lf) {
+          return { applies: false, reason: `trim_head_lf=${context.trim_head_lf} < ${tc.min_trim_head_lf}` };
+        }
+        matchedConditions.push(`trim_head>=${tc.min_trim_head_lf}`);
+      }
+
+      // { "trim_head_lf_gt": N } - check head trim linear feet (> comparison)
+      if (tc.trim_head_lf_gt !== undefined) {
+        if (context.trim_head_lf <= tc.trim_head_lf_gt) {
+          return { applies: false, reason: `trim_head_lf=${context.trim_head_lf} <= ${tc.trim_head_lf_gt}` };
+        }
+        matchedConditions.push(`trim_head>${tc.trim_head_lf_gt}`);
+      }
+
+      // { "min_trim_jamb_lf": N } - check jamb trim linear feet
+      if (tc.min_trim_jamb_lf !== undefined) {
+        if (context.trim_jamb_lf < tc.min_trim_jamb_lf) {
+          return { applies: false, reason: `trim_jamb_lf=${context.trim_jamb_lf} < ${tc.min_trim_jamb_lf}` };
+        }
+        matchedConditions.push(`trim_jamb>=${tc.min_trim_jamb_lf}`);
+      }
+
+      // { "trim_jamb_lf_gt": N } - check jamb trim linear feet (> comparison)
+      if (tc.trim_jamb_lf_gt !== undefined) {
+        if (context.trim_jamb_lf <= tc.trim_jamb_lf_gt) {
+          return { applies: false, reason: `trim_jamb_lf=${context.trim_jamb_lf} <= ${tc.trim_jamb_lf_gt}` };
+        }
+        matchedConditions.push(`trim_jamb>${tc.trim_jamb_lf_gt}`);
+      }
+
+      // { "min_trim_sill_lf": N } - check sill trim linear feet
+      if (tc.min_trim_sill_lf !== undefined) {
+        if (context.trim_sill_lf < tc.min_trim_sill_lf) {
+          return { applies: false, reason: `trim_sill_lf=${context.trim_sill_lf} < ${tc.min_trim_sill_lf}` };
+        }
+        matchedConditions.push(`trim_sill>=${tc.min_trim_sill_lf}`);
+      }
+
+      // { "trim_sill_lf_gt": N } - check sill trim linear feet (> comparison)
+      if (tc.trim_sill_lf_gt !== undefined) {
+        if (context.trim_sill_lf <= tc.trim_sill_lf_gt) {
+          return { applies: false, reason: `trim_sill_lf=${context.trim_sill_lf} <= ${tc.trim_sill_lf_gt}` };
+        }
+        matchedConditions.push(`trim_sill>${tc.trim_sill_lf_gt}`);
+      }
+    } // End of measurement-based triggers (when not always=true)
+  } // End of trigger condition evaluation
+
+  // =========================================================================
+  // All trigger conditions passed - now check exclusions
+  // =========================================================================
+
+  // Check excludes_if_attributes - skip rule if material has excluded attributes
+  if (rule.excludes_if_attributes && Array.isArray(rule.excludes_if_attributes)) {
+    for (const exclusion of rule.excludes_if_attributes) {
+      const { attribute, equals: expectedValue } = exclusion;
+
+      // Check against ALL assigned materials (if any has the excluded attribute, skip)
+      const hasExcludedAttribute = materials.some(material => {
+        // Dynamically access the attribute on the material object
+        const actualValue = (material as Record<string, any>)[attribute];
+        return actualValue === expectedValue;
+      });
+
+      if (hasExcludedAttribute) {
+        return {
+          applies: false,
+          reason: `excluded: material.${attribute} === ${expectedValue}`
+        };
+      }
+    }
+  }
+
+  // =========================================================================
+  // All conditions passed - return with reason string
+  // =========================================================================
+
+  if (matchedConditions.length > 0) {
+    return { applies: true, reason: matchedConditions.join(', ') };
+  }
+
+  // Unknown trigger condition format - log and apply by default
+  console.warn(`⚠️ Unknown trigger condition format for rule ${rule.rule_id}:`, tc);
+  return { applies: true, reason: 'unknown format - defaulting to apply' };
+}
+
+// ============================================================================
+// EVALUATE FORMULA
+// ============================================================================
+
+export function evaluateFormula(
+  formula: string,
+  context: MeasurementContext
+): { result: number; error?: string } {
+  try {
+    // Create a function that has access to all context variables
+    const contextKeys = Object.keys(context);
+    const contextValues = Object.values(context);
+
+    // Safe formula evaluation using Function constructor
+    const fn = new Function(...contextKeys, `return ${formula};`);
+    const result = fn(...contextValues);
+
+    // Ensure we return a valid number
+    const numResult = Number(result);
+    if (isNaN(numResult) || !isFinite(numResult)) {
+      return { result: 0, error: `Invalid result: ${result}` };
+    }
+
+    return { result: Math.max(0, numResult) }; // Never return negative quantities
+  } catch (err) {
+    return { result: 0, error: String(err) };
+  }
+}
+
+// ============================================================================
+// BUILD NOTE FROM TEMPLATE
+// Substitutes {variable} placeholders with actual values from context
+// ============================================================================
+
+/**
+ * Build a descriptive note from a template with variable substitution.
+ *
+ * Template format: "{facade_sqft} SF facade ÷ {coverage} SF/roll = {quantity} rolls"
+ *
+ * Available variables (from MeasurementContext):
+ * - facade_sqft, net_siding_sqft, openings_perimeter_lf, openings_count
+ * - outside_corners_count, inside_corners_count, trim_total_lf
+ * - Plus calculated values: quantity, coverage, waste_factor, piece_length, unit_cost
+ *
+ * @param template - Note template with {variable} placeholders
+ * @param context - Measurement context with values
+ * @param extras - Additional values like quantity, coverage, waste_factor
+ * @returns Formatted note string with values substituted
+ */
+export function buildNoteFromTemplate(
+  template: string | null | undefined,
+  context: MeasurementContext,
+  extras: Record<string, number | string> = {}
+): string {
+  if (!template) return '';
+
+  // Merge context and extras into a single values map
+  const outsideCornersCount = context.outside_corners_count || context.outside_corner_count || 0;
+  const insideCornersCount = context.inside_corners_count || context.inside_corner_count || 0;
+  const totalCornerCount = outsideCornersCount + insideCornersCount;
+  const facadePerimeterLf = context.facade_perimeter_lf || context.level_starter_lf || 0;
+  const netSidingSqft = context.net_siding_area_sqft || 0;
+  const bellyBandLf = context.belly_band_lf || 0;
+
+  const values: Record<string, number | string> = {
+    // From measurement context
+    facade_sqft: context.facade_sqft || context.facade_area_sqft || 0,
+    facade_area_sqft: context.facade_area_sqft || context.facade_sqft || 0,
+    net_siding_sqft: netSidingSqft,
+    net_siding_area_sqft: netSidingSqft,
+    openings_perimeter_lf: context.openings_perimeter_lf || context.total_opening_perimeter_lf || 0,
+    openings_count: context.openings_count || context.total_openings_count || 0,
+    openings_area_sqft: context.openings_area_sqft || context.total_openings_area_sqft || 0,
+    outside_corners_count: outsideCornersCount,
+    inside_corners_count: insideCornersCount,
+    total_corner_count: totalCornerCount,
+    outside_corner_lf: context.outside_corner_lf || 0,
+    inside_corner_lf: context.inside_corner_lf || 0,
+    total_corner_lf: context.total_corner_lf || 0,
+    trim_total_lf: context.trim_total_lf || 0,
+    trim_head_lf: context.trim_head_lf || 0,
+    trim_jamb_lf: context.trim_jamb_lf || 0,
+    trim_sill_lf: context.trim_sill_lf || 0,
+    facade_perimeter_lf: facadePerimeterLf,
+    corner_height: context.avg_wall_height_ft || context.facade_height_ft || 10,
+    belly_band_lf: bellyBandLf,
+    window_count: context.window_count || 0,
+    door_count: context.door_count || 0,
+    window_perimeter_lf: context.window_perimeter_lf || 0,
+    door_perimeter_lf: context.door_perimeter_lf || 0,
+
+    // Manufacturer-specific siding areas (for Artisan tabs, etc.)
+    artisan_sqft: context.artisan_sqft || context.artisan_area_sqft || 0,
+
+    // Flashing-related computed values
+    kickout_count: outsideCornersCount,  // Kickouts at roof-to-wall intersections ≈ outside corners
+    lf_per_corner: 11,  // Standard 11 LF per corner with waste
+    lf_per_opening: 3,  // Standard 3 LF average per opening for head flashing
+    joint_count: Math.ceil(netSidingSqft / 100),  // Estimate horizontal joints (1 per 100 SF)
+    source_lf: bellyBandLf || facadePerimeterLf,  // Generic source LF
+    joint_lf: facadePerimeterLf,  // Joint LF for caulk calculations
+
+    // Gable-related
+    gable_count: context.gable_count || 0,
+    gable_area_sqft: context.gable_area_sqft || 0,
+
+    // Override with extras (quantity, coverage, waste_factor, piece_length, unit_cost, etc.)
+    ...extras,
+  };
+
+  // Substitute all {variable} placeholders
+  let note = template;
+  for (const [key, value] of Object.entries(values)) {
+    const placeholder = new RegExp(`\\{${key}\\}`, 'g');
+    // Format numbers nicely (integers stay as integers, decimals get 1-2 places)
+    let displayValue: string;
+    if (typeof value === 'number') {
+      if (Number.isInteger(value)) {
+        displayValue = value.toString();
+      } else if (value >= 100) {
+        displayValue = value.toFixed(0); // Large numbers: no decimals
+      } else if (value >= 10) {
+        displayValue = value.toFixed(1); // Medium numbers: 1 decimal
+      } else {
+        displayValue = value.toFixed(2); // Small numbers: 2 decimals
+      }
+    } else {
+      displayValue = String(value);
+    }
+    note = note.replace(placeholder, displayValue);
+  }
+
+  // Clean up any remaining unsubstituted placeholders (show as "N/A")
+  note = note.replace(/\{[^}]+\}/g, 'N/A');
+
+  return note;
+}
+
+/**
+ * Extract coverage value from a formula string.
+ * Looks for patterns like "/ 1350" or "/ 100" in division operations.
+ * @returns Coverage value or 100 as default
+ */
+function extractCoverageFromFormula(formula: string): number {
+  // Match patterns like "/ 1350", "/ 100", "/1350", etc.
+  const divisionMatch = formula.match(/\/\s*(\d+(?:\.\d+)?)/);
+  if (divisionMatch) {
+    return parseFloat(divisionMatch[1]);
+  }
+  return 100; // Default coverage
+}
+
+/**
+ * Extract waste factor from a formula string.
+ * Looks for patterns like "* 1.10", "* 1.15", etc.
+ * @returns Waste factor or 1.10 as default (10% waste)
+ */
+function extractWasteFromFormula(formula: string): number {
+  // Match patterns like "* 1.10", "* 1.15", "*1.1", etc.
+  const wasteMatch = formula.match(/\*\s*(1\.\d+)/);
+  if (wasteMatch) {
+    return parseFloat(wasteMatch[1]);
+  }
+  return 1.10; // Default 10% waste
+}
+
+/**
+ * Extract piece length from a formula string.
+ * Looks for patterns like "/ 12" (12ft pieces), "/ 10" (10ft pieces), etc.
+ * @returns Piece length or 12 as default (12ft standard)
+ */
+function extractPieceLengthFromFormula(formula: string): number {
+  // For piece length, look for small divisors (typically 10 or 12 for board lengths)
+  const divisionMatch = formula.match(/\/\s*(\d+(?:\.\d+)?)/);
+  if (divisionMatch) {
+    const value = parseFloat(divisionMatch[1]);
+    // If it's a small value like 10 or 12, it's likely piece length
+    if (value <= 20) {
+      return value;
+    }
+  }
+  return 12; // Default 12ft piece length
+}
+
+// ============================================================================
+// MAIN: GENERATE AUTO-SCOPE ITEMS V2
+// ============================================================================
+
+/**
+ * Generate auto-scope line items with manufacturer-aware rule application
+ *
+ * Rules with manufacturer_filter = null (generic rules):
+ *   → Use total project measurements (e.g., WRB for entire facade)
+ *
+ * Rules with manufacturer_filter = ['James Hardie']:
+ *   → Only apply to James Hardie products, using Hardie's SF only
+ *
+ * Rules with manufacturer_filter = ['Engage Building Products']:
+ *   → Only apply to FastPlank products, using FastPlank's SF only
+ *
+ * PURE PORT: was `async` and made three DB calls —
+ *   - `fetchMeasurementsFromDatabase(extractionId)`
+ *   - `fetchAutoScopeRules()`
+ *   - `getPricingBySkus(skus, organizationId)`
+ * All three are now caller responsibilities, supplied via `refData`.
+ * `extractionId` and `organizationId` parameters are dropped because they
+ * had no other use.
+ */
+export interface AutoScopeV2RefData {
+  /** All active rows from `siding_auto_scope_rules` (active=true). If empty, internal fallback rules are used — preserving the source's behavior when DB was unconfigured. */
+  autoScopeRules: DbAutoScopeRule[];
+  /** Pricing keyed by SKU, pre-overlaid with any org-level overrides. Replaces the in-source `getPricingBySkus(...)` call. */
+  pricingBySkus: Map<string, PricingItem>;
+  /** Optional pre-fetched cad_hover_measurements row. Replaces the in-source `fetchMeasurementsFromDatabase(extractionId)` call. */
+  dbMeasurements?: CadHoverMeasurements | null;
+}
+
+export function generateAutoScopeItemsV2(
+  webhookMeasurements: Record<string, any> | undefined,
+  refData: AutoScopeV2RefData,
+  options?: AutoScopeV2Options
+): AutoScopeV2Result {
+  const result: AutoScopeV2Result = {
+    line_items: [],
+    rules_evaluated: 0,
+    rules_triggered: 0,
+    rules_skipped: [],
+    measurement_source: 'fallback',
+  };
+
+  const manufacturerGroups = options?.manufacturerGroups || {};
+  const manufacturerNames = Object.keys(manufacturerGroups);
+  const assignedMaterials = options?.assignedMaterials || [];
+  const materialCategoryAreas = options?.materialCategoryAreas || {};
+
+  // V9.0: Extract trim system and WRB product from options
+  const trimSystem = options?.trimSystem || 'hardie';
+  const wrbProduct = options?.wrbProduct || null;
+
+  // Phase 2B: Extract estimate settings from options
+  const estimateSettings = options?.estimateSettings || null;
+  if (estimateSettings) {
+    console.log('⚙️ [Phase 2B] estimate_settings received');
+  }
+
+  // 1. Build measurement context (total project measurements)
+  // PURE PORT: dbMeasurements is supplied via refData. We preserve every log
+  // line from source; the only behavioral change is the data source.
+  let dbMeasurements: CadHoverMeasurements | null = null;
+
+  // DEBUG: Log what we're working with
+  console.log('🔍 [AutoScope] Input diagnostics:');
+  console.log(`   webhookMeasurements keys: ${webhookMeasurements ? Object.keys(webhookMeasurements).join(', ') : 'NONE'}`);
+  if (webhookMeasurements) {
+    console.log(`   webhookMeasurements.facade_sqft: ${(webhookMeasurements as any).facade_sqft}`);
+    console.log(`   webhookMeasurements.facade_total_sqft: ${(webhookMeasurements as any).facade_total_sqft}`);
+    console.log(`   webhookMeasurements.gross_wall_area_sqft: ${(webhookMeasurements as any).gross_wall_area_sqft}`);
+  }
+
+  if (refData.dbMeasurements) {
+    dbMeasurements = refData.dbMeasurements;
+    result.measurement_source = 'database';
+    console.log(`✅ [AutoScope] Loaded dbMeasurements: facade_total_sqft=${(dbMeasurements as any).facade_total_sqft}`);
+  } else {
+    console.log('⚠️ [AutoScope] No dbMeasurements supplied via refData');
+  }
+
+  if (!dbMeasurements && webhookMeasurements) {
+    result.measurement_source = 'webhook';
+  }
+
+  const totalContext = buildMeasurementContext(dbMeasurements, webhookMeasurements);
+
+  // =========================================================================
+  // FALLBACK: Reconstruct facade_area_sqft from manufacturer groups if empty
+  // This handles cases where neither DB nor webhook has aggregate measurements
+  // but we DO have per-material measurements from spatial containment
+  //
+  // ⚠️ WARNING: This fallback can cause DOUBLING if manufacturer groups include
+  // both exterior_wall AND siding classes covering the same physical walls!
+  // The preferred path is to use facade_area_sqft from the webhook payload.
+  // =========================================================================
+  if (totalContext.facade_area_sqft === 0 && Object.keys(manufacturerGroups).length > 0) {
+    let totalArea = 0;
+    let totalPerimeter = 0;
+    for (const [mfr, data] of Object.entries(manufacturerGroups)) {
+      totalArea += data.area_sqft || 0;
+      totalPerimeter += data.linear_ft || 0;
+    }
+    if (totalArea > 0) {
+      console.warn(`⚠️ [AutoScope] FALLBACK TRIGGERED: Reconstructing totalContext from ${Object.keys(manufacturerGroups).length} manufacturer groups`);
+      console.warn(`   ⚠️ This may cause doubling if exterior_wall + siding classes overlap!`);
+      console.warn(`   ⚠️ Preferred: webhook should send facade_area_sqft from cad_hover_measurements`);
+      console.log(`   Total area from manufacturers: ${totalArea.toFixed(2)} SF`);
+      console.log(`   Total perimeter from manufacturers: ${totalPerimeter.toFixed(2)} LF`);
+      totalContext.facade_area_sqft = totalArea;
+      totalContext.facade_sqft = totalArea;
+      totalContext.gross_wall_area_sqft = totalArea;
+      totalContext.net_siding_area_sqft = totalArea;
+      // Estimate perimeter from area if not available
+      if (totalContext.facade_perimeter_lf === 0 && totalContext.avg_wall_height_ft > 0) {
+        totalContext.facade_perimeter_lf = totalArea / totalContext.avg_wall_height_ft;
+        console.log(`   Estimated perimeter: ${totalContext.facade_perimeter_lf.toFixed(2)} LF (area / height)`);
+      }
+    }
+  } else if (totalContext.facade_area_sqft > 0) {
+    console.log(`✅ [AutoScope] Using authoritative facade_area_sqft=${totalContext.facade_area_sqft.toFixed(2)} SF (no fallback needed)`);
+  }
+
+  // Phase 2B: Apply estimate_settings overrides to measurement context
+  if (estimateSettings) {
+    applyEstimateSettingsOverrides(totalContext, estimateSettings);
+  }
+
+  // 2. Fetch auto-scope rules
+  // PURE PORT: rules supplied via refData. If caller passes an empty array,
+  // fall back to the embedded `getFallbackRules()` set — same safety net the
+  // source had when the DB was unconfigured.
+  const rules = (refData.autoScopeRules && refData.autoScopeRules.length > 0)
+    ? refData.autoScopeRules
+    : getFallbackRules();
+  if (rules === refData.autoScopeRules) {
+    console.log(`✅ Loaded ${rules.length} auto-scope rules from refData`);
+  } else {
+    console.warn('⚠️ refData.autoScopeRules empty - using fallback auto-scope rules');
+  }
+  result.rules_evaluated = rules.length;
+
+  console.log(`📋 Evaluating ${rules.length} auto-scope rules...`);
+  console.log(`   Total project area: ${totalContext.facade_area_sqft.toFixed(2)} SF`);
+  if (manufacturerNames.length > 0) {
+    console.log(`   Manufacturer groups: ${manufacturerNames.join(', ')}`);
+  } else {
+    console.log(`   No manufacturer groups - only generic rules will apply`);
+  }
+  if (assignedMaterials.length > 0) {
+    console.log(`   Assigned materials: ${assignedMaterials.map(m => m.sku).join(', ')}`);
+  }
+
+  // V8.0: Log spatial containment status
+  if (options?.spatialContainment?.enabled) {
+    console.log(`[AutoScope V8.0] Spatial containment ENABLED`);
+    console.log(`[AutoScope V8.0] Matched ${options.spatialContainment.matched_openings}/${options.spatialContainment.total_openings} openings`);
+    if (options.spatialContainment.unmatched_openings && options.spatialContainment.unmatched_openings > 0) {
+      console.warn(`[AutoScope V8.0] ⚠️ ${options.spatialContainment.unmatched_openings} unmatched openings (will use project-wide measurements)`);
+    }
+  }
+
+  // V9.0: Log trim system and WRB product
+  console.log(`[AutoScope V9.0] Trim system: ${trimSystem}`);
+  if (trimSystem === 'whitewood') {
+    console.log(`[AutoScope V9.0] → Using WhiteWood lumber trim rules`);
+    console.log(`[AutoScope V9.0] → Skipping Hardie trim rules`);
+  }
+  if (wrbProduct) {
+    console.log(`[AutoScope V9.0] WRB product: ${wrbProduct}`);
+  }
+
+  // 3. Evaluate each rule
+  // Store triggered rules with their context info for line item generation
+  const triggeredRules: Array<{
+    rule: DbAutoScopeRule;
+    quantity: number;
+    manufacturer?: string;  // Which manufacturer this applies to (undefined = generic)
+    context: MeasurementContext;  // The context used for evaluation (for note generation)
+  }> = [];
+
+  // Siding-related material categories to skip when user has siding assignments
+  const SIDING_MATERIAL_CATEGORIES = ['siding', 'siding_panels', 'lap_siding', 'shingle_siding', 'panel_siding', 'vertical_siding'];
+
+  for (const rule of rules) {
+    // Skip siding panel rules if material_assignments already cover siding
+    const isSidingCategory = SIDING_MATERIAL_CATEGORIES.includes(rule.material_category?.toLowerCase() || '');
+    if (options?.skipSidingPanels && isSidingCategory) {
+      console.log(`  ⏭️ Rule ${rule.rule_id}: ${rule.rule_name} → SKIPPED (user has siding assignments)`);
+      result.rules_skipped.push(`${rule.material_sku}: skipped - user has siding assignments`);
+      continue;
+    }
+
+    // =========================================================================
+    // MANUFACTURER-AWARE RULE APPLICATION
+    // =========================================================================
+
+    const hasManufacturerFilter = rule.manufacturer_filter && rule.manufacturer_filter.length > 0;
+
+    if (!hasManufacturerFilter) {
+      // =====================================================================
+      // GENERIC RULE: Apply to total project measurements
+      // But if rule has material_category in trigger_condition, scope to that category's area
+      // =====================================================================
+      const { applies, reason } = shouldApplyRule(rule, totalContext, assignedMaterials, options?.config, trimSystem, estimateSettings);
+
+      if (applies) {
+        // Check if this rule targets a specific material_category
+        // If so, use the category's assigned area instead of global facade
+        let evalContext = totalContext;
+        const triggerCategory = rule.trigger_condition?.material_category?.toLowerCase();
+        console.log(`🎯 SCOPE_DEBUG rule=${rule.rule_id} triggerCat=${triggerCategory} hasArea=${!!materialCategoryAreas[triggerCategory || '']} keys=${Object.keys(materialCategoryAreas)}`);
+
+        if (triggerCategory && materialCategoryAreas[triggerCategory]) {
+          const categoryArea = materialCategoryAreas[triggerCategory].total_area_sqft;
+          evalContext = {
+            ...totalContext,
+            facade_sqft: categoryArea,
+            facade_area_sqft: categoryArea,
+            gross_wall_area_sqft: categoryArea,
+            net_siding_area_sqft: categoryArea,
+          };
+          // Verbose scoping log removed to reduce log volume
+        }
+
+        const { result: quantity, error } = evaluateFormula(rule.quantity_formula, evalContext);
+
+        if (error) {
+          console.warn(`⚠️ Rule ${rule.rule_id} (${rule.rule_name}): Formula error - ${error}`);
+          result.rules_skipped.push(`${rule.material_sku}: formula error - ${error}`);
+          continue;
+        }
+
+        if (quantity > 0) {
+          triggeredRules.push({ rule, quantity, manufacturer: undefined, context: evalContext });
+          result.rules_triggered++;
+          // Verbose per-rule logging removed to reduce log volume
+        } else {
+          result.rules_skipped.push(`${rule.material_sku}: quantity=0`);
+          console.log(`  ○ Rule ${rule.rule_id}: ${rule.rule_name} → 0 (formula returned 0)`);
+        }
+      } else {
+        result.rules_skipped.push(`${rule.material_sku}: ${reason}`);
+        // Special logging for config_toggle suppression
+        if (reason.includes('config_toggle')) {
+          console.log(`🔕 Rule ${rule.rule_id}: ${rule.rule_name} — SUPPRESSED by toggle: ${rule.trigger_condition?.config_toggle}`);
+        } else {
+          console.log(`  ✗ Rule ${rule.rule_id}: ${rule.rule_name} → skipped (${reason})`);
+        }
+      }
+    } else {
+      // =====================================================================
+      // MANUFACTURER-SPECIFIC RULE: Apply only to matching manufacturers
+      // =====================================================================
+
+      // Find matching manufacturer groups
+      const matchingManufacturers = rule.manufacturer_filter!.filter(
+        mfr => manufacturerGroups[mfr] !== undefined
+      );
+
+      if (matchingManufacturers.length === 0) {
+        // No matching manufacturers in the project
+        result.rules_skipped.push(`${rule.material_sku}: no matching manufacturer groups`);
+        console.log(`  ✗ Rule ${rule.rule_id}: ${rule.rule_name} → skipped (no matching manufacturers: ${rule.manufacturer_filter!.join(', ')})`);
+        continue;
+      }
+
+      // Apply rule to each matching manufacturer's measurements
+      for (const mfrName of matchingManufacturers) {
+        const mfrData = manufacturerGroups[mfrName];
+
+        // Skip if manufacturer has no area (nothing to calculate)
+        if (mfrData.area_sqft <= 0 && mfrData.linear_ft <= 0) {
+          console.log(`  ○ Rule ${rule.rule_id}: ${rule.rule_name} [${mfrName}] → skipped (no area/linear)`);
+          continue;
+        }
+
+        // Build manufacturer-specific context
+        const mfrContext = buildManufacturerContext(totalContext, mfrData);
+
+        // Scope to material category area if rule specifies one (e.g., board_batten = 151 SF vs full manufacturer area)
+        const triggerCategory = rule.trigger_condition?.material_category;
+        if (triggerCategory && materialCategoryAreas?.[triggerCategory]) {
+          const categoryArea = materialCategoryAreas[triggerCategory].total_area_sqft;
+          mfrContext.facade_sqft = categoryArea;
+          mfrContext.facade_area_sqft = categoryArea;
+          mfrContext.gross_wall_area_sqft = categoryArea;
+          mfrContext.net_siding_area_sqft = categoryArea;
+        }
+
+        // Diagnostic for caulk rules in manufacturer path
+        if (rule.material_category === 'caulk' || rule.rule_name?.toLowerCase().includes('caulk')) {
+          console.log(`🧪 MFR CAULK: rule=${rule.rule_name}, mfr=${mfrName}, ` +
+            `es.consumables.paintable=${estimateSettings?.consumables?.include_paintable_caulk}, ` +
+            `es.consumables.color_matched=${estimateSettings?.consumables?.include_color_matched_caulk}`);
+        }
+
+        const { applies, reason } = shouldApplyRule(rule, mfrContext, assignedMaterials, options?.config, trimSystem, estimateSettings);
+
+        if (applies) {
+          const { result: quantity, error } = evaluateFormula(rule.quantity_formula, mfrContext);
+
+          if (error) {
+            console.warn(`⚠️ Rule ${rule.rule_id} (${rule.rule_name}) [${mfrName}]: Formula error - ${error}`);
+            result.rules_skipped.push(`${rule.material_sku} [${mfrName}]: formula error - ${error}`);
+            continue;
+          }
+
+          if (quantity > 0) {
+            triggeredRules.push({ rule, quantity, manufacturer: mfrName, context: mfrContext });
+            result.rules_triggered++;
+            console.log(`  ✓ Rule ${rule.rule_id}: ${rule.rule_name} [${mfrName}: ${mfrData.area_sqft.toFixed(0)} SF] → ${Math.ceil(quantity)} ${rule.unit} (${reason})`);
+          } else {
+            result.rules_skipped.push(`${rule.material_sku} [${mfrName}]: quantity=0`);
+            console.log(`  ○ Rule ${rule.rule_id}: ${rule.rule_name} [${mfrName}] → 0 (formula returned 0)`);
+          }
+        } else {
+          result.rules_skipped.push(`${rule.material_sku} [${mfrName}]: ${reason}`);
+          // Special logging for config_toggle suppression
+          if (reason.includes('config_toggle')) {
+            console.log(`🔕 Rule ${rule.rule_id}: ${rule.rule_name} [${mfrName}] — SUPPRESSED by toggle: ${rule.trigger_condition?.config_toggle}`);
+          } else {
+            console.log(`  ✗ Rule ${rule.rule_id}: ${rule.rule_name} [${mfrName}] → skipped (${reason})`);
+          }
+        }
+      }
+    }
+  }
+
+  // 4. Resolve SKUs for trim rules based on estimate_settings/config
+  // This allows user-selected trim widths and finishes to drive the correct SKU
+  const TRIM_CATEGORIES = ['window_trim', 'door_trim', 'window_casing', 'door_casing', 'casing', 'opening_trim'];
+
+  // Build a map of rule -> resolved SKU for trim rules
+  const resolvedSkuMap = new Map<number, { sku: string; width: string; finish: string }>();
+
+  for (const { rule } of triggeredRules) {
+    const category = rule.material_category?.toLowerCase() || '';
+
+    // Check if this is a trim rule that should use user settings
+    if (TRIM_CATEGORIES.some(tc => category.includes(tc))) {
+      // Determine if this is window or door trim
+      const isWindowTrim = category.includes('window') || (category === 'casing' && !category.includes('door'));
+      const isDoorTrim = category.includes('door');
+
+      if (isWindowTrim) {
+        const resolved = resolveHardieTrimSku('window', options?.config, estimateSettings, rule.material_sku, refData.pricingBySkus);
+        resolvedSkuMap.set(rule.rule_id, resolved);
+      } else if (isDoorTrim) {
+        const resolved = resolveHardieTrimSku('door', options?.config, estimateSettings, rule.material_sku, refData.pricingBySkus);
+        resolvedSkuMap.set(rule.rule_id, resolved);
+      }
+    }
+  }
+
+  // Collect all unique SKUs (use resolved SKUs where available)
+  const skus = [...new Set(triggeredRules.map(tr => {
+    const resolved = resolvedSkuMap.get(tr.rule.rule_id);
+    return resolved?.sku || tr.rule.material_sku;
+  }))];
+  // PURE PORT: pricing keyed by SKU is supplied via refData (already overlaid
+  // with any organization-level overrides). Same `pricingMap` variable name as
+  // source so the rest of the body stays byte-identical.
+  const pricingMap = refData.pricingBySkus;
+  // `skus` is intentionally still computed above so any SKU referenced by a
+  // triggered rule can still be looked up; if absent from the supplied map,
+  // pricing falls through the same defaults the source used.
+  void skus;
+
+  // 5. Build line items with pricing
+  for (const { rule, quantity, manufacturer, context } of triggeredRules) {
+    // Use resolved SKU for trim rules
+    const resolved = resolvedSkuMap.get(rule.rule_id);
+    const effectiveSku = resolved?.sku || rule.material_sku;
+    const pricing = pricingMap.get(effectiveSku);
+
+    const rawMaterialCost = Number(pricing?.material_cost || 0);
+    const laborUnitCost = Number(pricing?.base_labor_cost || 0);
+    const totalLaborRate = pricing?.total_labor_cost || calculateTotalLabor(laborUnitCost);
+    const finalQuantity = Math.ceil(quantity);
+
+    // For labor-only SKUs (e.g., LABOR-PAINT-SIDING), use total_labor_cost as the unit cost
+    // This ensures paint labor shows the correct rate instead of $0.00
+    const isLaborOnlyItem = rawMaterialCost === 0 && totalLaborRate > 0;
+    const materialUnitCost = isLaborOnlyItem ? totalLaborRate : rawMaterialCost;
+
+    // Use product_name from pricing lookup for vendor-ready descriptions
+    // Append rule_name as purpose label (e.g., "HardieTrim 5/4 x 4 (Window Casing)")
+    // Skip suffix if product_name and rule_name are similar to avoid redundancy
+    const productName = pricing?.product_name;
+    const needsSuffix = productName
+      && !productName.toLowerCase().includes(rule.rule_name.toLowerCase())
+      && !rule.rule_name.toLowerCase().includes(productName.toLowerCase());
+
+    const description = productName
+      ? (needsSuffix ? `${productName} (${rule.rule_name})` : productName)
+      : (manufacturer ? `${rule.rule_name} (${manufacturer})` : rule.rule_name);
+
+    // Build note from template with variable substitution
+    // Extra values for template: quantity, coverage, waste_factor, piece_length, unit, unit_cost
+    // Use pricing_items.coverage_value for coverage when available (manufacturer-specific)
+    // Fall back to extracting from formula if not set in pricing_items
+    const pricingCoverage = pricing?.coverage_value;
+
+    // Determine coverage: use pricing_items.coverage_value if it exists and is > 0
+    // Otherwise extract from the formula (e.g., "/ 1350" → 1350)
+    const coverageValue = (pricingCoverage && pricingCoverage > 0)
+      ? pricingCoverage
+      : extractCoverageFromFormula(rule.quantity_formula);
+
+    // Determine piece_length: for trim/corner products, use coverage_value as piece length
+    // For area-based products (like WRB), extract from formula or use 12ft default
+    const isAreaBased = rule.material_category === 'water_barrier' ||
+                        rule.material_category === 'wrb' ||
+                        rule.material_category === 'house_wrap';
+    const pieceLengthValue = isAreaBased
+      ? extractPieceLengthFromFormula(rule.quantity_formula) // WRB doesn't use piece_length
+      : (pricingCoverage && pricingCoverage > 0 && pricingCoverage <= 20)
+        ? pricingCoverage  // Use coverage_value for trim (it's the piece length in LF)
+        : extractPieceLengthFromFormula(rule.quantity_formula);
+
+    const noteExtras: Record<string, number | string> = {
+      quantity: finalQuantity,
+      unit: rule.output_unit || rule.unit,
+      unit_cost: materialUnitCost,
+      coverage: coverageValue,
+      piece_length: pieceLengthValue,
+      waste_factor: extractWasteFromFormula(rule.quantity_formula),
+    };
+
+    // Build note: use calculation_notes template if available, otherwise fall back to description
+    let notes: string | undefined;
+    if (rule.calculation_notes) {
+      notes = buildNoteFromTemplate(rule.calculation_notes, context, noteExtras);
+      if (manufacturer) {
+        notes += ` [${manufacturer}]`;
+      }
+    } else {
+      // Fallback to old behavior
+      notes = manufacturer
+        ? `${rule.description || ''} [Applied to ${manufacturer} products]`.trim()
+        : rule.description || undefined;
+    }
+
+    const lineItem: AutoScopeLineItem = {
+      description,
+      sku: effectiveSku,  // Use resolved SKU for trim rules
+      quantity: finalQuantity,
+      unit: rule.output_unit || rule.unit,
+      category: rule.material_category,
+      presentation_group: rule.presentation_group,
+
+      material_unit_cost: materialUnitCost,
+      material_extended: Math.round(finalQuantity * materialUnitCost * 100) / 100,
+      labor_unit_cost: laborUnitCost,
+      labor_extended: Math.round(finalQuantity * totalLaborRate * 100) / 100,
+
+      calculation_source: 'auto-scope',
+      rule_id: String(rule.rule_id),
+      formula_used: rule.quantity_formula,
+      notes,
+    };
+
+    result.line_items.push(lineItem);
+  }
+
+  console.log(`✅ Auto-scope V2 complete: ${result.rules_triggered}/${result.rules_evaluated} rules triggered, ${result.line_items.length} line items`);
+
+  return result;
+}
+
+// ============================================================================
+// FALLBACK RULES (when database unavailable)
+// ============================================================================
+
+function getFallbackRules(): DbAutoScopeRule[] {
+  const now = new Date().toISOString();
+  return [
+    {
+      rule_id: 1,
+      rule_name: 'Tyvek House Wrap (Fallback)',
+      description: 'Fallback rule - 1350 SF coverage per roll',
+      material_category: 'water_barrier',
+      material_sku: 'TYVEK-HW-9X150',
+      quantity_formula: 'Math.ceil(facade_area_sqft / 1350)',
+      unit: 'ROLL',
+      output_unit: 'ROLL',
+      size_description: null,
+      trigger_condition: { always: true },
+      presentation_group: 'siding',
+      group_order: 1,
+      item_order: 1,
+      priority: 1,
+      active: true,
+      created_at: now,
+      updated_at: now,
+      manufacturer_filter: null, // Generic rule - applies to all
+      calculation_notes: '{facade_sqft} SF facade ÷ 1350 SF/roll = {quantity} rolls',
+    },
+    {
+      rule_id: 2,
+      rule_name: 'Siding Nails (Fallback)',
+      description: 'Fallback rule - 1 box per 100 SF',
+      material_category: 'fasteners',
+      material_sku: 'MAZE-SIDING-2.5',
+      quantity_formula: 'Math.ceil((facade_area_sqft - openings_area_sqft) / 100)',
+      unit: 'BOX',
+      output_unit: 'BOX',
+      size_description: null,
+      trigger_condition: { always: true },
+      presentation_group: 'fasteners',
+      group_order: 5,
+      item_order: 1,
+      priority: 1,
+      active: true,
+      created_at: now,
+      updated_at: now,
+      manufacturer_filter: null, // Generic rule - applies to all
+      calculation_notes: '{net_siding_sqft} SF siding ÷ 100 SF/box = {quantity} boxes',
+    },
+    {
+      rule_id: 3,
+      rule_name: 'Caulk (Fallback)',
+      description: 'Fallback rule - 1 tube per 25 LF',
+      material_category: 'accessories',
+      material_sku: 'OSI-QUAD-10OZ',
+      quantity_formula: 'Math.ceil(openings_perimeter_lf / 25)',
+      unit: 'TUBE',
+      output_unit: 'TUBE',
+      size_description: null,
+      trigger_condition: { min_openings: 1 },
+      presentation_group: 'fasteners',
+      group_order: 5,
+      item_order: 2,
+      priority: 1,
+      active: true,
+      created_at: now,
+      updated_at: now,
+      manufacturer_filter: null, // Generic rule - applies to all
+      calculation_notes: '{openings_perimeter_lf} LF openings ÷ 25 LF/tube = {quantity} tubes',
+    },
+  ];
+}

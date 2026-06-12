@@ -1,0 +1,3437 @@
+/**
+ * Orchestrator V2 - PURE PORT for @estimatepros/estimating-engine
+ *
+ * Source: ~/Downloads/exterior-estimation-api-temp/src/calculations/siding/orchestrator-v2.ts
+ *
+ * Behavior preserved 1:1: every formula, every console.log, every fall-through,
+ * every UNMATCHED safety-net branch, the labor + overhead computation, the
+ * line-item consolidation, the spatial-containment logic — all byte-identical
+ * to source.
+ *
+ * Deviations from source (the only ones):
+ * 1. Database imports removed (`@/services/database`, `@/services/pricing`,
+ *    `@/services/configService`).
+ * 2. The four async DB-bound calls inside the entry point are replaced with
+ *    refData reads — no fetch, no Supabase, no `await`:
+ *      • getCalculationConstants('siding')          → input.refData.calculationConstants
+ *      • detection_class_material_mapping query     → input.refData.detectionClassMappings
+ *      • getProjectEstimateSettings(projectId)       → input.refData.projectEstimateSettings
+ *      • labor_rates / labor_auto_scope_rules /     → input.refData.laborRates /
+ *        overhead_costs queries                       laborAutoScopeRules / overheadCosts
+ *      • organizations.settings.overhead_config      → input.refData.orgOverheadConfig
+ *      • getPricingByIds(...)                        → input.refData.pricingByIds
+ *      • buildManufacturerGroups(...)               → sync (Step 2 signature)
+ *      • generateAutoScopeItemsV2(...)              → sync (Step 2 signature)
+ * 3. Function is SYNCHRONOUS. `async` removed, `Promise<...>` return type
+ *    unwrapped. `await` keywords removed at every internal call site.
+ * 4. Public entry point is now `calculateSidingTakeoff(input)` taking a
+ *    single `SidingOrchestratorV2Input` bag. The body destructures the bag
+ *    so every internal variable name matches source verbatim.
+ *
+ * Original schema mapping preserved (rule_id, material_sku, rule_name, etc.).
+ */
+
+import type { MaterialAssignment, WebhookMeasurements, PerMaterialMeasurements } from '../types/webhook';
+import type { PricingItem } from '../types/pricing';
+import {
+  generateAutoScopeItemsV2,
+  buildManufacturerGroups,
+  buildAssignedMaterialsFromPricing,
+  resolveConfigToggle,
+  type DbAutoScopeRule,
+} from '../autoscope/autoscopeV2';
+import type { AutoScopeLineItem, CadHoverMeasurements, MaterialCategoryAreas } from '../types/autoscope';
+import type { DetectionCountPricing } from '../types/detectionCountPricing';
+import type {
+  CalculationConstants,
+  ProjectEstimateSettings,
+} from '../types/config';
+// `LaborRate`, `OverheadCost`, `LaborAutoScopeRule`, and `OrgOverheadConfig` are
+// declared as private file-scope interfaces below (byte-identical to source).
+// `DetectionClassMapping` is sourced from the engine's types module because it
+// was declared inside the function body in the source — file-scope is needed
+// for the refData input shape.
+import type { DetectionClassMapping } from '../types/orchestrator';
+
+// ============================================================================
+// BOOLEAN HELPERS - Handle JSON string "true"/"false" from Supabase
+// ============================================================================
+
+/**
+ * Check if a value is explicitly false (handles both boolean false and string "false")
+ */
+function isFalse(value: unknown): boolean {
+  return value === false || value === 'false';
+}
+
+/**
+ * Check if a value is explicitly true (handles both boolean true and string "true")
+ */
+function isTrue(value: unknown): boolean {
+  return value === true || value === 'true';
+}
+
+// ============================================================================
+// TYPES
+// ============================================================================
+
+// Labor rate from database
+interface LaborRate {
+  id: string;
+  rate_name: string;
+  description: string;
+  trade: string;
+  presentation_group: string;
+  unit: string;
+  base_rate: string;
+  difficulty_multiplier: string;
+  min_charge: string | null;
+  notes: string;
+}
+
+// Overhead cost from database
+interface OverheadCost {
+  id: string;
+  cost_name: string;
+  description: string;
+  category: string;
+  cost_type: string;
+  unit: string | null;
+  base_rate: string | null;
+  calculation_formula: string | null;
+  default_quantity: string;
+  applies_to_trade: string[] | null;
+  required: boolean;
+  display_order: number;
+  notes: string;
+}
+
+// Labor auto-scope rule from database
+interface LaborAutoScopeRule {
+  id: number;
+  rule_id: string;
+  rule_name: string;
+  description: string | null;
+  trade: string;
+  trigger_type: 'always' | 'material_category' | 'material_sku_pattern' | 'detection_class';
+  trigger_value: string | null;
+  trigger_condition: Record<string, any> | null;
+  labor_rate_id: number | null;
+  quantity_source: 'facade_sqft' | 'material_sqft' | 'material_count' | 'detection_count' | 'material_lf';
+  quantity_formula: string | null;
+  quantity_unit: string;
+  priority: number;
+  active: boolean;
+  // Joined labor_rates data
+  labor_rates?: LaborRate;
+}
+
+// Labor line item for output
+interface LaborLineItem {
+  rate_id: string;
+  rate_name: string;
+  description: string;
+  quantity: number;
+  unit: string;
+  unit_cost: number;
+  total_cost: number;
+  notes?: string;
+}
+
+// Overhead line item for output
+interface OverheadLineItem {
+  cost_id: string;
+  cost_name: string;
+  description: string;
+  category: string;
+  quantity?: number;
+  unit?: string;
+  rate?: number;
+  amount: number;
+  calculation_type: string;
+  notes?: string;
+}
+
+// Project totals
+interface ProjectTotals {
+  material_cost: number;
+  material_markup_rate: number;
+  material_markup_amount: number;
+  material_total: number;
+
+  installation_labor_subtotal: number;
+  overhead_subtotal: number;
+  overhead_total: number;  // For display: overhead_subtotal + project_insurance
+  labor_cost_before_markup: number;
+  labor_markup_rate: number;
+  labor_markup_amount: number;
+  labor_total: number;
+
+  subtotal: number;
+  project_insurance: number;
+  grand_total: number;
+}
+
+// ============================================================================
+// MIKE SKJEI CALCULATION CONSTANTS
+// ============================================================================
+
+const MARKUP_RATE = 0.26;
+const SOC_UNEMPLOYMENT_RATE = 0.1265;
+const LI_HOURLY_RATE = 3.56;
+const INSURANCE_RATE_PER_THOUSAND = 24.38;
+const DEFAULT_CREW_SIZE = 4;
+const DEFAULT_ESTIMATED_WEEKS = 2;
+
+// Organization-specific overhead config (from organizations.settings.overhead_config)
+interface OrgOverheadConfig {
+  crew_size?: number;
+  estimated_weeks?: number;
+  li_hourly_rate?: number;
+  insurance_rate_per_thousand?: number;
+  include_dumpster?: boolean;
+  dumpster_rate?: number;
+  include_toilet?: boolean;
+  toilet_rate?: number;
+  mobilization_total?: number;
+  mobilization_type?: string;
+  mobilization_note?: string;
+}
+
+export interface CombinedLineItem {
+  description: string;
+  sku: string;
+  quantity: number;
+  unit: string;
+  category: string;
+  presentation_group: string;
+  item_order?: number;  // Display order within presentation group (higher = bottom)
+
+  // Pricing
+  material_unit_cost: number;
+  material_extended: number;
+  labor_unit_cost: number;
+  labor_extended: number;
+  total_extended: number;
+
+  // Labor calculation
+  squares_for_labor?: number;
+  labor_class?: string;  // Links to labor_rates.rate_name (e.g., "Lap Siding Installation")
+  is_colorplus?: boolean;  // Flag for ColorPlus premium labor
+
+  // Metadata
+  calculation_source: 'assigned_material' | 'auto-scope' | 'bluebeam_unmatched' | 'detection_count_unmatched';
+  pricing_item_id?: string;
+  detection_id?: string;
+  detection_ids?: string[];
+  detection_count?: number;
+  rule_id?: string;
+  formula_used?: string;
+  notes?: string;
+  raw_quantity?: number;  // Original SF/LF before conversion (for note rebuilding during consolidation)
+}
+
+export interface V2CalculationResult {
+  success: boolean;
+  line_items: CombinedLineItem[];
+  labor: {
+    installation_items: LaborLineItem[];
+    installation_subtotal: number;
+  };
+  overhead: {
+    items: OverheadLineItem[];
+    subtotal: number;
+  };
+  totals: {
+    material_cost: number;
+    labor_cost: number;
+    overhead: number;
+    subtotal: number;
+    markup_percent: number;
+    markup_amount: number;
+    total: number;
+  };
+  project_totals: ProjectTotals;
+  metadata: {
+    pricing_method: 'hybrid-v2';
+    calculation_method: string;
+    assigned_items_count: number;
+    auto_scope_items_count: number;
+    items_priced: number;
+    items_missing: string[];
+    items_before_consolidation: number;
+    items_after_consolidation: number;
+    measurement_source: 'database' | 'webhook' | 'fallback';
+    rules_evaluated: number;
+    rules_triggered: number;
+    markup_rate: number;
+    crew_size: number;
+    estimated_weeks: number;
+    warnings: Array<{ code: string; message: string }>;
+  };
+}
+
+// ============================================================================
+// INSTALLATION LABOR CALCULATION
+// ============================================================================
+
+/**
+ * Calculate installation labor using labor_auto_scope_rules
+ * Groups materials by labor_class for separate labor line items per siding type.
+ * Also adds ColorPlus premium labor for ColorPlus materials.
+ *
+ * Dynamically generates labor items based on:
+ * - labor_class from pricing_items (e.g., "Lap Siding Installation", "Panel Siding Installation")
+ * - ColorPlus premium (additional labor for ColorPlus products)
+ * - Detection counts for specialty items
+ * - Facade area for universal items (WRB, demo)
+ */
+function calculateInstallationLaborFromRules(
+  materials: CombinedLineItem[],
+  laborAutoScopeRules: LaborAutoScopeRule[],
+  detectionCounts: Record<string, { count: number; total_lf?: number; total_sf?: number }> | undefined,
+  facadeAreaSqft: number,
+  laborRates: LaborRate[] = []
+): { laborItems: LaborLineItem[], subtotal: number } {
+
+  console.log('');
+  console.log('═══════════════════════════════════════════════════════════════════════');
+  console.log('👷 calculateInstallationLaborFromRules FUNCTION ENTERED');
+  console.log('═══════════════════════════════════════════════════════════════════════');
+  console.log(`   Facade area: ${facadeAreaSqft} SF (${(facadeAreaSqft / 100).toFixed(2)} SQ)`);
+  console.log(`   Rules to evaluate: ${laborAutoScopeRules.length}`);
+  console.log(`   Materials: ${materials.length}`);
+  console.log(`   Labor rates: ${laborRates.length}`);
+
+  const laborItems: LaborLineItem[] = [];
+
+  // =========================================================================
+  // STEP 1: Group materials by labor_class for installation labor
+  // This creates separate labor lines for lap siding, panel siding, etc.
+  // =========================================================================
+  interface LaborClassAccumulator {
+    squares: number;       // Total squares for labor
+    sqft: number;          // Total square feet
+    count: number;         // Count of items
+    lf: number;            // Linear feet
+    colorplusSquares: number;  // Squares of ColorPlus materials
+  }
+
+  const materialsByLaborClass: Record<string, LaborClassAccumulator> = {};
+
+  // Also track by category for legacy rule support
+  const materialsByCategory: Record<string, { sqft: number; count: number; lf: number }> = {};
+
+  for (const item of materials) {
+    // Group by labor_class (new approach)
+    const laborClass = item.labor_class || 'Lap Siding Installation';  // Default to lap siding
+    if (!materialsByLaborClass[laborClass]) {
+      materialsByLaborClass[laborClass] = { squares: 0, sqft: 0, count: 0, lf: 0, colorplusSquares: 0 };
+    }
+
+    // Accumulate squares for labor from the item
+    if (item.squares_for_labor) {
+      materialsByLaborClass[laborClass].squares += item.squares_for_labor;
+
+      // Track ColorPlus separately
+      if (item.is_colorplus) {
+        materialsByLaborClass[laborClass].colorplusSquares += item.squares_for_labor;
+      }
+    }
+
+    // Also accumulate by unit for other calculations
+    if (item.unit === 'SF' || item.unit === 'sf') {
+      materialsByLaborClass[laborClass].sqft += item.quantity;
+    } else if (item.unit === 'LF' || item.unit === 'lf') {
+      materialsByLaborClass[laborClass].lf += item.quantity;
+    } else {
+      materialsByLaborClass[laborClass].count += item.quantity;
+    }
+
+    // Legacy: also group by category for rule evaluation
+    const category = (item.category || 'other').toLowerCase();
+    if (!materialsByCategory[category]) {
+      materialsByCategory[category] = { sqft: 0, count: 0, lf: 0 };
+    }
+
+    if (item.unit === 'SF' || item.unit === 'sf') {
+      materialsByCategory[category].sqft += item.quantity;
+    } else if (item.unit === 'LF' || item.unit === 'lf') {
+      materialsByCategory[category].lf += item.quantity;
+    } else {
+      if (item.squares_for_labor) {
+        materialsByCategory[category].sqft += item.squares_for_labor * 100;
+      }
+      materialsByCategory[category].count += item.quantity;
+    }
+  }
+
+  console.log('   Labor classes found:', Object.keys(materialsByLaborClass).join(', '));
+  console.log('   Material categories found:', Object.keys(materialsByCategory).join(', '));
+
+  // =========================================================================
+  // STEP 2: Generate labor items by labor_class
+  // Creates separate lines like "Install fiber cement lap siding" and "Install panel siding"
+  // =========================================================================
+  for (const [laborClassName, data] of Object.entries(materialsByLaborClass)) {
+    if (data.squares <= 0) continue;
+
+    // Find the matching labor rate by rate_name
+    const matchingRate = laborRates.find(r =>
+      r.rate_name.toLowerCase() === laborClassName.toLowerCase()
+    );
+
+    if (matchingRate) {
+      const unitCost = parseFloat(matchingRate.base_rate) || 0;
+      const multiplier = parseFloat(matchingRate.difficulty_multiplier) || 1.0;
+      const minCharge = parseFloat(matchingRate.min_charge || '0');
+
+      const baseCost = data.squares * unitCost * multiplier;
+      const totalCost = Math.max(baseCost, minCharge);
+
+      console.log(`   ✅ ${laborClassName}: ${data.squares.toFixed(2)} SQ × $${unitCost}/SQ = $${totalCost.toFixed(2)}`);
+
+      laborItems.push({
+        rate_id: matchingRate.id,
+        rate_name: matchingRate.rate_name,
+        description: matchingRate.description,
+        quantity: Math.round(data.squares * 100) / 100,
+        unit: matchingRate.unit || 'SQ',
+        unit_cost: unitCost,
+        total_cost: Math.round(totalCost * 100) / 100,
+        notes: `${(data.sqft || data.squares * 100).toFixed(0)} SF ÷ 100 = ${data.squares.toFixed(2)} SQ @ $${unitCost.toFixed(2)}/SQ`
+      });
+
+      // =========================================================================
+      // STEP 3: Add ColorPlus Premium if applicable
+      // This is an ADDITIONAL line for the extra labor on ColorPlus materials
+      // =========================================================================
+      if (data.colorplusSquares > 0) {
+        const colorplusPremiumRate = laborRates.find(r =>
+          r.rate_name.toLowerCase().includes('colorplus') ||
+          r.rate_name.toLowerCase().includes('color plus') ||
+          r.rate_name.toLowerCase().includes('premium')
+        );
+
+        if (colorplusPremiumRate) {
+          const premiumUnitCost = parseFloat(colorplusPremiumRate.base_rate) || 0;
+          const premiumMultiplier = parseFloat(colorplusPremiumRate.difficulty_multiplier) || 1.0;
+          const premiumMinCharge = parseFloat(colorplusPremiumRate.min_charge || '0');
+
+          const premiumBaseCost = data.colorplusSquares * premiumUnitCost * premiumMultiplier;
+          const premiumTotalCost = Math.max(premiumBaseCost, premiumMinCharge);
+
+          console.log(`   ✅ ColorPlus Premium (${laborClassName}): ${data.colorplusSquares.toFixed(2)} SQ × $${premiumUnitCost}/SQ = $${premiumTotalCost.toFixed(2)}`);
+
+          laborItems.push({
+            rate_id: colorplusPremiumRate.id,
+            rate_name: colorplusPremiumRate.rate_name,
+            description: `ColorPlus premium labor for ${laborClassName}`,
+            quantity: Math.round(data.colorplusSquares * 100) / 100,
+            unit: colorplusPremiumRate.unit || 'SQ',
+            unit_cost: premiumUnitCost,
+            total_cost: Math.round(premiumTotalCost * 100) / 100,
+            notes: `ColorPlus premium: ${data.colorplusSquares.toFixed(2)} SQ @ $${premiumUnitCost.toFixed(2)}/SQ`
+          });
+        } else {
+          console.log(`   ⚠️ No ColorPlus premium rate found for ${data.colorplusSquares.toFixed(2)} SQ of ColorPlus material`);
+        }
+      }
+    } else {
+      console.log(`   ⚠️ No labor rate found for labor_class: ${laborClassName}`);
+    }
+  }
+
+  // =========================================================================
+  // STEP 4: Evaluate auto-scope rules for non-siding labor (WRB, demo, specialty items)
+  // These rules handle things like facade-based items and detection-based items
+  // =========================================================================
+  console.log(`\n🔍 [LaborAutoScope] Evaluating ${laborAutoScopeRules.length} labor auto-scope rules...`);
+  console.log(`   facadeAreaSqft passed to function: ${facadeAreaSqft}`);
+
+  for (const rule of laborAutoScopeRules) {
+    console.log(`\n   📋 Rule: ${rule.rule_id} (${rule.rule_name})`);
+    console.log(`      trigger_type: ${rule.trigger_type}`);
+    console.log(`      quantity_source: ${rule.quantity_source}`);
+    console.log(`      labor_rate_id: ${rule.labor_rate_id}`);
+    console.log(`      labor_rates joined: ${rule.labor_rates ? JSON.stringify(rule.labor_rates) : 'NULL'}`);
+
+    let quantity = 0;
+    let shouldApply = false;
+    const rate = rule.labor_rates;
+
+    if (!rate) {
+      console.log(`   ⚠️ Rule ${rule.rule_id} has no linked labor rate - skipping`);
+      continue;
+    }
+
+    // Skip material_category rules for siding - we handle those via labor_class above
+    if (rule.trigger_type === 'material_category') {
+      const categories = (rule.trigger_value || '').split(',').map(c => c.trim().toLowerCase());
+      const isSidingCategory = categories.some(c =>
+        c.includes('siding') || c === 'lap_siding' || c === 'panel_siding' || c === 'shingle_siding'
+      );
+      if (isSidingCategory) {
+        console.log(`   ⏭️ Skipping rule ${rule.rule_id} (siding category handled by labor_class)`);
+        continue;
+      }
+    }
+
+    // Track source info for meaningful notes
+    let sourceInfo = '';
+    let rawValue = 0;
+
+    // Evaluate trigger condition
+    if (rule.trigger_type === 'always') {
+      // Always apply (e.g., WRB, demo/cleanup)
+      shouldApply = true;
+      console.log(`      ✓ trigger_type='always' - shouldApply=true`);
+
+      if (rule.quantity_source === 'facade_sqft') {
+        rawValue = facadeAreaSqft;
+        quantity = facadeAreaSqft / 100; // Convert to squares
+        sourceInfo = `${facadeAreaSqft.toFixed(0)} SF facade ÷ 100`;
+        console.log(`      ✓ quantity_source='facade_sqft' - quantity=${quantity.toFixed(2)} SQ (from ${facadeAreaSqft} SF)`);
+      } else {
+        console.log(`      ⚠️ quantity_source='${rule.quantity_source}' not handled for 'always' trigger`);
+      }
+
+    } else if (rule.trigger_type === 'material_category') {
+      // Check if any of the trigger categories have materials (non-siding items)
+      const categories = (rule.trigger_value || '').split(',').map(c => c.trim().toLowerCase());
+      const matchedCategories: string[] = [];
+
+      for (const cat of categories) {
+        const catData = materialsByCategory[cat];
+        if (catData) {
+          shouldApply = true;
+          matchedCategories.push(cat);
+
+          if (rule.quantity_source === 'material_sqft') {
+            rawValue += catData.sqft;
+            quantity += catData.sqft / 100; // Convert to squares
+          } else if (rule.quantity_source === 'material_count') {
+            rawValue += catData.count;
+            quantity += catData.count;
+          } else if (rule.quantity_source === 'material_lf') {
+            rawValue += catData.lf;
+            quantity += catData.lf;
+          }
+        }
+      }
+      if (matchedCategories.length > 0) {
+        sourceInfo = `${matchedCategories.join(', ')}: ${rawValue.toFixed(rule.quantity_source === 'material_count' ? 0 : 1)} ${rule.quantity_source === 'material_sqft' ? 'SF' : rule.quantity_source === 'material_lf' ? 'LF' : 'EA'}`;
+      }
+
+    } else if (rule.trigger_type === 'material_sku_pattern') {
+      // Check for SKUs matching pattern (e.g., CORBEL%)
+      const pattern = (rule.trigger_value || '').replace('%', '').toLowerCase();
+      const matchingItems = materials.filter(item =>
+        item.sku?.toLowerCase().startsWith(pattern)
+      );
+
+      if (matchingItems.length > 0) {
+        shouldApply = true;
+        quantity = matchingItems.reduce((sum, item) => sum + item.quantity, 0);
+        rawValue = quantity;
+        sourceInfo = `${matchingItems.length} items matching ${pattern}*`;
+      }
+
+    } else if (rule.trigger_type === 'detection_class') {
+      // Check detection counts
+      const classes = (rule.trigger_value || '').split(',').map(c => c.trim().toLowerCase());
+      const detectedItems: string[] = [];
+
+      for (const cls of classes) {
+        const detection = detectionCounts?.[cls];
+        if (detection && detection.count > 0) {
+          shouldApply = true;
+          quantity += detection.count || 0;
+          rawValue += detection.count || 0;
+          detectedItems.push(`${detection.count} ${cls}`);
+        }
+      }
+      if (detectedItems.length > 0) {
+        sourceInfo = detectedItems.join(' + ');
+      }
+    }
+
+    // Apply the rule if conditions met and quantity > 0
+    console.log(`      Final: shouldApply=${shouldApply}, quantity=${quantity}`);
+
+    if (shouldApply && quantity > 0) {
+      const unitCost = parseFloat(rate.base_rate) || 0;
+      const multiplier = parseFloat(rate.difficulty_multiplier) || 1.0;
+      const minCharge = parseFloat(rate.min_charge || '0');
+
+      const baseCost = quantity * unitCost * multiplier;
+      const totalCost = Math.max(baseCost, minCharge);
+
+      console.log(`   ✅ ADDING LABOR: ${rule.rule_name}: ${quantity.toFixed(2)} ${rule.quantity_unit} × $${unitCost}/${rule.quantity_unit} = $${totalCost.toFixed(2)}`);
+
+      // Build meaningful notes based on trigger type
+      // Use rate.unit as fallback if rule.quantity_unit is undefined
+      const displayUnit = rule.quantity_unit || rate.unit || 'ea';
+      let notes = '';
+      if (rule.trigger_type === 'always' && rule.quantity_source === 'facade_sqft') {
+        notes = `${sourceInfo} = ${quantity.toFixed(2)} SQ @ $${unitCost.toFixed(2)}/SQ`;
+      } else if (rule.trigger_type === 'detection_class') {
+        notes = `${sourceInfo} @ $${unitCost.toFixed(2)}/${displayUnit}`;
+      } else if (rule.trigger_type === 'material_category') {
+        notes = `${sourceInfo} = ${quantity.toFixed(2)} ${displayUnit} @ $${unitCost.toFixed(2)}/${displayUnit}`;
+      } else {
+        notes = `${quantity.toFixed(2)} ${displayUnit} @ $${unitCost.toFixed(2)}/${displayUnit}`;
+      }
+
+      laborItems.push({
+        rate_id: rate.id,
+        rate_name: rate.rate_name,
+        description: rate.description || rule.description || '',
+        quantity: Math.round(quantity * 100) / 100,
+        unit: rule.quantity_unit || rate.unit,
+        unit_cost: unitCost,
+        total_cost: Math.round(totalCost * 100) / 100,
+        notes
+      });
+    }
+  }
+
+  const subtotal = laborItems.reduce((sum, item) => sum + item.total_cost, 0);
+  console.log(`   📊 Installation labor subtotal: $${subtotal.toFixed(2)} (${laborItems.length} items)`);
+
+  return { laborItems, subtotal: Math.round(subtotal * 100) / 100 };
+}
+
+/**
+ * Legacy labor calculation - fallback if no rules available
+ * Calculate installation labor based on Mike Skjei methodology
+ */
+function calculateInstallationLaborLegacy(
+  materials: CombinedLineItem[],
+  laborRates: LaborRate[],
+  productCategory: string = 'lap_siding'
+): { laborItems: LaborLineItem[], subtotal: number } {
+
+  console.log('👷 Calculating installation labor (legacy method)...');
+  console.log(`   Product category: ${productCategory}`);
+
+  const RATE_MAP: Record<string, string> = {
+    'lap_siding': 'Lap Siding Installation',
+    'siding': 'Lap Siding Installation',
+    'shingle': 'Shingle Siding Installation',
+    'panel': 'Panel Siding Installation',
+  };
+
+  const targetRateName = RATE_MAP[productCategory] || 'Lap Siding Installation';
+  console.log(`   Target labor rate: ${targetRateName}`);
+
+  const totalSquares = materials
+    .filter(m =>
+      m.presentation_group === 'Siding' ||
+      m.category?.toLowerCase().includes('siding') ||
+      m.category === 'lap_siding'
+    )
+    .reduce((sum, m) => sum + (m.squares_for_labor || 0), 0);
+
+  console.log(`   Total squares for labor: ${totalSquares.toFixed(2)} SQ`);
+
+  const laborItems: LaborLineItem[] = [];
+
+  if (totalSquares <= 0) {
+    console.log('   ⚠️ No squares for labor - skipping');
+    return { laborItems, subtotal: 0 };
+  }
+
+  const installRate = laborRates.find(r => r.rate_name === targetRateName);
+
+  if (installRate) {
+    const unitCost = parseFloat(installRate.base_rate) || 0;
+    const multiplier = parseFloat(installRate.difficulty_multiplier) || 1.0;
+    const minCharge = parseFloat(installRate.min_charge || '0');
+
+    const baseCost = totalSquares * unitCost * multiplier;
+    const totalCost = Math.max(baseCost, minCharge);
+
+    console.log(`   💵 ${targetRateName}: ${totalSquares.toFixed(2)} SQ × $${unitCost}/SQ = $${totalCost.toFixed(2)}`);
+
+    laborItems.push({
+      rate_id: installRate.id,
+      rate_name: installRate.rate_name,
+      description: installRate.description,
+      quantity: Math.round(totalSquares * 100) / 100,
+      unit: installRate.unit,
+      unit_cost: unitCost,
+      total_cost: Math.round(totalCost * 100) / 100,
+      notes: installRate.notes
+    });
+  } else {
+    console.log(`   ⚠️ Labor rate not found: ${targetRateName}`);
+  }
+
+  const subtotal = laborItems.reduce((sum, item) => sum + item.total_cost, 0);
+  console.log(`   📊 Installation labor subtotal: $${subtotal.toFixed(2)}`);
+
+  return { laborItems, subtotal: Math.round(subtotal * 100) / 100 };
+}
+
+/**
+ * Calculate overhead costs based on Mike Skjei methodology
+ * V9.1: Now supports org-specific overhead config from organizations.settings.overhead_config
+ */
+function calculateOverhead(
+  overheadCosts: OverheadCost[],
+  installationLaborSubtotal: number,
+  config: { crew_size?: number; estimated_weeks?: number } = {},
+  orgConfig: OrgOverheadConfig | null = null
+): { overheadItems: OverheadLineItem[], subtotal: number } {
+
+  console.log('🏗️ Calculating overhead costs...');
+
+  // Use org config values with fallbacks to defaults
+  const crewSize = orgConfig?.crew_size ?? config.crew_size ?? DEFAULT_CREW_SIZE;
+  const estimatedWeeks = orgConfig?.estimated_weeks ?? config.estimated_weeks ?? DEFAULT_ESTIMATED_WEEKS;
+  const liHourlyRate = orgConfig?.li_hourly_rate ?? LI_HOURLY_RATE;
+  // Use !isFalse() to skip when explicitly set to false or "false" (handles undefined/null as "include")
+  const includeDumpster = !isFalse(orgConfig?.include_dumpster);
+  const includeToilet = !isFalse(orgConfig?.include_toilet);
+  const mobilizationTotal = orgConfig?.mobilization_total;
+  const mobilizationNote = orgConfig?.mobilization_note;
+
+  console.log(`   Crew size: ${crewSize}, Estimated weeks: ${estimatedWeeks}`);
+  console.log(`   L&I Rate: $${liHourlyRate}/hr ${orgConfig?.li_hourly_rate ? '(from org config)' : '(default)'}`);
+  console.log(`   Include Dumpster: ${includeDumpster}, Include Toilet: ${includeToilet}`);
+  console.log(`   Installation labor subtotal: $${installationLaborSubtotal.toFixed(2)}`);
+
+  const overheadItems: OverheadLineItem[] = [];
+  const sortedCosts = [...overheadCosts].sort((a, b) => a.display_order - b.display_order);
+
+  for (const cost of sortedCosts) {
+    let amount = 0;
+    let quantity: number | undefined;
+    let rate: number | undefined;
+    let notes: string | undefined = cost.notes;
+
+    if (cost.cost_name === 'Project Insurance') {
+      console.log(`   ⏭️ Skipping ${cost.cost_name} (calculated at end)`);
+      continue;
+    }
+
+    // V9.1: Skip dumpster if org config excludes it
+    if (cost.cost_name.toLowerCase().includes('dumpster') && !includeDumpster) {
+      console.log(`   ⏭️ Skipping ${cost.cost_name} (org config: include_dumpster=false)`);
+      continue;
+    }
+
+    // V9.1: Skip toilet/porta-potty if org config excludes it
+    // Match various names: "toilet", "porta potty", "port-a-john", "sanitation", "restroom"
+    const costNameLower = cost.cost_name.toLowerCase();
+    const isToiletItem = costNameLower.includes('toilet') ||
+                         costNameLower.includes('porta') ||
+                         costNameLower.includes('potty') ||
+                         costNameLower.includes('sanitation') ||
+                         costNameLower.includes('restroom');
+    if (isToiletItem && !includeToilet) {
+      console.log(`   ⏭️ Skipping ${cost.cost_name} (org config: include_toilet=false)`);
+      continue;
+    }
+
+    // V9.1: Override mobilization with org-specific total
+    if (cost.cost_name.toLowerCase().includes('mobilization') && mobilizationTotal !== undefined) {
+      amount = mobilizationTotal;
+      quantity = 1;
+      rate = mobilizationTotal;
+      notes = mobilizationNote || cost.notes;
+      console.log(`   📊 ${cost.cost_name}: $${amount.toFixed(2)} (from org config)`);
+    } else {
+      switch (cost.cost_type) {
+        case 'percentage':
+          if (cost.calculation_formula?.includes('0.1265')) {
+            rate = SOC_UNEMPLOYMENT_RATE;
+            amount = installationLaborSubtotal * rate;
+            console.log(`   📊 ${cost.cost_name}: ${(rate * 100).toFixed(2)}% × $${installationLaborSubtotal.toFixed(2)} = $${amount.toFixed(2)}`);
+          }
+          break;
+
+        case 'calculated':
+          if (cost.calculation_formula?.includes('crew_size')) {
+            const hours = crewSize * estimatedWeeks * 40;
+            rate = liHourlyRate;  // V9.1: Use org-specific L&I rate
+            amount = hours * rate;
+            quantity = hours;
+            console.log(`   📊 ${cost.cost_name}: ${hours} hrs × $${rate}/hr = $${amount.toFixed(2)}`);
+          }
+          break;
+
+        case 'flat_fee':
+          quantity = parseFloat(cost.default_quantity) || 1;
+          rate = parseFloat(cost.base_rate || '0');
+          amount = quantity * rate;
+          console.log(`   📊 ${cost.cost_name}: ${quantity} × $${rate} = $${amount.toFixed(2)}`);
+          break;
+
+        case 'per_day':
+          quantity = parseFloat(cost.default_quantity) || 1;
+          rate = parseFloat(cost.base_rate || '0');
+          amount = quantity * rate;
+          console.log(`   📊 ${cost.cost_name}: ${quantity} days × $${rate}/day = $${amount.toFixed(2)}`);
+          break;
+      }
+    }
+
+    if (amount > 0) {
+      overheadItems.push({
+        cost_id: cost.id,
+        cost_name: cost.cost_name,
+        description: cost.description,
+        category: cost.category,
+        quantity,
+        unit: cost.unit || undefined,
+        rate,
+        amount: Math.round(amount * 100) / 100,
+        calculation_type: cost.cost_type,
+        notes
+      });
+    }
+  }
+
+  const subtotal = overheadItems.reduce((sum, item) => sum + item.amount, 0);
+  console.log(`   📊 Overhead subtotal: $${subtotal.toFixed(2)}`);
+
+  return { overheadItems, subtotal: Math.round(subtotal * 100) / 100 };
+}
+
+/**
+ * Calculate final project totals with markup and insurance
+ * V9.1: Now accepts insuranceRatePerThousand parameter for org-specific rates
+ */
+function calculateProjectTotals(
+  materialCost: number,
+  installationLaborSubtotal: number,
+  overheadSubtotal: number,
+  markupRate: number = MARKUP_RATE,
+  insuranceRatePerThousand: number = INSURANCE_RATE_PER_THOUSAND
+): ProjectTotals {
+
+  console.log('💰 Calculating project totals...');
+  console.log(`   Material cost: $${materialCost.toFixed(2)}`);
+  console.log(`   Installation labor: $${installationLaborSubtotal.toFixed(2)}`);
+  console.log(`   Overhead: $${overheadSubtotal.toFixed(2)}`);
+  console.log(`   Markup rate: ${(markupRate * 100).toFixed(0)}%`);
+  console.log(`   Insurance rate: $${insuranceRatePerThousand}/$1K`);
+
+  const materialMarkupAmount = materialCost * markupRate;
+  const materialTotal = materialCost + materialMarkupAmount;
+
+  const laborCostBeforeMarkup = installationLaborSubtotal + overheadSubtotal;
+  const laborMarkupAmount = laborCostBeforeMarkup * markupRate;
+  const laborTotal = laborCostBeforeMarkup + laborMarkupAmount;
+
+  const subtotal = materialTotal + laborTotal;
+  const projectInsurance = (subtotal / 1000) * insuranceRatePerThousand;
+  const grandTotal = subtotal + projectInsurance;
+
+  console.log(`   Material total (with markup): $${materialTotal.toFixed(2)}`);
+  console.log(`   Labor total (with markup): $${laborTotal.toFixed(2)}`);
+  console.log(`   Project insurance: $${projectInsurance.toFixed(2)}`);
+  console.log(`   Grand total: $${grandTotal.toFixed(2)}`);
+
+  // Calculate overhead_total for display (includes project insurance)
+  const overheadTotal = overheadSubtotal + projectInsurance;
+
+  return {
+    material_cost: Math.round(materialCost * 100) / 100,
+    material_markup_rate: markupRate,
+    material_markup_amount: Math.round(materialMarkupAmount * 100) / 100,
+    material_total: Math.round(materialTotal * 100) / 100,
+
+    installation_labor_subtotal: Math.round(installationLaborSubtotal * 100) / 100,
+    overhead_subtotal: Math.round(overheadSubtotal * 100) / 100,
+    overhead_total: Math.round(overheadTotal * 100) / 100,  // For display: includes project insurance
+    labor_cost_before_markup: Math.round(laborCostBeforeMarkup * 100) / 100,
+    labor_markup_rate: markupRate,
+    labor_markup_amount: Math.round(laborMarkupAmount * 100) / 100,
+    labor_total: Math.round(laborTotal * 100) / 100,
+
+    subtotal: Math.round(subtotal * 100) / 100,
+    project_insurance: Math.round(projectInsurance * 100) / 100,
+    grand_total: Math.round(grandTotal * 100) / 100
+  };
+}
+
+// ============================================================================
+// MAIN V2 CALCULATION  —  PUBLIC ENTRY POINT
+// ============================================================================
+
+/**
+ * Pre-fetched reference data the orchestrator used to read from the database.
+ * The caller is responsible for fetching these (with whatever credentials it
+ * has) and applying any organization pricing-override overlay BEFORE calling
+ * `calculateSidingTakeoff`. See `pricing/applyOrganizationOverrides.ts` for
+ * the pure overlay helpers.
+ */
+export interface SidingOrchestratorV2RefData {
+  /** From `getCalculationConstants('siding')`. */
+  calculationConstants: CalculationConstants;
+  /** From `getProjectEstimateSettings(projectId)`. */
+  projectEstimateSettings: ProjectEstimateSettings | null;
+  /** From `detection_class_material_mapping` (active=true). */
+  detectionClassMappings: DetectionClassMapping[];
+  /** From `labor_rates` (active=true, trade='siding'). */
+  laborRates: LaborRate[];
+  /** From `labor_auto_scope_rules` (active=true, trade='siding') with `labor_rates` joined. */
+  laborAutoScopeRules: LaborAutoScopeRule[];
+  /** From `overhead_costs` (active=true), already filtered to siding/universal. */
+  overheadCosts: OverheadCost[];
+  /** From `organizations.settings.overhead_config` for the project's org. Null if not set. */
+  orgOverheadConfig: OrgOverheadConfig | null;
+  /** From `siding_auto_scope_rules` (active=true). Empty array → engine uses fallback rules. */
+  autoScopeRules: DbAutoScopeRule[];
+  /** Per-id pricing, pre-overlaid with org-level overrides. */
+  pricingByIds: Map<string, PricingItem>;
+  /** Per-SKU pricing, pre-overlaid with org-level overrides. */
+  pricingBySkus: Map<string, PricingItem>;
+  /**
+   * Pre-fetched `cad_hover_measurements` row for this extraction (job_id).
+   * Replaces the source orchestrator's `fetchMeasurementsFromDatabase(extractionId)`
+   * call. Caller fetches with the service-role client. Null when no row exists
+   * (engine then falls back to webhookMeasurements + manufacturer-group
+   * reconstruction, same as source behaved with no DB row).
+   */
+  cadHoverMeasurements?: CadHoverMeasurements | null;
+  /**
+   * Pre-loaded result of host-side `loadDetectionCountPricing()` — Map keyed by
+   * `class_name` AND `display_name` (and Bluebeam subject strings) → DB-resolved
+   * SKU + cost from `detection_class_material_mapping` joined to `pricing_items`.
+   *
+   * Mirrors production's `await loadDetectionCountPricing()` call inside
+   * orchestrator-v2.ts:909-924. Engine does not yet consume this field — the
+   * corbel and Bluebeam-count emission paths still use their hardcoded
+   * fallbacks. Wiring those code paths is a follow-up step.
+   */
+  detectionCountPricing?: Map<string, DetectionCountPricing> | null;
+}
+
+/**
+ * Single-bag input. Keeps the original positional argument names verbatim so
+ * the byte-identical body below can `const { ... } = input` and reference them
+ * unchanged.
+ */
+export interface SidingOrchestratorV2Input {
+  materialAssignments: MaterialAssignment[];
+  extractionId?: string;
+  webhookMeasurements?: WebhookMeasurements;
+  organizationId?: string;
+  /** Default 0.15 in source. Same default applied via destructuring. */
+  markupRate?: number;
+  detectionCounts?: Record<string, {
+    count: number;
+    total_lf?: number;
+    total_sf?: number;
+    display_name: string;
+    measurement_type: 'count' | 'area' | 'linear';
+    unit: string;
+  }>;
+  // V8.0: Spatial Containment parameters
+  perMaterialMeasurements?: PerMaterialMeasurements;
+  spatialContainment?: {
+    enabled: boolean;
+    matched_openings: number;
+    total_openings: number;
+    unmatched_openings?: number;
+  };
+  // Config fields from frontend (for paint service, etc.)
+  config?: Record<string, any>;
+  // Project ID for fetching estimate settings from database
+  projectId?: string;
+  // PURE PORT: replaces every DB call inside the body.
+  refData: SidingOrchestratorV2RefData;
+}
+
+export function calculateSidingTakeoff(
+  input: SidingOrchestratorV2Input
+): V2CalculationResult {
+  // Destructure into the same variable names the source body uses so the
+  // ported body below stays byte-identical.
+  const {
+    materialAssignments,
+    extractionId,
+    webhookMeasurements,
+    organizationId,
+    markupRate = 0.15,
+    detectionCounts,
+    perMaterialMeasurements,
+    spatialContainment,
+    projectId,
+    refData,
+  } = input;
+  // `config` is `let`-rebindable below (the source mutates it after merging
+  // estimate_settings), so it cannot be a `const` from destructuring.
+  let config: Record<string, any> | undefined = input.config;
+  // Mirror the unused `extractionId` reference from the source's debug log
+  // path; preserved as a no-op to maintain the parameter on the input bag.
+  void extractionId;
+
+  // =========================================================================
+  // DETECTION COUNT PRICING (DCP)
+  // Mirrors production orchestrator-v2.ts:909-924 (`await loadDetectionCountPricing()`).
+  // Engine stays sync — host preloads via refData.detectionCountPricing in the
+  // refData parallel batch. Empty map (load failed / unconfigured) cleanly
+  // degrades downstream consumers to their hardcoded fallbacks, same as
+  // production behaves when DB is unconfigured.
+  // =========================================================================
+  const detectionCountPricingMap = refData.detectionCountPricing ?? new Map<string, DetectionCountPricing>();
+  console.log(`📦 [DCP] loaded=${detectionCountPricingMap.size}`);
+
+  // TEMP DEBUG — capture overhead at engine entry, BEFORE the dbEstimateSettings
+  // merge at L932-947 mutates config.estimate_settings.
+  console.log('[orchestrator config overhead]', {
+    payload_overhead: config?.estimate_settings?.overhead ?? null,
+    has_estimate_settings: !!config?.estimate_settings,
+  });
+  console.log('[orchestrator dbEstimateSettings overhead]', {
+    has_dbEstimateSettings: !!refData.projectEstimateSettings,
+    db_overhead: refData.projectEstimateSettings?.overhead ?? null,
+  });
+  // =========================================================================
+  // Phase 5: Load constants from database (cached 5 min, falls back to hardcoded)
+  // PURE PORT: supplied by caller via refData.calculationConstants.
+  // =========================================================================
+  const dbConstants = refData.calculationConstants;
+  const CALC_MARKUP_RATE = dbConstants.markup_rate;
+  const CALC_SOC_UNEMPLOYMENT_RATE = dbConstants.soc_unemployment_rate;
+  const CALC_LI_HOURLY_RATE = dbConstants.li_hourly_rate;
+  const CALC_INSURANCE_RATE_PER_THOUSAND = dbConstants.insurance_rate_per_thousand;
+  const CALC_CREW_SIZE = dbConstants.default_crew_size;
+  const CALC_ESTIMATED_WEEKS = dbConstants.default_estimated_weeks;
+  console.log(`📋 Constants from DB: markup=${CALC_MARKUP_RATE}, L&I=${CALC_SOC_UNEMPLOYMENT_RATE}, insurance=$${CALC_INSURANCE_RATE_PER_THOUSAND}/1000`);
+
+  // =========================================================================
+  // FETCH DETECTION CLASS MAPPINGS FROM DATABASE
+  // These define how each detection class should be processed (measurement_type,
+  // waste_factor, default_product_sku, etc.). Used by the dynamic detection loop
+  // to catch classes not handled by hardcoded blocks.
+  // PURE PORT: supplied via refData.detectionClassMappings. The
+  // `DetectionClassMapping` interface is imported from `../types/orchestrator`
+  // because it must be at file scope for the refData input shape.
+  // =========================================================================
+  const classMappings: DetectionClassMapping[] = refData.detectionClassMappings;
+  if (classMappings.length > 0) {
+    console.log(`📋 Loaded ${classMappings.length} detection class mappings from DB`);
+  } else {
+    console.log('ℹ️ No active detection class mappings found in DB');
+  }
+
+  // =========================================================================
+  // FETCH ESTIMATE SETTINGS FROM DATABASE
+  // n8n strips estimate_settings from the payload, so we fetch directly from
+  // project_configurations table using the project_id
+  // PURE PORT: supplied via refData.projectEstimateSettings.
+  // `projectId` parameter is preserved on the input bag for log/audit context
+  // even though the engine no longer uses it for a DB lookup.
+  // =========================================================================
+  void projectId;
+  const dbEstimateSettings: ProjectEstimateSettings | null = refData.projectEstimateSettings;
+  if (dbEstimateSettings) {
+    console.log('✅ Loaded estimate_settings from database:', {
+      allKeys: Object.keys(dbEstimateSettings),
+      trim_system: dbEstimateSettings.trim_system,
+      wrb_product: dbEstimateSettings.wrb_product || dbEstimateSettings.wrb?.product,
+      window_trim_width: dbEstimateSettings.window_trim_width,
+      door_trim_width: dbEstimateSettings.door_trim_width,
+      overhead: dbEstimateSettings.overhead,
+      consumables: dbEstimateSettings.consumables,
+      flashing: dbEstimateSettings.flashing,
+    });
+  }
+
+  // Merge DB settings into config.estimate_settings (DB takes precedence)
+  // This ensures all downstream code uses the fetched settings
+  if (!config) {
+    config = {};
+  }
+  if (dbEstimateSettings) {
+    config.estimate_settings = {
+      ...(config.estimate_settings || {}),
+      ...dbEstimateSettings,
+    };
+    // Also set top-level convenience fields
+    config.window_trim_width = dbEstimateSettings.window_trim_width || config.window_trim_width;
+    config.window_trim_finish = dbEstimateSettings.window_trim_finish || config.window_trim_finish;
+    config.door_trim_width = dbEstimateSettings.door_trim_width || config.door_trim_width;
+    config.door_trim_finish = dbEstimateSettings.door_trim_finish || config.door_trim_finish;
+  }
+
+  // =========================================================================
+  // DEBUG: Log ALL incoming parameters at function entry
+  // =========================================================================
+  console.log('🚀 [Orchestrator] Function called with parameters:');
+  console.log('   materialAssignments count:', materialAssignments?.length || 0);
+  console.log('   extractionId:', extractionId);
+  console.log('   organizationId:', organizationId);
+  console.log('   markupRate:', markupRate);
+  console.log('   webhookMeasurements keys:', webhookMeasurements ? Object.keys(webhookMeasurements) : 'undefined');
+  console.log('   webhookMeasurements.openings_area_sqft:', (webhookMeasurements as any)?.openings_area_sqft);
+  console.log('   webhookMeasurements.windows?.total_area_sqft:', (webhookMeasurements as any)?.windows?.total_area_sqft);
+  console.log('   webhookMeasurements.trim:', JSON.stringify((webhookMeasurements as any)?.trim, null, 2));
+  console.log('📊 Detection Counts received:', JSON.stringify(detectionCounts, null, 2));
+  console.log('🎯 Belly Band from detection_counts:', {
+    raw: detectionCounts?.belly_band,
+    total_lf: detectionCounts?.belly_band?.total_lf,
+    count: detectionCounts?.belly_band?.count
+  });
+
+  // V8.0: Log spatial containment parameters
+  if (spatialContainment?.enabled) {
+    console.log('🎯 [Orchestrator V8.0] SPATIAL CONTAINMENT ENABLED');
+    console.log(`   Matched openings: ${spatialContainment.matched_openings}/${spatialContainment.total_openings}`);
+    if (spatialContainment.unmatched_openings) {
+      console.log(`   Unmatched openings: ${spatialContainment.unmatched_openings}`);
+    }
+  }
+  if (perMaterialMeasurements && Object.keys(perMaterialMeasurements).length > 0) {
+    console.log('🎯 [Orchestrator V8.0] Per-material measurements received:');
+    for (const [matId, measures] of Object.entries(perMaterialMeasurements)) {
+      console.log(`   ${measures.manufacturer}: ${measures.facade_sqft.toFixed(0)} SF, ${measures.window_count} windows (${measures.window_perimeter_lf.toFixed(1)} LF)`);
+    }
+  }
+
+  const warnings: Array<{ code: string; message: string }> = [];
+  const lineItems: CombinedLineItem[] = [];
+  const missingItems: string[] = [];
+
+  let totalMaterialCost = 0;
+  // Note: Per-item labor removed - labor calculated separately via calculateInstallationLabor()
+
+  // =========================================================================
+  // FETCH LABOR RATES AND OVERHEAD COSTS FROM DATABASE
+  // PURE PORT: all three datasets supplied via refData.
+  // =========================================================================
+
+  console.log('📋 Loaded labor rates from refData...');
+  const laborRates: LaborRate[] = refData.laborRates;
+  console.log(`   Found ${laborRates.length} labor rates`);
+
+  console.log('📋 Loaded labor auto-scope rules from refData...');
+  const laborAutoScopeRules: LaborAutoScopeRule[] = refData.laborAutoScopeRules;
+  console.log(`   Found ${laborAutoScopeRules.length} labor auto-scope rules`);
+  for (const rule of laborAutoScopeRules) {
+    console.log(`   📋 Rule ${rule.rule_id}: ${rule.rule_name} (trigger=${rule.trigger_type}, source=${rule.quantity_source}, labor_rate_id=${rule.labor_rate_id})`);
+    console.log(`      labor_rates joined: ${rule.labor_rates ? `id=${rule.labor_rates.id}, rate=${rule.labor_rates.base_rate}` : 'NULL - JOIN FAILED!'}`);
+  }
+
+  // Filtering for siding trade or universal costs is the caller's
+  // responsibility, mirroring source filter semantics.
+  console.log('📋 Loaded overhead costs from refData...');
+  const sidingOverheadCosts: OverheadCost[] = refData.overheadCosts.filter(cost =>
+    cost.applies_to_trade === null ||
+    (Array.isArray(cost.applies_to_trade) && cost.applies_to_trade.includes('siding'))
+  );
+  console.log(`   Found ${sidingOverheadCosts.length} overhead costs for siding`);
+
+  // =========================================================================
+  // FETCH ORGANIZATION OVERHEAD CONFIG
+  // Org-specific settings override hardcoded defaults for L&I, insurance,
+  // dumpster, toilet, mobilization, etc.
+  // PURE PORT: caller does the privileged read of
+  //   `organizations.settings.overhead_config` (typically with the service
+  //   role key) and supplies the result via refData.orgOverheadConfig.
+  // =========================================================================
+  let orgOverheadConfig: OrgOverheadConfig | null = refData.orgOverheadConfig;
+  if (organizationId) {
+    if (orgOverheadConfig) {
+      console.log('📊 Org overhead config: FOUND');
+      console.log(`   Dumpster: ${orgOverheadConfig.include_dumpster ? `$${orgOverheadConfig.dumpster_rate}` : 'EXCLUDED'}`);
+      console.log(`   Toilet: ${orgOverheadConfig.include_toilet ? `$${orgOverheadConfig.toilet_rate}` : 'EXCLUDED'}`);
+      console.log(`   Mobilization: $${orgOverheadConfig.mobilization_total}`);
+      console.log(`   L&I Rate: $${orgOverheadConfig.li_hourly_rate}/hr`);
+      console.log(`   Insurance: $${orgOverheadConfig.insurance_rate_per_thousand}/$1K`);
+    } else {
+      console.log('📊 Org overhead config: NOT FOUND (using defaults)');
+    }
+  }
+
+  // =========================================================================
+  // Phase 2B: Apply estimate_settings.overhead overrides
+  // =========================================================================
+  const estSettingsOverhead = config?.estimate_settings?.overhead;
+  if (estSettingsOverhead && orgOverheadConfig) {
+    if (estSettingsOverhead.include_dumpster !== undefined) {
+      orgOverheadConfig.include_dumpster = estSettingsOverhead.include_dumpster;
+    }
+    if (estSettingsOverhead.dumpster_cost !== undefined) {
+      orgOverheadConfig.dumpster_rate = estSettingsOverhead.dumpster_cost;
+    }
+    if (estSettingsOverhead.include_toilet !== undefined) {
+      orgOverheadConfig.include_toilet = estSettingsOverhead.include_toilet;
+    }
+    if (estSettingsOverhead.toilet_cost !== undefined) {
+      orgOverheadConfig.toilet_rate = estSettingsOverhead.toilet_cost;
+    }
+    if (estSettingsOverhead.mobilization !== undefined) {
+      orgOverheadConfig.mobilization_total = estSettingsOverhead.mobilization;
+    }
+    if (estSettingsOverhead.li_rate !== undefined) {
+      orgOverheadConfig.li_hourly_rate = estSettingsOverhead.li_rate;
+    }
+    if (estSettingsOverhead.insurance_rate !== undefined) {
+      orgOverheadConfig.insurance_rate_per_thousand = estSettingsOverhead.insurance_rate;
+    }
+    console.log('⚙️ [Phase 2B] Overhead overridden from estimate_settings');
+  }
+
+  // V9.1: Override insurance rate with org-specific value if available
+  const EFFECTIVE_INSURANCE_RATE = orgOverheadConfig?.insurance_rate_per_thousand ?? CALC_INSURANCE_RATE_PER_THOUSAND;
+  if (orgOverheadConfig?.insurance_rate_per_thousand) {
+    console.log(`📊 Using org-specific insurance rate: $${EFFECTIVE_INSURANCE_RATE}/$1K (was $${CALC_INSURANCE_RATE_PER_THOUSAND}/$1K)`);
+  }
+
+  // TEMP DEBUG — final values driving L&I, insurance, mobilization, toilet.
+  // After Phase 2B, orgOverheadConfig is the authoritative source for these.
+  console.log('[orchestrator final overhead config]', {
+    li_hourly_rate: orgOverheadConfig?.li_hourly_rate ?? CALC_LI_HOURLY_RATE,
+    li_hourly_rate_source: orgOverheadConfig?.li_hourly_rate != null ? 'orgOverheadConfig (post-Phase-2B)' : `CALC default ${CALC_LI_HOURLY_RATE}`,
+    insurance_rate_per_thousand: EFFECTIVE_INSURANCE_RATE,
+    insurance_rate_source: orgOverheadConfig?.insurance_rate_per_thousand != null ? 'orgOverheadConfig (post-Phase-2B)' : `CALC default ${CALC_INSURANCE_RATE_PER_THOUSAND}`,
+    mobilization_total: orgOverheadConfig?.mobilization_total ?? null,
+    include_toilet: orgOverheadConfig?.include_toilet ?? null,
+    toilet_rate: orgOverheadConfig?.toilet_rate ?? null,
+    include_dumpster: orgOverheadConfig?.include_dumpster ?? null,
+    dumpster_rate: orgOverheadConfig?.dumpster_rate ?? null,
+    crew_size: orgOverheadConfig?.crew_size ?? CALC_CREW_SIZE,
+    estimated_weeks: orgOverheadConfig?.estimated_weeks ?? CALC_ESTIMATED_WEEKS,
+  });
+
+  // =========================================================================
+  // PART 1: Process Material Assignments (ID-based pricing)
+  // =========================================================================
+
+  // Extract trim totals from webhookMeasurements for fallback
+  // Data can be in EITHER location:
+  //   1. Nested: webhookMeasurements.trim.total_trim_lf (from Detection Editor via webhook.ts enrichment)
+  //   2. Flat: webhookMeasurements.total_trim_lf (if passed directly)
+  const wm = webhookMeasurements as any;
+
+  // Check nested object first, then flat properties
+  const trimTotalLf =
+    Number(wm?.trim?.total_trim_lf) ||
+    Number(wm?.total_trim_lf) ||
+    0;
+
+  const trimHeadLf =
+    Number(wm?.trim?.total_head_lf) ||
+    Number(wm?.total_head_lf) ||
+    Number(wm?.trim_head_lf) ||
+    0;
+
+  const trimJambLf =
+    Number(wm?.trim?.total_jamb_lf) ||
+    Number(wm?.total_jamb_lf) ||
+    Number(wm?.trim_jamb_lf) ||
+    0;
+
+  const trimSillLf =
+    Number(wm?.trim?.total_sill_lf) ||
+    Number(wm?.total_sill_lf) ||
+    Number(wm?.trim_sill_lf) ||
+    0;
+
+  console.log('✂️ [MaterialAssignments] Trim totals extracted:', {
+    trimTotalLf, trimHeadLf, trimJambLf, trimSillLf,
+    sources: {
+      nested_trim: wm?.trim,
+      flat_total_trim_lf: wm?.total_trim_lf,
+      flat_total_head_lf: wm?.total_head_lf,
+      flat_total_jamb_lf: wm?.total_jamb_lf,
+      flat_total_sill_lf: wm?.total_sill_lf,
+    }
+  });
+
+  if (materialAssignments && materialAssignments.length > 0) {
+    // =========================================================================
+    // CLASS-BASED FILTERING - WHITELIST APPROACH
+    // Only include explicit siding installation surface classes.
+    // Excludes: garage (opening), etc.
+    // =========================================================================
+    const SIDING_INSTALLATION_CLASSES = ['siding', 'gable', 'exterior_wall', 'exterior wall', 'building', 'facade'];
+
+    // Filter to ONLY include siding installation classes (whitelist approach)
+    const filteredMaterialAssignments = materialAssignments.filter(a => {
+      const cls = (a.detection_class || '').toLowerCase();
+
+      // Only include if class matches a siding installation class
+      const isSidingInstallation = SIDING_INSTALLATION_CLASSES.some(sc => cls.includes(sc));
+
+      if (!isSidingInstallation) {
+        console.log(`   ⏭️ [LineItems] Skipping '${a.detection_class}' (${a.quantity?.toFixed(1) || 0} ${a.unit}) - not a siding installation area`);
+        return false;
+      }
+
+      return true;
+    });
+
+    const removedCount = materialAssignments.length - filteredMaterialAssignments.length;
+    if (removedCount > 0) {
+      const removedArea = materialAssignments
+        .filter(a => !filteredMaterialAssignments.includes(a))
+        .filter(a => a.unit === 'SF')
+        .reduce((sum, a) => sum + (a.quantity || 0), 0);
+      console.log(`🏭 [LineItems] Filtered ${materialAssignments.length} → ${filteredMaterialAssignments.length} (removed ${removedCount} non-siding classes, ${removedArea.toFixed(0)} SF excluded)`);
+    }
+
+    // Batch fetch pricing for all assigned materials
+    // PURE PORT: pre-overlaid pricing supplied via refData.pricingByIds.
+    const pricingIds = filteredMaterialAssignments.map(m => m.pricing_item_id);
+    void pricingIds;
+    const pricingMap = refData.pricingByIds;
+
+    for (const assignment of filteredMaterialAssignments) {
+      const pricing = pricingMap.get(assignment.pricing_item_id);
+
+      if (!pricing) {
+        console.warn(`⚠️ No pricing found for ID: ${assignment.pricing_item_id}`);
+        missingItems.push(assignment.pricing_item_id);
+        warnings.push({
+          code: 'PRICING_NOT_FOUND',
+          message: `No pricing found for material ID: ${assignment.pricing_item_id}`,
+        });
+        continue;
+      }
+
+      // =========================================================================
+      // TRIM FALLBACK: Use aggregated trim totals when detection has no dimensions
+      // Check both detection_class AND pricing.category for trim products
+      // =========================================================================
+      let effectiveQuantity = assignment.quantity;
+      // Notes will be built after quantity calculation with full formula details
+      let notes = '';
+
+      const detectionClass = assignment.detection_class?.toLowerCase() || '';
+      const pricingCategory = pricing.category?.toLowerCase() || '';
+      const productName = pricing.product_name?.toLowerCase() || '';
+
+      // Check if this is a trim item by:
+      // 1. detection_class is 'trim' OR contains 'trim'
+      // 2. pricing category is 'trim'
+      // 3. product name contains 'trim'
+      const isTrimItem =
+        detectionClass === 'trim' ||
+        detectionClass.includes('trim') ||
+        pricingCategory === 'trim' ||
+        pricingCategory.includes('trim') ||
+        productName.includes('trim');
+
+      console.log(`✂️ [Trim Check] ${pricing.product_name}:`, {
+        detection_class: assignment.detection_class,
+        pricing_category: pricing.category,
+        quantity: assignment.quantity,
+        unit: assignment.unit,
+        isTrimItem,
+        trimTotalLf
+      });
+
+      if (isTrimItem && assignment.quantity === 0 && trimTotalLf > 0) {
+        // Fallback to aggregated trim totals
+        effectiveQuantity = trimTotalLf;
+        notes = `From trim totals: ${trimTotalLf.toFixed(2)} LF (head: ${trimHeadLf.toFixed(1)}, jamb: ${trimJambLf.toFixed(1)}, sill: ${trimSillLf.toFixed(1)})`;
+        console.log(`✂️ [Trim Fallback] ${pricing.product_name}: Using trim totals ${trimTotalLf.toFixed(2)} LF instead of 0`);
+      }
+
+      // Create a modified assignment with effective quantity for calculation
+      const effectiveAssignment = { ...assignment, quantity: effectiveQuantity };
+
+      // Calculate quantity based on unit conversion
+      const quantity = calculateMaterialQuantity(effectiveAssignment, pricing);
+      const materialCost = quantity * Number(pricing.material_cost || 0);
+      const materialExtended = Math.round(materialCost * 100) / 100;
+
+      // Build descriptive notes based on the calculation type
+      // Use same category-aware waste/coverage as calculateMaterialQuantity()
+      const category = pricing.category?.toLowerCase() || '';
+      const categoryWasteDefaults: Record<string, number> = {
+        'lap_siding': 1.10, 'siding': 1.10,
+        'panel': 1.10, 'board_batten': 1.10, 'panel_siding': 1.10,
+        'shingle': 1.15, 'shingle_siding': 1.15, 'shake': 1.15,
+        'trim': 1.10, 'corners': 1.12, 'flashing': 1.10
+      };
+      const wasteMultiplier = pricing.waste_factor || categoryWasteDefaults[category] || 1.10;
+      const pricingUnit = pricing.unit?.toLowerCase() || '';
+
+      if (!notes) {  // Only set if not already set by trim fallback
+        if (assignment.unit === 'SF' && (pricingUnit === 'square' || pricingUnit === 'sq')) {
+          // SF to squares
+          notes = `${effectiveQuantity.toFixed(0)} SF × ${wasteMultiplier} waste ÷ 100 = ${quantity} SQ`;
+        } else if (assignment.unit === 'SF' && (pricingUnit === 'ea' || pricingUnit === 'pc' || pricingUnit === 'piece')) {
+          // SF to pieces using coverage
+          const categoryCoverageDefaults: Record<string, number> = {
+            'lap_siding': 6.58, 'siding': 6.58,
+            'panel': 40, 'board_batten': 40, 'panel_siding': 40,
+            'shingle': 2.33, 'shingle_siding': 2.33, 'shake': 2.33
+          };
+          const coveragePerPiece = pricing.coverage_value || categoryCoverageDefaults[category] || 6.58;
+          notes = `${effectiveQuantity.toFixed(0)} SF × ${wasteMultiplier} waste ÷ ${coveragePerPiece} SF/pc = ${quantity} pcs`;
+        } else if (assignment.unit === 'LF' && (pricingUnit === 'ea' || pricingUnit === 'pc' || pricingUnit === 'pieces')) {
+          // LF to pieces
+          const pieceLength = pricing.coverage_value || 12;
+          notes = `${effectiveQuantity.toFixed(1)} LF ÷ ${pieceLength}ft × ${wasteMultiplier} waste = ${quantity} pcs`;
+        } else if (assignment.unit === 'EA') {
+          notes = `${quantity} ${assignment.detection_class || 'items'} from detection`;
+        } else {
+          notes = `${effectiveQuantity.toFixed(1)} ${assignment.unit} × ${wasteMultiplier} waste = ${quantity} ${pricingUnit}`;
+        }
+      }
+
+      // Calculate squares for labor (SF / 100 = squares)
+      // V8.2: Use NET area for siding installation labor (deduct openings from gross polygon area)
+      // Material quantities still use gross area (you need material to cover the full panel)
+      let squaresForLabor = 0;
+      if (assignment.unit === 'SF') {
+        // Look up openings deduction from per-material measurements (V8.0 spatial containment)
+        const perMatData = perMaterialMeasurements?.[assignment.pricing_item_id];
+
+        // V8.4: Calculate openings from facade_area - net_siding (reliable data from Transform CAD node)
+        const facadeArea = Number(wm?.facade_area_sqft) || Number(wm?.facade_sqft) || Number(wm?.facade_total_sqft) || 0;
+        const netSiding = Number(wm?.net_siding_sqft) || Number(wm?.net_wall_area_sqft) || 0;
+
+        // Openings = gross facade - net siding
+        const globalOpenings = (facadeArea > 0 && netSiding > 0)
+          ? Math.max(0, facadeArea - netSiding)
+          : 0;
+
+        console.log(`[Labor] globalOpenings: ${globalOpenings.toFixed(2)} SF (facade=${facadeArea.toFixed(2)} - net=${netSiding.toFixed(2)})`);
+
+        // Use per-material openings if available, otherwise fall back to global
+        // For per-material, prorate based on this detection's share of the total facade
+        let openingsDeduction = 0;
+
+        // V8.2 DEBUG: Log per-detection values before calculation
+        console.log(`[Labor DEBUG] Detection ${assignment.detection_class}: perMatData?.openings_area_sqft=${perMatData?.openings_area_sqft}, globalOpenings=${globalOpenings}, effectiveQuantity=${effectiveQuantity}`);
+
+        if (perMatData?.openings_area_sqft && perMatData.openings_area_sqft > 0) {
+          // Per-material spatial containment data available
+          // If multiple detections share this material, prorate the openings
+          const materialTotalSqft = perMatData.facade_sqft || effectiveQuantity;
+          const detectionRatio = materialTotalSqft > 0 ? effectiveQuantity / materialTotalSqft : 1;
+          openingsDeduction = perMatData.openings_area_sqft * detectionRatio;
+        } else if (globalOpenings > 0) {
+          // Fall back to global openings proportioned by this detection's share
+          // Estimate total facade from all material assignments
+          const totalAssignedSqft = filteredMaterialAssignments
+            .filter(a => a.unit === 'SF')
+            .reduce((sum, a) => sum + (a.quantity || 0), 0);
+          const detectionRatio = totalAssignedSqft > 0 ? effectiveQuantity / totalAssignedSqft : 1;
+          openingsDeduction = globalOpenings * detectionRatio;
+        }
+
+        // V8.2 DEBUG: Log final openingsDeduction
+        console.log(`[Labor DEBUG] openingsDeduction = ${openingsDeduction}`);
+
+        // Calculate NET area for labor (gross - openings)
+        const netQuantityForLabor = Math.max(0, effectiveQuantity - openingsDeduction);
+        squaresForLabor = netQuantityForLabor / 100;
+
+        console.log(`   📐 [Labor] ${assignment.detection_class}: gross=${effectiveQuantity.toFixed(1)} SF - openings=${openingsDeduction.toFixed(1)} SF = net=${netQuantityForLabor.toFixed(1)} SF (${squaresForLabor.toFixed(2)} SQ)`);
+      }
+
+      // Get consistent presentation_group and item_order
+      const presentationGroup = getPresentationGroup(pricing.category);
+      const itemOrder = getItemOrder(presentationGroup, pricing.category);
+
+      // Determine if this is a ColorPlus product (check product name for "ColorPlus")
+      const isColorPlus = pricing.product_name?.toLowerCase().includes('colorplus') ||
+                          pricing.product_name?.toLowerCase().includes('color plus');
+
+      lineItems.push({
+        description: pricing.product_name,
+        sku: pricing.sku,
+        quantity,
+        unit: pricing.unit,
+        category: pricing.category || assignment.detection_class,
+        presentation_group: presentationGroup,
+        item_order: itemOrder,
+
+        material_unit_cost: Number(pricing.material_cost || 0),
+        material_extended: materialExtended,
+        labor_unit_cost: 0,  // Labor calculated separately by squares
+        labor_extended: 0,   // Labor calculated separately by squares
+        total_extended: materialExtended,  // Material only - labor separate
+
+        squares_for_labor: squaresForLabor,
+        labor_class: pricing.labor_class,  // Links to labor_rates.rate_name
+        is_colorplus: isColorPlus,  // Flag for ColorPlus premium labor
+
+        calculation_source: 'assigned_material',
+        pricing_item_id: assignment.pricing_item_id,
+        detection_id: assignment.detection_id,
+        detection_ids: [assignment.detection_id],
+        detection_count: 1,
+        notes,
+        raw_quantity: effectiveQuantity,  // Original SF/LF for note rebuilding during consolidation
+      });
+
+      totalMaterialCost += materialCost;
+      // Labor is now calculated separately via calculateInstallationLabor()
+    }
+  }
+
+  // =========================================================================
+  // PART 2: Generate Auto-Scope Items (SKU-based pricing)
+  // =========================================================================
+
+  // Check if material_assignments already include siding products
+  // If so, skip auto-scope rules for siding panels to prevent duplicates
+  const SIDING_CLASSES = ['siding', 'exterior_wall', 'gable', 'building'];
+  const hasSidingAssignments = materialAssignments?.some(
+    m => SIDING_CLASSES.includes(m.detection_class?.toLowerCase() || '')
+  );
+
+  if (hasSidingAssignments) {
+    console.log('📋 User has siding material assignments - will skip auto-scope siding panels');
+  }
+
+  // Merge detection_counts into webhookMeasurements for buildMeasurementContext
+  // This extracts belly_band_count and belly_band_lf from detection_counts
+  const enrichedMeasurements: Record<string, any> = {
+    ...(webhookMeasurements || {}),
+  };
+  if (detectionCounts?.belly_band) {
+    enrichedMeasurements.belly_band_count = detectionCounts.belly_band.count || 0;
+    enrichedMeasurements.belly_band_lf = detectionCounts.belly_band.total_lf || 0;
+  }
+
+  // =========================================================================
+  // DEBUG: Log trim data flow
+  // =========================================================================
+  console.log('✂️ [Orchestrator] webhookMeasurements.trim:', JSON.stringify((webhookMeasurements as any)?.trim, null, 2));
+  console.log('✂️ [Orchestrator] enrichedMeasurements.trim:', JSON.stringify(enrichedMeasurements.trim, null, 2));
+
+  // =========================================================================
+  // BUILD MANUFACTURER GROUPS from material assignments
+  // This aggregates SF/LF by manufacturer for per-manufacturer auto-scope rules
+  // V8.0: Also merges per_material_measurements from spatial containment
+  // =========================================================================
+  console.log('🏭 Building manufacturer groups from material assignments...');
+
+  // PURE PORT: buildManufacturerGroups is now sync and takes pre-overlaid
+  // pricing (Step 2 signature). organizationId no longer needed here.
+  const manufacturerGroups = buildManufacturerGroups(
+    materialAssignments.map(a => ({
+      pricing_item_id: a.pricing_item_id,
+      quantity: a.quantity,
+      unit: a.unit,
+      area_sqft: a.area_sf ?? undefined,  // Map area_sf to area_sqft, convert null to undefined
+      perimeter_lf: a.perimeter_lf ?? undefined,  // Convert null to undefined
+      detection_id: a.detection_id,
+      detection_class: a.detection_class,  // Pass detection_class for overlap filtering
+    })),
+    refData.pricingByIds,
+    perMaterialMeasurements  // V8.0: Pass per-material measurements from spatial containment
+  );
+
+  console.log(`🏭 Built ${Object.keys(manufacturerGroups).length} manufacturer groups`);
+  for (const [mfr, data] of Object.entries(manufacturerGroups)) {
+    const openingsInfo = data.total_openings_perimeter_lf !== undefined
+      ? `, ${data.total_openings_perimeter_lf.toFixed(0)} LF openings (V8.0)`
+      : '';
+    console.log(`   ${mfr}: ${data.area_sqft.toFixed(0)} SF, ${data.linear_ft.toFixed(0)} LF${openingsInfo}`);
+  }
+
+  // =========================================================================
+  // BUILD ASSIGNED MATERIALS for trigger condition evaluation
+  // This enables material_category-based auto-scope rules (e.g., Artisan)
+  // =========================================================================
+  let assignedMaterialsForAutoScope: { sku: string; category: string; manufacturer: string; pricing_item_id?: string }[] = [];
+  const materialCategoryAreas: MaterialCategoryAreas = {};
+
+  if (materialAssignments && materialAssignments.length > 0) {
+    // Fetch pricing for all assigned materials to get categories
+    // PURE PORT: pre-overlaid pricing supplied via refData.pricingByIds.
+    const pricingIds = materialAssignments.map(m => m.pricing_item_id);
+    void pricingIds;
+    const pricingMapForAutoScope = refData.pricingByIds;
+
+    // Build the assigned materials list using the utility function
+    assignedMaterialsForAutoScope = buildAssignedMaterialsFromPricing(
+      materialAssignments.map(a => ({
+        pricing_item_id: a.pricing_item_id,
+        assigned_material_id: a.pricing_item_id,
+        quantity: a.quantity,
+        unit: a.unit,
+      })),
+      pricingMapForAutoScope
+    );
+
+    // Verbose per-material logging removed to reduce log volume
+
+    // =========================================================================
+    // BUILD MATERIAL CATEGORY AREAS for scoped auto-scope rules
+    // When a rule has material_category in trigger_condition (e.g., board_batten),
+    // it should use only that category's assigned area, not the global facade.
+    // Fixes: B&B and Artisan rules over-counting when only partial coverage assigned.
+    // IMPORTANT: Use pricing.category from pricing_items (e.g., "board_batten"),
+    // NOT the detection_class material_category from assigned_products.
+    // =========================================================================
+    for (const assignment of materialAssignments) {
+      // Reuse the pricing lookup we already did above
+      const pricing = pricingMapForAutoScope.get(assignment.pricing_item_id);
+      if (!pricing?.category) continue;
+
+      // Use the PRODUCT category from pricing_items (e.g., "board_batten")
+      const productCategory = pricing.category.toLowerCase();
+      const quantity = assignment.quantity || 0;
+      const unit = assignment.unit?.toUpperCase() || '';
+
+      // Only count SF assignments for area-based rules
+      if (unit === 'SF' && quantity > 0) {
+        if (!materialCategoryAreas[productCategory]) {
+          materialCategoryAreas[productCategory] = { total_area_sqft: 0, material_ids: [] };
+        }
+        materialCategoryAreas[productCategory].total_area_sqft += quantity;
+        if (!materialCategoryAreas[productCategory].material_ids.includes(assignment.pricing_item_id)) {
+          materialCategoryAreas[productCategory].material_ids.push(assignment.pricing_item_id);
+        }
+      }
+    }
+
+    // Single targeted debug log for category areas
+    console.log(`🎯 CATEGORY_AREAS_DEBUG: ${JSON.stringify(materialCategoryAreas)}`);
+  }
+
+  // =========================================================================
+  // V9.0: Extract trim system and WRB product from config
+  // Priority: DB settings (estimate_settings) > webhook payload > default
+  // Frontend sends: config.trim_system = 'hardie' | 'whitewood'
+  // Frontend sends: config.wrb_product = 'henry-jumbotex' | 'henry-hydrotex' | etc.
+  // =========================================================================
+  const trimSystem = (
+    config?.estimate_settings?.trim_system ||  // DB settings (merged above)
+    config?.trim_system ||                      // Webhook payload
+    'hardie'                                    // Default
+  ) as 'hardie' | 'whitewood';
+  const wrbProduct = (
+    config?.estimate_settings?.wrb_product ||
+    config?.estimate_settings?.wrb?.product ||
+    config?.wrb_product ||
+    null
+  ) as string | null;
+
+  console.log(`🔧 Trim system: ${trimSystem}`);
+  console.log(`🔧 WRB product: ${wrbProduct || 'not specified'}`);
+
+  if (trimSystem === 'whitewood') {
+    console.log('   → Using WhiteWood lumber trim rules');
+    console.log('   → Skipping default Hardie trim rules');
+  }
+
+  // =========================================================================
+  // Phase 2B: Extract estimate_settings from config
+  // =========================================================================
+  const estimateSettings = config?.estimate_settings || null;
+  if (estimateSettings) {
+    console.log('⚙️ [Phase 2B] estimate_settings passed to auto-scope:', {
+      keys: Object.keys(estimateSettings),
+      consumables: estimateSettings.consumables,
+      flashing: estimateSettings.flashing,
+    });
+  } else {
+    console.log('⚠️ [Phase 2B] No estimate_settings in config');
+  }
+
+  // PURE PORT: generateAutoScopeItemsV2 is now sync and takes refData
+  // directly (Step 2 signature). extractionId/organizationId arguments are
+  // no longer relevant — the dbMeasurements payload (if any) is supplied
+  // via refData and the pricing map by SKU is pre-overlaid.
+
+  // TEMP DEBUG — confirm refData.cadHoverMeasurements reached the engine.
+  // Remove once dbMeasurements parity is confirmed.
+  console.log('[orchestrator refData cadHoverMeasurements]', {
+    found: refData.cadHoverMeasurements != null,
+  });
+
+  const autoScopeResult = generateAutoScopeItemsV2(
+    enrichedMeasurements,
+    {
+      autoScopeRules: refData.autoScopeRules,
+      pricingBySkus: refData.pricingBySkus,
+      // PURE PORT: pre-fetched row from `cad_hover_measurements` (caller's job).
+      // Equivalent to source's `await fetchMeasurementsFromDatabase(extractionId)`
+      // at autoscope-v2.ts:2039 of the source.
+      dbMeasurements: refData.cadHoverMeasurements ?? null,
+    },
+    {
+      skipSidingPanels: hasSidingAssignments,
+      manufacturerGroups,  // Pass manufacturer groups for per-manufacturer rules
+      assignedMaterials: assignedMaterialsForAutoScope,  // Pass assigned materials for category-based rules
+      materialCategoryAreas,  // Pass category areas for scoped rules (B&B, Artisan fix)
+      // V8.0: Pass spatial containment metadata for logging/diagnostics
+      spatialContainment: spatialContainment,
+      // Pass config for trigger_condition field checks (e.g., paint_service_type)
+      config,
+      // V9.0: Trim system and WRB product for rule filtering
+      trimSystem,
+      wrbProduct,
+      // Phase 2B: Pass estimate settings for section toggles and manual LF overrides
+      estimateSettings,
+    }
+  );
+
+  // =========================================================================
+  // CONSOLIDATE ASSIGNED MATERIALS BEFORE ADDING AUTO-SCOPE
+  // =========================================================================
+  const itemsBeforeConsolidation = lineItems.length;
+  const consolidatedAssigned = consolidateLineItems(lineItems);
+  const itemsAfterConsolidation = consolidatedAssigned.length;
+
+  console.log(`📦 Consolidated ${itemsBeforeConsolidation} line items → ${itemsAfterConsolidation}`);
+
+  // Replace with consolidated items
+  lineItems.length = 0;
+  lineItems.push(...consolidatedAssigned);
+
+  // Add auto-scope line items
+  for (const autoItem of autoScopeResult.line_items) {
+    // Determine presentation_group from category first (more reliable),
+    // then fall back to normalizing the database's presentation_group
+    // This ensures wrb/house_wrap categories go to 'Flashing & Weatherproofing'
+    // even if the database rule has presentation_group: 'siding'
+    const categoryBasedGroup = getPresentationGroup(autoItem.category);
+    const normalizedGroup = categoryBasedGroup !== 'Other Materials'
+      ? categoryBasedGroup
+      : normalizePresentationGroup(autoItem.presentation_group);
+    // Get item_order (higher = appears at bottom of section)
+    const itemOrder = getItemOrder(normalizedGroup, autoItem.category);
+
+    lineItems.push({
+      description: autoItem.description,
+      sku: autoItem.sku,
+      quantity: autoItem.quantity,
+      unit: autoItem.unit,
+      category: autoItem.category,
+      presentation_group: normalizedGroup,
+      item_order: itemOrder,
+
+      material_unit_cost: autoItem.material_unit_cost,
+      material_extended: autoItem.material_extended,
+      labor_unit_cost: 0,  // Labor calculated separately by squares
+      labor_extended: 0,   // Labor calculated separately by squares
+      total_extended: autoItem.material_extended,  // Material only - labor separate
+
+      calculation_source: 'auto-scope',
+      rule_id: autoItem.rule_id,
+      formula_used: autoItem.formula_used,
+      notes: autoItem.notes,
+    });
+
+    totalMaterialCost += autoItem.material_extended;
+    // Labor is now calculated separately via calculateInstallationLabor()
+  }
+
+  // =========================================================================
+  // BELLY BAND SUPPORTING MATERIALS
+  // Generate additional items when belly band detections are present
+  // Skip entirely if estimateSettings.belly_band.include is explicitly false
+  // =========================================================================
+  const bellyBandLf = detectionCounts?.belly_band?.total_lf || 0;
+  const bellyBandInclude = resolveConfigToggle(estimateSettings as Record<string, any>, 'belly_band.include');
+  console.log('📏 Belly Band LF value:', bellyBandLf, '(type:', typeof bellyBandLf, ')');
+  console.log('📏 Belly Band include toggle:', bellyBandInclude);
+  console.log('📏 Will generate belly band items:', bellyBandLf > 0 && bellyBandInclude !== false);
+
+  if (bellyBandLf > 0 && bellyBandInclude !== false) {
+    console.log(`✅ GENERATING BELLY BAND ITEMS for ${bellyBandLf.toFixed(1)} LF`);
+
+    // Constants for belly band calculations
+    const BOARD_LENGTH_FT = 12;
+    const WASTE_FACTOR = 1.10; // 10% waste
+    const FLASHING_LENGTH_FT = 10;
+    const CAULK_COVERAGE_LF = 50;
+    const NAILS_COVERAGE_LF = 150;
+
+    // 1. HardieTrim 5/4 x 8 boards (12ft pieces) - main belly band material
+    const boardPricing = detectionCountPricingMap.get('belly_band_trim')
+      ?? detectionCountPricingMap.get('JH-TRIM-BB-8-CP');
+    const boardPieces = Math.ceil((bellyBandLf / BOARD_LENGTH_FT) * WASTE_FACTOR);
+    const boardUnitCost = boardPricing?.material_cost ?? 32.00;
+    const boardExtended = boardPieces * boardUnitCost;
+    if (!boardPricing) {
+      console.warn('⚠️ [bellyBand] No DB pricing for belly_band_trim — using fallback $32.00');
+    }
+    lineItems.push({
+      description: boardPricing?.description ?? 'HardieTrim 5/4 x 8 x 12ft ColorPlus - Belly Band',
+      sku: boardPricing?.sku ?? 'JH-TRIM-BB-8-CP',
+      quantity: boardPieces,
+      unit: boardPricing?.unit ?? 'ea',
+      category: 'belly_band_trim',
+      presentation_group: 'trims',
+      item_order: 1,
+      material_unit_cost: boardUnitCost,
+      material_extended: boardExtended,
+      labor_unit_cost: 0,
+      labor_extended: 0,
+      total_extended: boardExtended,
+      calculation_source: 'auto-scope',
+      notes: `Belly band trim boards: ${bellyBandLf.toFixed(1)} LF ÷ ${BOARD_LENGTH_FT}ft × ${WASTE_FACTOR} waste = ${boardPieces} pcs`,
+    });
+    totalMaterialCost += boardExtended;
+
+    // 2. Z-Flashing 2" (10ft pieces) - runs along top of belly band
+    const zFlashPricing = detectionCountPricingMap.get('belly_band_flashing')
+      ?? detectionCountPricingMap.get('112Z2BPW');
+    const zFlashingPieces = Math.ceil((bellyBandLf / FLASHING_LENGTH_FT) * WASTE_FACTOR);
+    const zFlashingUnitCost = zFlashPricing?.material_cost ?? 12.50;
+    const zFlashingExtended = zFlashingPieces * zFlashingUnitCost;
+    if (!zFlashPricing) {
+      console.warn('⚠️ [bellyBand] No DB pricing for belly_band_flashing — using fallback $12.50');
+    }
+    lineItems.push({
+      description: zFlashPricing?.description ?? 'Z-Flashing 2" Pre-Painted White - Belly Band Head',
+      sku: zFlashPricing?.sku ?? '112Z2BPW',
+      quantity: zFlashingPieces,
+      unit: zFlashPricing?.unit ?? 'ea',
+      category: 'belly_band_flashing',
+      presentation_group: 'metals_flashings',
+      item_order: 2,
+      material_unit_cost: zFlashingUnitCost,
+      material_extended: zFlashingExtended,
+      labor_unit_cost: 0,
+      labor_extended: 0,
+      total_extended: zFlashingExtended,
+      calculation_source: 'auto-scope',
+      notes: `Head flashing for belly band: ${bellyBandLf.toFixed(1)} LF ÷ ${FLASHING_LENGTH_FT}ft = ${zFlashingPieces} pcs`,
+    });
+    totalMaterialCost += zFlashingExtended;
+
+    // 3. Aluminum Drip Edge (10ft pieces) - at bottom of belly band
+    const dripEdgePieces = Math.ceil((bellyBandLf / FLASHING_LENGTH_FT) * WASTE_FACTOR);
+    const dripEdgeUnitCost = 8.50;
+    const dripEdgeExtended = dripEdgePieces * dripEdgeUnitCost;
+    lineItems.push({
+      description: 'Aluminum Drip Edge 10ft - Belly Band Bottom',
+      sku: 'ROOF-DRIP-10',
+      quantity: dripEdgePieces,
+      unit: 'ea',
+      category: 'belly_band_flashing',
+      presentation_group: 'Belly Band',
+      item_order: 3,
+      material_unit_cost: dripEdgeUnitCost,
+      material_extended: dripEdgeExtended,
+      labor_unit_cost: 0,
+      labor_extended: 0,
+      total_extended: dripEdgeExtended,
+      calculation_source: 'auto-scope',
+      notes: `Drip edge for belly band bottom: ${bellyBandLf.toFixed(1)} LF ÷ ${FLASHING_LENGTH_FT}ft = ${dripEdgePieces} pcs`,
+    });
+    totalMaterialCost += dripEdgeExtended;
+
+    // 4. Stainless Steel Trim Nails (1 box per 150 LF)
+    const nailBoxes = Math.ceil(bellyBandLf / NAILS_COVERAGE_LF);
+    const nailsUnitCost = 7.50;
+    const nailsExtended = nailBoxes * nailsUnitCost;
+    lineItems.push({
+      description: 'Stainless Steel Trim Nails 2" - Belly Band',
+      sku: 'TRIM-NAIL-SS-2',
+      quantity: nailBoxes,
+      unit: 'box',
+      category: 'belly_band_fastener',
+      presentation_group: 'Belly Band',
+      item_order: 4,
+      material_unit_cost: nailsUnitCost,
+      material_extended: nailsExtended,
+      labor_unit_cost: 0,
+      labor_extended: 0,
+      total_extended: nailsExtended,
+      calculation_source: 'auto-scope',
+      notes: `Trim nails for belly band: ${bellyBandLf.toFixed(1)} LF ÷ ${NAILS_COVERAGE_LF} LF/box = ${nailBoxes} boxes`,
+    });
+    totalMaterialCost += nailsExtended;
+
+    // 5. ColorMatch Caulk (1 tube per 50 LF for joints)
+    const caulkTubes = Math.ceil(bellyBandLf / CAULK_COVERAGE_LF);
+    const caulkUnitCost = 8.50;
+    const caulkExtended = caulkTubes * caulkUnitCost;
+    lineItems.push({
+      description: 'ColorMatch Caulk - Belly Band Joints',
+      sku: 'JH-CAULK-CM',
+      quantity: caulkTubes,
+      unit: 'tube',
+      category: 'belly_band_caulk',
+      presentation_group: 'Belly Band',
+      item_order: 5,
+      material_unit_cost: caulkUnitCost,
+      material_extended: caulkExtended,
+      labor_unit_cost: 0,
+      labor_extended: 0,
+      total_extended: caulkExtended,
+      calculation_source: 'auto-scope',
+      notes: `Joint caulk for belly band: ${bellyBandLf.toFixed(1)} LF ÷ ${CAULK_COVERAGE_LF} LF/tube = ${caulkTubes} tubes`,
+    });
+    totalMaterialCost += caulkExtended;
+
+    console.log(`🎀 Added ${5} belly band items totaling $${(boardExtended + zFlashingExtended + dripEdgeExtended + nailsExtended + caulkExtended).toFixed(2)}`);
+  } else if (bellyBandLf > 0 && bellyBandInclude === false) {
+    console.log(`🔕 Belly Band items SUPPRESSED — belly_band.include is explicitly false (${bellyBandLf.toFixed(1)} LF detected but skipped)`);
+  }
+
+  // Debug: Log belly band items in lineItems
+  const bellyBandItems = lineItems.filter(item =>
+    item.presentation_group === 'Belly Band' ||
+    item.category?.includes('belly_band')
+  );
+  console.log('📦 Belly Band items in lineItems:', bellyBandItems.length);
+  bellyBandItems.forEach(item => {
+    console.log(`  - ${item.description}: presentation_group="${item.presentation_group}", category="${item.category}"`);
+  });
+
+  // =========================================================================
+  // SOFFIT - Auto-generate from detections
+  // =========================================================================
+  const soffitSf = detectionCounts?.soffit?.total_sf || 0;
+  console.log('📏 Soffit SF value:', soffitSf);
+
+  if (soffitSf > 0) {
+    console.log(`✅ GENERATING SOFFIT ITEMS for ${soffitSf.toFixed(1)} SF`);
+
+    // Soffit panels (12 SF per panel, 10% waste)
+    const soffitPanels = Math.ceil(soffitSf / 12 * 1.10);
+    const soffitPanelCost = 28.00;
+    const soffitPanelExtended = soffitPanels * soffitPanelCost;
+    lineItems.push({
+      description: 'HardieSoffit 12" Vented Panel',
+      sku: 'JH-SOFFIT-12-VENT',
+      quantity: soffitPanels,
+      unit: 'ea',
+      category: 'soffit_panel',
+      presentation_group: 'Soffit & Fascia',
+      item_order: 1,
+      material_unit_cost: soffitPanelCost,
+      material_extended: soffitPanelExtended,
+      labor_unit_cost: 0,
+      labor_extended: 0,
+      total_extended: soffitPanelExtended,
+      calculation_source: 'auto-scope',
+      notes: `Soffit panels: ${soffitSf.toFixed(1)} SF × 1.10 waste ÷ 12 SF = ${soffitPanels} panels`,
+    });
+    totalMaterialCost += soffitPanelExtended;
+
+    // J-channel for soffit (perimeter estimate)
+    const soffitPerimeterLf = Math.sqrt(soffitSf) * 4;
+    const jChannelPcs = Math.ceil(soffitPerimeterLf / 12 * 1.10);
+    const jChannelCost = 6.50;
+    const jChannelExtended = jChannelPcs * jChannelCost;
+    lineItems.push({
+      description: 'Soffit J-Channel 12ft',
+      sku: 'SOFFIT-JCHANNEL-12',
+      quantity: jChannelPcs,
+      unit: 'ea',
+      category: 'soffit_trim',
+      presentation_group: 'Soffit & Fascia',
+      item_order: 2,
+      material_unit_cost: jChannelCost,
+      material_extended: jChannelExtended,
+      labor_unit_cost: 0,
+      labor_extended: 0,
+      total_extended: jChannelExtended,
+      calculation_source: 'auto-scope',
+      notes: `J-channel: ~${soffitPerimeterLf.toFixed(0)} LF perimeter`,
+    });
+    totalMaterialCost += jChannelExtended;
+
+    console.log(`📦 Added soffit items totaling $${(soffitPanelExtended + jChannelExtended).toFixed(2)}`);
+  }
+
+  // =========================================================================
+  // FASCIA - Auto-generate from detections
+  // =========================================================================
+  const fasciaLf = detectionCounts?.fascia?.total_lf || 0;
+  console.log('📏 Fascia LF value:', fasciaLf);
+
+  if (fasciaLf > 0) {
+    console.log(`✅ GENERATING FASCIA ITEMS for ${fasciaLf.toFixed(1)} LF`);
+
+    // Fascia boards (12ft pieces, 10% waste)
+    const fasciaPcs = Math.ceil(fasciaLf / 12 * 1.10);
+    const fasciaCost = 24.00;
+    const fasciaExtended = fasciaPcs * fasciaCost;
+    lineItems.push({
+      description: 'HardieTrim 5/4 x 6 x 12ft Fascia',
+      sku: 'JH-TRIM-FASCIA-6',
+      quantity: fasciaPcs,
+      unit: 'ea',
+      category: 'fascia_board',
+      presentation_group: 'Soffit & Fascia',
+      item_order: 3,
+      material_unit_cost: fasciaCost,
+      material_extended: fasciaExtended,
+      labor_unit_cost: 0,
+      labor_extended: 0,
+      total_extended: fasciaExtended,
+      calculation_source: 'auto-scope',
+      notes: `Fascia boards: ${fasciaLf.toFixed(1)} LF × 1.10 waste ÷ 12ft = ${fasciaPcs} pcs`,
+    });
+    totalMaterialCost += fasciaExtended;
+
+    // Fascia nails
+    const fasciaNailBoxes = Math.ceil(fasciaLf / 100);
+    const fasciaNailCost = 7.50;
+    const fasciaNailExtended = fasciaNailBoxes * fasciaNailCost;
+    lineItems.push({
+      description: 'Stainless Steel Trim Nails 1lb Box',
+      sku: 'TRIM-NAILS-SS-1LB',
+      quantity: fasciaNailBoxes,
+      unit: 'box',
+      category: 'fascia_fastener',
+      presentation_group: 'Soffit & Fascia',
+      item_order: 4,
+      material_unit_cost: fasciaNailCost,
+      material_extended: fasciaNailExtended,
+      labor_unit_cost: 0,
+      labor_extended: 0,
+      total_extended: fasciaNailExtended,
+      calculation_source: 'auto-scope',
+      notes: `Fascia nails: ${fasciaLf.toFixed(1)} LF ÷ 100 LF/box = ${fasciaNailBoxes} box`,
+    });
+    totalMaterialCost += fasciaNailExtended;
+
+    console.log(`📦 Added fascia items totaling $${(fasciaExtended + fasciaNailExtended).toFixed(2)}`);
+  }
+
+  // =========================================================================
+  // GUTTERS & DOWNSPOUTS - Auto-generate from detections
+  // =========================================================================
+  const gutterLf = detectionCounts?.gutter?.total_lf || 0;
+  const downspoutCount = detectionCounts?.downspout?.count || 0;
+  console.log('📏 Gutter LF value:', gutterLf, 'Downspout count:', downspoutCount);
+
+  if (gutterLf > 0) {
+    console.log(`✅ GENERATING GUTTER ITEMS for ${gutterLf.toFixed(1)} LF`);
+
+    // Gutter sections (10ft pieces, 10% waste)
+    const gutterPcs = Math.ceil(gutterLf / 10 * 1.10);
+    const gutterCost = 12.00;
+    const gutterExtended = gutterPcs * gutterCost;
+    lineItems.push({
+      description: '5" K-Style Aluminum Gutter 10ft',
+      sku: 'GUTTER-5K-ALU-10',
+      quantity: gutterPcs,
+      unit: 'ea',
+      category: 'gutter',
+      presentation_group: 'Gutters & Downspouts',
+      item_order: 1,
+      material_unit_cost: gutterCost,
+      material_extended: gutterExtended,
+      labor_unit_cost: 0,
+      labor_extended: 0,
+      total_extended: gutterExtended,
+      calculation_source: 'auto-scope',
+      notes: `Gutters: ${gutterLf.toFixed(1)} LF × 1.10 waste ÷ 10ft = ${gutterPcs} pcs`,
+    });
+    totalMaterialCost += gutterExtended;
+
+    // Gutter hangers (1 per 2 LF)
+    const hangerCount = Math.ceil(gutterLf / 2);
+    const hangerCost = 1.50;
+    const hangerExtended = hangerCount * hangerCost;
+    lineItems.push({
+      description: 'Hidden Gutter Hanger',
+      sku: 'GUTTER-HANGER-HIDDEN',
+      quantity: hangerCount,
+      unit: 'ea',
+      category: 'gutter_hanger',
+      presentation_group: 'Gutters & Downspouts',
+      item_order: 2,
+      material_unit_cost: hangerCost,
+      material_extended: hangerExtended,
+      labor_unit_cost: 0,
+      labor_extended: 0,
+      total_extended: hangerExtended,
+      calculation_source: 'auto-scope',
+      notes: `Hangers: ${gutterLf.toFixed(1)} LF ÷ 2 LF spacing = ${hangerCount} hangers`,
+    });
+    totalMaterialCost += hangerExtended;
+
+    // End caps (2 per run, estimate runs from LF)
+    const estimatedRuns = Math.ceil(gutterLf / 30);
+    const endCapCount = estimatedRuns * 2;
+    const endCapCost = 3.50;
+    const endCapExtended = endCapCount * endCapCost;
+    lineItems.push({
+      description: 'Gutter End Cap',
+      sku: 'GUTTER-ENDCAP',
+      quantity: endCapCount,
+      unit: 'ea',
+      category: 'gutter_accessory',
+      presentation_group: 'Gutters & Downspouts',
+      item_order: 3,
+      material_unit_cost: endCapCost,
+      material_extended: endCapExtended,
+      labor_unit_cost: 0,
+      labor_extended: 0,
+      total_extended: endCapExtended,
+      calculation_source: 'auto-scope',
+      notes: `End caps: ~${estimatedRuns} runs × 2 = ${endCapCount} caps`,
+    });
+    totalMaterialCost += endCapExtended;
+
+    console.log(`📦 Added gutter items totaling $${(gutterExtended + hangerExtended + endCapExtended).toFixed(2)}`);
+  }
+
+  if (downspoutCount > 0) {
+    console.log(`✅ GENERATING DOWNSPOUT ITEMS for ${downspoutCount} downspouts`);
+
+    // Downspouts (10ft each)
+    const downspoutCost = 8.00;
+    const downspoutExtended = downspoutCount * downspoutCost;
+    lineItems.push({
+      description: '2x3 Aluminum Downspout 10ft',
+      sku: 'DOWNSPOUT-2X3-10',
+      quantity: downspoutCount,
+      unit: 'ea',
+      category: 'downspout',
+      presentation_group: 'Gutters & Downspouts',
+      item_order: 4,
+      material_unit_cost: downspoutCost,
+      material_extended: downspoutExtended,
+      labor_unit_cost: 0,
+      labor_extended: 0,
+      total_extended: downspoutExtended,
+      calculation_source: 'auto-scope',
+      notes: `Downspouts from detection: ${downspoutCount} locations`,
+    });
+    totalMaterialCost += downspoutExtended;
+
+    // Downspout brackets (3 per downspout)
+    const dsBracketCount = downspoutCount * 3;
+    const dsBracketCost = 2.00;
+    const dsBracketExtended = dsBracketCount * dsBracketCost;
+    lineItems.push({
+      description: 'Downspout Bracket',
+      sku: 'DOWNSPOUT-BRACKET',
+      quantity: dsBracketCount,
+      unit: 'ea',
+      category: 'downspout_bracket',
+      presentation_group: 'Gutters & Downspouts',
+      item_order: 5,
+      material_unit_cost: dsBracketCost,
+      material_extended: dsBracketExtended,
+      labor_unit_cost: 0,
+      labor_extended: 0,
+      total_extended: dsBracketExtended,
+      calculation_source: 'auto-scope',
+      notes: `Brackets: ${downspoutCount} downspouts × 3 = ${dsBracketCount} brackets`,
+    });
+    totalMaterialCost += dsBracketExtended;
+
+    // Elbows (2 per downspout - top and bottom)
+    const elbowCount = downspoutCount * 2;
+    const elbowCost = 4.00;
+    const elbowExtended = elbowCount * elbowCost;
+    lineItems.push({
+      description: 'Downspout Elbow',
+      sku: 'DOWNSPOUT-ELBOW',
+      quantity: elbowCount,
+      unit: 'ea',
+      category: 'downspout',
+      presentation_group: 'Gutters & Downspouts',
+      item_order: 6,
+      material_unit_cost: elbowCost,
+      material_extended: elbowExtended,
+      labor_unit_cost: 0,
+      labor_extended: 0,
+      total_extended: elbowExtended,
+      calculation_source: 'auto-scope',
+      notes: `Elbows: ${downspoutCount} downspouts × 2 = ${elbowCount} elbows`,
+    });
+    totalMaterialCost += elbowExtended;
+
+    console.log(`📦 Added downspout items totaling $${(downspoutExtended + dsBracketExtended + elbowExtended).toFixed(2)}`);
+  }
+
+  // =========================================================================
+  // ARCHITECTURAL DETAILS - Corbels, Brackets, Shutters, Posts, Columns
+  // =========================================================================
+  const corbelCount = detectionCounts?.corbel?.count || 0;
+  const bracketDetectionCount = detectionCounts?.bracket?.count || 0;
+  const shutterCount = detectionCounts?.shutter?.count || 0;
+  const postCount = detectionCounts?.post?.count || 0;
+  const columnCount = detectionCounts?.column?.count || 0;
+
+  if (corbelCount > 0) {
+    // PURE PORT (sync): production also has an `await fetch()` inline fallback
+    // here for when DCP cache is empty. We omit that — refData.detectionCountPricing
+    // is preloaded by the host (Step 1C). On miss, we fall through to the same
+    // hardcoded fallback values production falls through to ($0 cost,
+    // CORBEL-GLULAM SKU, calculation_source: 'detection_count_unmatched').
+    const corbelPricing = detectionCountPricingMap.get('corbel');
+    const corbelCost = corbelPricing?.material_cost ?? 0;
+    const corbelSku = corbelPricing?.sku ?? 'CORBEL-GLULAM';
+    const corbelDescription = corbelPricing?.description ?? 'Glu-Lam Corbel Assembly';
+    const corbelExtended = corbelCount * corbelCost;
+
+    if (corbelPricing) {
+      console.log(`✅ GENERATING CORBEL ITEMS for ${corbelCount} corbels @ $${corbelCost}/ea (DB)`);
+    } else {
+      console.warn(`⚠️ No DB pricing for corbel — emitting $0 VERIFY PRICING line item`);
+    }
+
+    lineItems.push({
+      description: corbelPricing ? corbelDescription : `⚠️ Glu-Lam Corbel Assembly (VERIFY PRICING)`,
+      sku: corbelSku,
+      quantity: corbelCount,
+      unit: corbelPricing?.unit ?? 'ea',
+      category: 'corbel',
+      presentation_group: corbelPricing?.presentation_group ?? 'accessories',
+      item_order: 1,
+      material_unit_cost: corbelCost,
+      material_extended: corbelExtended,
+      labor_unit_cost: corbelPricing?.labor_cost ?? 0,
+      labor_extended: (corbelPricing?.labor_cost ?? 0) * corbelCount,
+      total_extended: corbelExtended + (corbelPricing?.labor_cost ?? 0) * corbelCount,
+      calculation_source: corbelPricing ? 'auto-scope' : 'detection_count_unmatched',
+      notes: `Corbels from detection: ${corbelCount} locations`,
+    });
+    totalMaterialCost += corbelExtended;
+  }
+
+  if (bracketDetectionCount > 0) {
+    console.log(`✅ GENERATING BRACKET ITEMS for ${bracketDetectionCount} brackets`);
+    const bracketCost = 35.00;
+    const bracketExtended = bracketDetectionCount * bracketCost;
+    lineItems.push({
+      description: 'Decorative Bracket - Primed',
+      sku: 'BRACKET-DECORATIVE',
+      quantity: bracketDetectionCount,
+      unit: 'ea',
+      category: 'bracket',
+      presentation_group: 'Architectural Details',
+      item_order: 2,
+      material_unit_cost: bracketCost,
+      material_extended: bracketExtended,
+      labor_unit_cost: 0,
+      labor_extended: 0,
+      total_extended: bracketExtended,
+      calculation_source: 'auto-scope',
+      notes: `Brackets from detection: ${bracketDetectionCount} locations`,
+    });
+    totalMaterialCost += bracketExtended;
+  }
+
+  if (shutterCount > 0) {
+    console.log(`✅ GENERATING SHUTTER ITEMS for ${shutterCount} shutters`);
+    const shutterCost = 65.00;
+    const shutterExtended = shutterCount * shutterCost;
+    lineItems.push({
+      description: 'Exterior Shutter - Vinyl',
+      sku: 'SHUTTER-VINYL',
+      quantity: shutterCount,
+      unit: 'ea',
+      category: 'shutter',
+      presentation_group: 'Architectural Details',
+      item_order: 3,
+      material_unit_cost: shutterCost,
+      material_extended: shutterExtended,
+      labor_unit_cost: 0,
+      labor_extended: 0,
+      total_extended: shutterExtended,
+      calculation_source: 'auto-scope',
+      notes: `Shutters from detection: ${shutterCount} (pairs = ${Math.ceil(shutterCount / 2)})`,
+    });
+    totalMaterialCost += shutterExtended;
+  }
+
+  if (postCount > 0) {
+    console.log(`✅ GENERATING POST ITEMS for ${postCount} posts`);
+    const postCost = 85.00;
+    const postExtended = postCount * postCost;
+    lineItems.push({
+      description: 'Porch Post Wrap - PVC',
+      sku: 'POST-WRAP-PVC',
+      quantity: postCount,
+      unit: 'ea',
+      category: 'post',
+      presentation_group: 'Architectural Details',
+      item_order: 4,
+      material_unit_cost: postCost,
+      material_extended: postExtended,
+      labor_unit_cost: 0,
+      labor_extended: 0,
+      total_extended: postExtended,
+      calculation_source: 'auto-scope',
+      notes: `Post wraps from detection: ${postCount} posts`,
+    });
+    totalMaterialCost += postExtended;
+  }
+
+  if (columnCount > 0) {
+    console.log(`✅ GENERATING COLUMN ITEMS for ${columnCount} columns`);
+    const columnCost = 150.00;
+    const columnExtended = columnCount * columnCost;
+    lineItems.push({
+      description: 'Column Wrap - PVC',
+      sku: 'COLUMN-WRAP-PVC',
+      quantity: columnCount,
+      unit: 'ea',
+      category: 'column',
+      presentation_group: 'Architectural Details',
+      item_order: 5,
+      material_unit_cost: columnCost,
+      material_extended: columnExtended,
+      labor_unit_cost: 0,
+      labor_extended: 0,
+      total_extended: columnExtended,
+      calculation_source: 'auto-scope',
+      notes: `Column wraps from detection: ${columnCount} columns`,
+    });
+    totalMaterialCost += columnExtended;
+  }
+
+  // =========================================================================
+  // GENERIC BLUEBEAM COUNT ITEMS
+  // Process any detection_counts keys not handled by hardcoded blocks above
+  // These come from Bluebeam imports with bluebeam_content labels
+  // =========================================================================
+  const handledDetectionKeys = new Set([
+    'corbel', 'bracket', 'shutter', 'post', 'column', 'belly_band',
+    'soffit', 'fascia', 'gutter', 'downspout', 'gable_topout',
+    'vent', 'gable_vent', 'outlet', 'hose_bib', 'light_fixture'
+  ]);
+
+  // detectionCountPricingMap is already loaded from DB above.
+  // Keys are both class_name ('corbel') and display_name ('Corbel Count', '1" x 6" WW Trim Count').
+  // Unknown keys now emit $0 VERIFY PRICING line items instead of being silently dropped.
+
+  if (detectionCounts) {
+    for (const [key, detection] of Object.entries(detectionCounts)) {
+      if (handledDetectionKeys.has(key.toLowerCase())) continue; // Already processed above
+      if (!detection || (detection.count || 0) === 0) continue;
+
+      const pricing = detectionCountPricingMap.get(key);
+      if (pricing) {
+        console.log(`📦 Bluebeam count item: "${key}" × ${detection.count} @ $${pricing.material_cost}/ea (DB)`);
+        const materialExtended = detection.count * pricing.material_cost;
+        const laborExtended = detection.count * (pricing.labor_cost ?? 0);
+        lineItems.push({
+          description: pricing.description,
+          sku: pricing.sku,
+          quantity: detection.count,
+          unit: pricing.unit ?? 'ea',
+          category: 'bluebeam_count',
+          presentation_group: pricing.presentation_group,
+          item_order: 99,
+          material_unit_cost: pricing.material_cost,
+          material_extended: materialExtended,
+          labor_unit_cost: pricing.labor_cost ?? 0,
+          labor_extended: laborExtended,
+          total_extended: materialExtended + laborExtended,
+          calculation_source: 'auto-scope',
+          notes: `Bluebeam count: ${key} = ${detection.count}`,
+        });
+        totalMaterialCost += materialExtended;
+      } else {
+        // No DB pricing found — emit $0 flagged line item so nothing is silently dropped
+        console.warn(`⚠️ No DB pricing for Bluebeam count key "${key}" × ${detection.count} — emitting $0 VERIFY PRICING`);
+        lineItems.push({
+          description: `⚠️ ${key} (VERIFY PRICING)`,
+          sku: 'UNMATCHED',
+          quantity: detection.count,
+          unit: detection.unit ?? 'ea',
+          category: 'bluebeam_count',
+          presentation_group: 'Unmatched Items',
+          item_order: 999,
+          material_unit_cost: 0,
+          material_extended: 0,
+          labor_unit_cost: 0,
+          labor_extended: 0,
+          total_extended: 0,
+          calculation_source: 'detection_count_unmatched',
+          notes: `No pricing found for Bluebeam count key: ${key}`,
+        });
+      }
+    }
+  }
+
+  // =========================================================================
+  // DIRECT WHITEWOOD CORNER GENERATION
+  // Bypasses auto-scope rules 181-183 which have a measurement context bug
+  // =========================================================================
+  if (trimSystem === 'whitewood') {
+    const osCornerCount = (webhookMeasurements as any)?.corners?.outside_count
+      || (webhookMeasurements as any)?.outside_corners_count
+      || 0;
+    const isCornerCount = (webhookMeasurements as any)?.corners?.inside_count
+      || (webhookMeasurements as any)?.inside_corners_count
+      || 0;
+    const wallHeight = (webhookMeasurements as any)?.avg_wall_height_ft || 10;
+
+    if (osCornerCount > 0) {
+      const osCornerLf = osCornerCount * wallHeight;
+      const pcs1x3 = Math.ceil(osCornerLf / 12 * 1.05);
+      const pcs1x4 = Math.ceil(osCornerLf / 12 * 1.05);
+
+      console.log(`📦 WW O/S Corners: ${osCornerCount} corners × ${wallHeight}ft = ${osCornerLf} LF → ${pcs1x3}pc 1x3 + ${pcs1x4}pc 1x4`);
+
+      const ext1x3 = pcs1x3 * 7.82;
+      lineItems.push({
+        description: '1x3 WhiteWood O/S Corner 12ft',
+        sku: 'WW-1X3-12',
+        quantity: pcs1x3,
+        unit: 'pieces',
+        category: 'corner',
+        presentation_group: 'Trim & Corners',
+        item_order: 50,
+        material_unit_cost: 7.82,
+        material_extended: ext1x3,
+        labor_unit_cost: 0,
+        labor_extended: 0,
+        total_extended: ext1x3,
+        calculation_source: 'auto-scope',
+        notes: `${osCornerCount} O/S corners × ${wallHeight}ft ÷ 12ft × 1.05 waste`,
+      });
+      totalMaterialCost += ext1x3;
+
+      const ext1x4 = pcs1x4 * 9.37;
+      lineItems.push({
+        description: '1x4 WhiteWood O/S Corner 12ft',
+        sku: 'WW-1X4-12',
+        quantity: pcs1x4,
+        unit: 'pieces',
+        category: 'corner',
+        presentation_group: 'Trim & Corners',
+        item_order: 51,
+        material_unit_cost: 9.37,
+        material_extended: ext1x4,
+        labor_unit_cost: 0,
+        labor_extended: 0,
+        total_extended: ext1x4,
+        calculation_source: 'auto-scope',
+        notes: `${osCornerCount} O/S corners × ${wallHeight}ft ÷ 12ft × 1.05 waste`,
+      });
+      totalMaterialCost += ext1x4;
+    }
+
+    if (isCornerCount > 0) {
+      const isCornerLf = isCornerCount * wallHeight;
+      const pcs2x2 = Math.ceil(isCornerLf / 20 * 1.05);
+
+      console.log(`📦 WW I/S Corners: ${isCornerCount} corners × ${wallHeight}ft = ${isCornerLf} LF → ${pcs2x2}pc 2x2`);
+
+      const ext2x2 = pcs2x2 * 10.42;
+      lineItems.push({
+        description: '2x2 WhiteWood I/S Corner 20ft',
+        sku: 'WW-2X2-20',
+        quantity: pcs2x2,
+        unit: 'pieces',
+        category: 'corner',
+        presentation_group: 'Trim & Corners',
+        item_order: 52,
+        material_unit_cost: 10.42,
+        material_extended: ext2x2,
+        labor_unit_cost: 0,
+        labor_extended: 0,
+        total_extended: ext2x2,
+        calculation_source: 'auto-scope',
+        notes: `${isCornerCount} I/S corners × ${wallHeight}ft ÷ 20ft × 1.05 waste`,
+      });
+      totalMaterialCost += ext2x2;
+    }
+  }
+
+  // =========================================================================
+  // PENETRATION FLASHING - Vents, Outlets, Hose Bibs, Light Fixtures
+  // Skip auto-scope flashing for detections that have manual material assignments
+  // =========================================================================
+  const ventCount = detectionCounts?.vent?.count || 0;
+  const gableVentCount = detectionCounts?.gable_vent?.count || 0;
+  const outletCount = detectionCounts?.outlet?.count || 0;
+  const hoseBibCount = detectionCounts?.hose_bib?.count || 0;
+  const lightFixtureCount = detectionCounts?.light_fixture?.count || 0;
+
+  // Helper function to count material assignments for a detection class
+  // Checks multiple property names for compatibility with different payload formats
+  const getAssignedCount = (detectionClass: string): number => {
+    if (!materialAssignments || !Array.isArray(materialAssignments)) {
+      return 0;
+    }
+
+    const assignmentsForClass = materialAssignments.filter((ma: any) => {
+      // Check all possible property names for detection class
+      const maClass = (ma.detection_class || ma.class || ma.detectionClass || '').toLowerCase();
+      return maClass === detectionClass.toLowerCase();
+    });
+
+    return assignmentsForClass.reduce(
+      (sum: number, ma: any) => sum + (ma.quantity || ma.count || ma.qty || 1), 0
+    );
+  };
+
+  // Calculate unassigned penetrations (those without manual material assignments)
+  const unassignedVentCount = Math.max(0, ventCount - getAssignedCount('vent'));
+  const unassignedGableVentCount = Math.max(0, gableVentCount - getAssignedCount('gable_vent'));
+  const unassignedOutletCount = Math.max(0, outletCount - getAssignedCount('outlet'));
+  const unassignedHoseBibCount = Math.max(0, hoseBibCount - getAssignedCount('hose_bib'));
+  const unassignedLightFixtureCount = Math.max(0, lightFixtureCount - getAssignedCount('light_fixture'));
+
+  const totalUnassignedPenetrations = unassignedVentCount + unassignedGableVentCount +
+    unassignedOutletCount + unassignedHoseBibCount + unassignedLightFixtureCount;
+
+  console.log(`🔍 Penetration check: ${ventCount} vents (${unassignedVentCount} unassigned), ${gableVentCount} gable vents (${unassignedGableVentCount} unassigned)`);
+
+  if (totalUnassignedPenetrations > 0) {
+    console.log(`✅ GENERATING PENETRATION FLASHING for ${totalUnassignedPenetrations} unassigned penetrations (skipping ${ventCount + gableVentCount + outletCount + hoseBibCount + lightFixtureCount - totalUnassignedPenetrations} with material assignments)`);
+
+    // Penetration flashing blocks
+    const flashBlockCost = 8.50;
+    const flashBlockExtended = totalUnassignedPenetrations * flashBlockCost;
+    lineItems.push({
+      description: 'Siding Penetration Flashing Block',
+      sku: 'FLASH-PENETRATION',
+      quantity: totalUnassignedPenetrations,
+      unit: 'ea',
+      category: 'penetration',
+      presentation_group: 'Flashing & Weatherproofing',
+      item_order: 10,
+      material_unit_cost: flashBlockCost,
+      material_extended: flashBlockExtended,
+      labor_unit_cost: 0,
+      labor_extended: 0,
+      total_extended: flashBlockExtended,
+      calculation_source: 'auto-scope',
+      notes: `Penetration flashing (unassigned only): ${unassignedVentCount} vents + ${unassignedGableVentCount} gable vents + ${unassignedOutletCount} outlets + ${unassignedHoseBibCount} hose bibs + ${unassignedLightFixtureCount} lights = ${totalUnassignedPenetrations}`,
+    });
+    totalMaterialCost += flashBlockExtended;
+
+    // Caulk for penetrations
+    const penetrationCaulkTubes = Math.ceil(totalUnassignedPenetrations / 10);
+    const penetrationCaulkCost = 8.50;
+    const penetrationCaulkExtended = penetrationCaulkTubes * penetrationCaulkCost;
+    lineItems.push({
+      description: 'Sealant for Penetrations',
+      sku: 'CAULK-PENETRATION',
+      quantity: penetrationCaulkTubes,
+      unit: 'tube',
+      category: 'penetration',
+      presentation_group: 'Flashing & Weatherproofing',
+      item_order: 11,
+      material_unit_cost: penetrationCaulkCost,
+      material_extended: penetrationCaulkExtended,
+      labor_unit_cost: 0,
+      labor_extended: 0,
+      total_extended: penetrationCaulkExtended,
+      calculation_source: 'auto-scope',
+      notes: `Penetration sealant: ${totalUnassignedPenetrations} ÷ 10 per tube = ${penetrationCaulkTubes} tubes`,
+    });
+    totalMaterialCost += penetrationCaulkExtended;
+
+    console.log(`📦 Added penetration flashing items totaling $${(flashBlockExtended + penetrationCaulkExtended).toFixed(2)}`);
+  } else if (ventCount + gableVentCount + outletCount + hoseBibCount + lightFixtureCount > 0) {
+    console.log(`⏭️ SKIPPING penetration flashing - all ${ventCount + gableVentCount + outletCount + hoseBibCount + lightFixtureCount} penetrations have material assignments`);
+  }
+
+  // Gable vents need additional trim ring (only for unassigned gable vents)
+  if (unassignedGableVentCount > 0) {
+    const gableVentTrimCost = 12.00;
+    const gableVentTrimExtended = unassignedGableVentCount * gableVentTrimCost;
+    lineItems.push({
+      description: 'Gable Vent Trim Ring',
+      sku: 'GABLE-VENT-TRIM',
+      quantity: unassignedGableVentCount,
+      unit: 'ea',
+      category: 'gable_vent',
+      presentation_group: 'Flashing & Weatherproofing',
+      item_order: 12,
+      material_unit_cost: gableVentTrimCost,
+      material_extended: gableVentTrimExtended,
+      labor_unit_cost: 0,
+      labor_extended: 0,
+      total_extended: gableVentTrimExtended,
+      calculation_source: 'auto-scope',
+      notes: `Gable vent trim rings: ${unassignedGableVentCount} unassigned vents (${gableVentCount - unassignedGableVentCount} have material assignments)`,
+    });
+    totalMaterialCost += gableVentTrimExtended;
+  }
+
+  // =========================================================================
+  // ROOFING COMPONENTS - Log only (for roofing trade)
+  // =========================================================================
+  const eaveLf = detectionCounts?.eave?.total_lf || 0;
+  const rakeLf = detectionCounts?.rake?.total_lf || 0;
+  const ridgeLf = detectionCounts?.ridge?.total_lf || 0;
+  const valleyLf = detectionCounts?.valley?.total_lf || 0;
+
+  if (eaveLf > 0 || rakeLf > 0 || ridgeLf > 0 || valleyLf > 0) {
+    console.log('📏 Roofing components detected:');
+    console.log(`   - Eave: ${eaveLf.toFixed(1)} LF`);
+    console.log(`   - Rake: ${rakeLf.toFixed(1)} LF`);
+    console.log(`   - Ridge: ${ridgeLf.toFixed(1)} LF`);
+    console.log(`   - Valley: ${valleyLf.toFixed(1)} LF`);
+    console.log('   (These are passed to roofing trade API for drip edge, starter, ridge cap calculations)');
+  }
+
+  // =========================================================================
+  // DYNAMIC DETECTION CLASS PROCESSING
+  // Catch-all for detection classes not handled by hardcoded blocks above.
+  // Uses detection_class_material_mapping from database to generate line items.
+  // =========================================================================
+  if (detectionCounts && Object.keys(detectionCounts).length > 0 && classMappings.length > 0) {
+    console.log('\n🔄 [DYNAMIC DETECTION] Processing additional detection classes...');
+
+    // Classes already handled by hardcoded blocks above — do not double-process
+    const HANDLED_CLASSES = new Set([
+      // Structural/facade classes (not materials)
+      'building', 'exterior_wall', 'exterior wall', 'facade', 'roof', 'siding',
+      // Core openings (handled by webhook measurements)
+      'window', 'door', 'garage',
+      // Gables and corners (handled by auto-scope rules)
+      'gable', 'corner_inside', 'corner_outside',
+      // Linear detections with dedicated handling
+      'belly_band', 'soffit', 'fascia', 'gutter', 'downspout',
+      'gable_topout', 'topout', 'eave', 'rake', 'ridge', 'valley',
+      // Architectural details with dedicated handling
+      'corbel', 'bracket', 'shutter', 'post', 'column',
+      // Penetrations with dedicated handling
+      'vent', 'gable_vent', 'outlet', 'hose_bib', 'light_fixture',
+    ]);
+
+    // Build a map for fast lookup
+    const classMappingMap = new Map<string, DetectionClassMapping>();
+    for (const mapping of classMappings) {
+      classMappingMap.set(mapping.class_name.toLowerCase(), mapping);
+    }
+
+    const dynamicProcessed: string[] = [];
+    const dynamicUnknown: string[] = [];
+
+    for (const [className, data] of Object.entries(detectionCounts)) {
+      const classLower = className.toLowerCase();
+
+      // Skip classes already handled by hardcoded blocks
+      if (HANDLED_CLASSES.has(classLower)) {
+        continue;
+      }
+
+      // Check if this class has meaningful data
+      const count = data.count || 0;
+      const totalLf = data.total_lf || 0;
+      const totalSf = data.total_sf || 0;
+
+      if (count <= 0 && totalLf <= 0 && totalSf <= 0) {
+        continue;  // No data for this class
+      }
+
+      // Look up mapping
+      const mapping = classMappingMap.get(classLower);
+
+      if (mapping) {
+        // Calculate quantity based on measurement type
+        let quantity = 0;
+        let rawValue = 0;
+
+        switch (mapping.measurement_type) {
+          case 'count':
+            rawValue = count;
+            quantity = Math.ceil(count * (mapping.waste_factor || 1));
+            break;
+          case 'linear':
+            rawValue = totalLf;
+            quantity = Math.ceil(totalLf * (mapping.waste_factor || 1.12));
+            break;
+          case 'area':
+            rawValue = totalSf;
+            quantity = Math.ceil(totalSf * (mapping.waste_factor || 1.12));
+            break;
+        }
+
+        if (quantity <= 0) continue;
+
+        // Determine presentation group from mapping or trade
+        const presentationGroup = mapping.presentation_group ||
+          (mapping.trade === 'trim' ? 'Trim' :
+           mapping.trade === 'siding' ? 'Siding' :
+           mapping.trade === 'gutters' ? 'Gutters & Downspouts' :
+           mapping.trade === 'architectural' ? 'Architectural Details' :
+           'Accessories');
+
+        // Create line item
+        const notePrefix = mapping.default_product_sku ? '' : '⚠️ VERIFY PRICING — ';
+        lineItems.push({
+          description: mapping.display_name || className,
+          sku: mapping.default_product_sku || `DYNAMIC-${classLower.toUpperCase()}`,
+          quantity: quantity,
+          unit: mapping.unit_of_measure || 'EA',
+          category: mapping.trade || 'accessories',
+          presentation_group: presentationGroup,
+          material_unit_cost: 0,  // Will need pricing lookup or manual entry
+          material_extended: 0,
+          labor_unit_cost: 0,
+          labor_extended: 0,
+          total_extended: 0,
+          calculation_source: 'auto-scope',  // Uses auto-scope type for consistency
+          notes: `${notePrefix}Dynamic detection: ${className} (${rawValue.toFixed(1)} ${mapping.measurement_type === 'linear' ? 'LF' : mapping.measurement_type === 'area' ? 'SF' : 'count'} × ${mapping.waste_factor || 1} waste)`,
+        });
+
+        dynamicProcessed.push(className);
+        console.log(`   ✅ ${className}: ${rawValue.toFixed(1)} → ${quantity} ${mapping.unit_of_measure} (${mapping.display_name})`);
+      } else {
+        // No mapping exists — log warning
+        dynamicUnknown.push(className);
+        console.log(`   ⚠️ WARNING: Unknown detection class '${className}' with data {count: ${count}, lf: ${totalLf.toFixed(1)}, sf: ${totalSf.toFixed(1)}} — no mapping in detection_class_material_mapping`);
+      }
+    }
+
+    // Step C: Summary log
+    console.log(`🔄 [DYNAMIC DETECTION] SUMMARY:`);
+    console.log(`   Processed ${dynamicProcessed.length} additional classes: ${dynamicProcessed.length > 0 ? dynamicProcessed.join(', ') : '(none)'}`);
+    console.log(`   Skipped ${dynamicUnknown.length} unknown classes: ${dynamicUnknown.length > 0 ? dynamicUnknown.join(', ') : '(none)'}`);
+  } else if (detectionCounts && Object.keys(detectionCounts).length > 0) {
+    console.log('ℹ️ [DYNAMIC DETECTION] Skipped — no class mappings loaded from database');
+  }
+
+  // =========================================================================
+  // SUMMARY LOG - All Detection-Generated Items
+  // =========================================================================
+  const detectionGeneratedItems = lineItems.filter(item =>
+    item.notes?.toLowerCase().includes('detection') ||
+    item.notes?.toLowerCase().includes('from detection')
+  );
+  console.log('📦 Total detection-generated items:', detectionGeneratedItems.length);
+
+  // =========================================================================
+  // PART 3: Calculate Labor and Overhead using Mike Skjei Methodology
+  // =========================================================================
+
+  // Calculate material total (sum of material_extended from all items)
+  const materialTotal = lineItems.reduce((sum, item) => sum + (item.material_extended || 0), 0);
+  console.log(`📊 Material total: $${materialTotal.toFixed(2)}`);
+
+  // Get facade area for labor calculations
+  // IMPORTANT: Use gross facade area (NOT net siding) for WRB and demo calculations
+  // WRB covers the entire wall including areas behind openings
+  // Cast to any to check all possible property names since types may not be complete
+  const wmLabor = webhookMeasurements as any;
+
+  const facadeAreaSqft = wmLabor?.facade_area_sqft ||      // MeasurementContext uses this
+    wmLabor?.facade_sqft ||                                 // WebhookMeasurements type has this
+    wmLabor?.facade_total_sqft ||                           // Database column name
+    wmLabor?.gross_wall_area_sqft ||                        // Alternative name
+    wmLabor?.net_siding_area_sqft ||                        // Fallback only if gross not available
+    wmLabor?.net_siding_sqft ||                             // Another variation
+    0;
+
+  // Calculate installation labor using auto-scope rules (or legacy method if no rules)
+  let laborItems: LaborLineItem[];
+  let laborSubtotal: number;
+
+  console.log(`\n👷 LABOR CALCULATION START`);
+  console.log(`   laborAutoScopeRules.length: ${laborAutoScopeRules.length}`);
+  console.log(`   facadeAreaSqft: ${facadeAreaSqft}`);
+  console.log(`   lineItems.length: ${lineItems.length}`);
+  console.log(`   laborRates.length: ${laborRates.length}`);
+
+  if (laborAutoScopeRules.length > 0) {
+    console.log(`   → Using rules-based labor calculation`);
+    // Use new rules-based labor calculation with labor_class grouping
+    const laborResult = calculateInstallationLaborFromRules(
+      lineItems,
+      laborAutoScopeRules,
+      detectionCounts,
+      facadeAreaSqft,
+      laborRates  // Pass laborRates for labor_class-based grouping
+    );
+    laborItems = laborResult.laborItems;
+    laborSubtotal = laborResult.subtotal;
+  } else {
+    // Fall back to legacy method
+    const laborResult = calculateInstallationLaborLegacy(
+      lineItems,
+      laborRates,
+      'lap_siding'
+    );
+    laborItems = laborResult.laborItems;
+    laborSubtotal = laborResult.subtotal;
+  }
+
+  // Calculate overhead costs (without project insurance - that's added after markup calculation)
+  // V9.1: Pass org overhead config for org-specific L&I, mobilization, dumpster/toilet exclusion
+  let { overheadItems, subtotal: overheadSubtotal } = calculateOverhead(
+    sidingOverheadCosts,
+    laborSubtotal,
+    { crew_size: CALC_CREW_SIZE, estimated_weeks: CALC_ESTIMATED_WEEKS },
+    orgOverheadConfig
+  );
+
+  // =========================================================================
+  // Phase 2B: Add dumpster/toilet from estimate_settings if not already present
+  // The overhead_costs table may not have these items, so we add them explicitly
+  // =========================================================================
+  const estOverhead = config?.estimate_settings?.overhead;
+  if (estOverhead) {
+    // Check if dumpster item already exists
+    const hasDumpster = overheadItems.some(item =>
+      item.cost_name.toLowerCase().includes('dumpster')
+    );
+
+    // Add dumpster if explicitly enabled (true or "true"), has cost, and not already present
+    // Missing field should NOT add item - only explicit true triggers addition
+    if (!hasDumpster && isTrue(estOverhead.include_dumpster) && estOverhead.dumpster_cost && estOverhead.dumpster_cost > 0) {
+      const dumpsterCost = estOverhead.dumpster_cost;
+      overheadItems.push({
+        cost_id: 'EST-DUMPSTER',
+        cost_name: 'Dumpster Rental',
+        description: 'Roll-off dumpster rental for project duration',
+        category: 'site_services',
+        quantity: 1,
+        unit: 'ea',
+        rate: dumpsterCost,
+        amount: dumpsterCost,
+        calculation_type: 'flat_fee',
+        notes: `Dumpster rental for project duration`
+      });
+      overheadSubtotal += dumpsterCost;
+      console.log(`   📊 Dumpster Rental: $${dumpsterCost.toFixed(2)} (from estimate_settings)`);
+    }
+
+    // Check if toilet item already exists
+    const hasToilet = overheadItems.some(item => {
+      const name = item.cost_name.toLowerCase();
+      return name.includes('toilet') || name.includes('porta') || name.includes('potty') || name.includes('sanitation');
+    });
+
+    // Add toilet if explicitly enabled (true or "true"), has cost, and not already present
+    // Missing field should NOT add item - only explicit true triggers addition
+    if (!hasToilet && isTrue(estOverhead.include_toilet) && estOverhead.toilet_cost && estOverhead.toilet_cost > 0) {
+      const toiletCost = estOverhead.toilet_cost;
+      const weeks = estOverhead.estimated_weeks || orgOverheadConfig?.estimated_weeks || CALC_ESTIMATED_WEEKS;
+      overheadItems.push({
+        cost_id: 'EST-TOILET',
+        cost_name: 'Portable Toilet Rental',
+        description: 'Porta potty rental for crew',
+        category: 'site_services',
+        quantity: 1,
+        unit: 'ea',
+        rate: toiletCost,
+        amount: toiletCost,
+        calculation_type: 'flat_fee',
+        notes: `Porta potty rental - ${weeks} weeks`
+      });
+      overheadSubtotal += toiletCost;
+      console.log(`   📊 Portable Toilet: $${toiletCost.toFixed(2)} (from estimate_settings)`);
+    }
+  }
+
+  // Calculate final totals with markup
+  // V9.1: Pass org-specific insurance rate
+  const projectTotals = calculateProjectTotals(
+    materialTotal,
+    laborSubtotal,
+    overheadSubtotal,
+    CALC_MARKUP_RATE,
+    EFFECTIVE_INSURANCE_RATE
+  );
+
+  // =========================================================================
+  // ADD PROJECT INSURANCE AS OVERHEAD LINE ITEM
+  // Project insurance is calculated on the marked-up subtotal, so it must be
+  // added after calculateProjectTotals. This ensures it appears in the
+  // takeoff_line_items and Excel export.
+  // =========================================================================
+  if (projectTotals.project_insurance > 0) {
+    overheadItems.push({
+      cost_id: 'PROJECT-INSURANCE',
+      cost_name: 'Project Insurance',
+      description: 'General liability and workers comp insurance for project',
+      category: 'insurance',
+      quantity: 1,
+      unit: 'project',
+      rate: projectTotals.project_insurance,
+      amount: projectTotals.project_insurance,
+      calculation_type: 'calculated',
+      notes: `$${EFFECTIVE_INSURANCE_RATE.toFixed(2)} per $1,000 of project subtotal ($${projectTotals.subtotal.toFixed(2)})`
+    });
+    console.log(`   📊 Project Insurance: $${projectTotals.project_insurance.toFixed(2)} (added to overhead items)`);
+  }
+
+  // Update overhead subtotal to include project insurance
+  const overheadTotalWithInsurance = overheadSubtotal + projectTotals.project_insurance;
+
+  // =========================================================================
+  // UNMATCHED BLUEBEAM ITEMS — Safety net for unmapped subjects
+  // Items with bluebeam_content but no assigned_material_id flow through as
+  // flagged $0 line items so nothing gets silently dropped.
+  // =========================================================================
+  const unmatchedItems = config?.unmatched_bluebeam_items || [];
+  if (unmatchedItems.length > 0) {
+    console.log(`⚠️ [UNMATCHED] Processing ${unmatchedItems.length} unmatched Bluebeam items`);
+
+    for (const item of unmatchedItems) {
+      const isCountBased = item.total_item_count > 0;
+      const quantity = isCountBased ? item.total_item_count : Math.ceil(item.total_area_sf);
+      const unit = isCountBased ? 'ea' : 'sf';
+
+      if (quantity <= 0) continue; // Skip zero-quantity items
+
+      lineItems.push({
+        description: `⚠️ ${item.bluebeam_content} (VERIFY PRICING)`,
+        sku: 'UNMATCHED',
+        quantity: quantity,
+        unit: unit,
+        category: 'unmatched',
+        presentation_group: 'Unmatched Items',
+        material_unit_cost: 0,
+        material_extended: 0,
+        labor_unit_cost: 0,
+        labor_extended: 0,
+        total_extended: 0,
+        calculation_source: 'bluebeam_unmatched',
+        notes: `Bluebeam class: ${item.class} | ${item.annotation_count} annotations | Needs material assignment`,
+      });
+
+      console.log(`   ⚠️ Added unmatched: "${item.bluebeam_content}" × ${quantity} ${unit}`);
+    }
+  }
+
+  // =========================================================================
+  // PART 4: Build Result
+  // =========================================================================
+
+  const assignedCount = lineItems.filter(i => i.calculation_source === 'assigned_material').length;
+  const autoScopeCount = lineItems.filter(i => i.calculation_source === 'auto-scope').length;
+
+  // =========================================================================
+  // RECONCILIATION: Log warnings for detection classes that didn't produce line items
+  // This is read-only logging for visibility into dropped classes
+  // =========================================================================
+  reconcileDetectionOutput(detectionCounts, lineItems);
+
+  return {
+    success: true,
+    line_items: lineItems,
+    labor: {
+      installation_items: laborItems,
+      installation_subtotal: laborSubtotal,
+    },
+    overhead: {
+      items: overheadItems,
+      subtotal: overheadTotalWithInsurance,  // Includes project insurance
+    },
+    totals: {
+      material_cost: projectTotals.material_cost,
+      labor_cost: projectTotals.labor_total,
+      overhead: projectTotals.overhead_subtotal,
+      subtotal: projectTotals.subtotal,
+      markup_percent: projectTotals.material_markup_rate * 100,
+      markup_amount: projectTotals.material_markup_amount + projectTotals.labor_markup_amount,
+      total: projectTotals.grand_total,
+    },
+    project_totals: projectTotals,
+    metadata: {
+      pricing_method: 'hybrid-v2',
+      calculation_method: 'mike_skjei_v1',
+      assigned_items_count: assignedCount,
+      auto_scope_items_count: autoScopeCount,
+      items_priced: assignedCount + autoScopeCount,
+      items_missing: missingItems,
+      items_before_consolidation: itemsBeforeConsolidation,
+      items_after_consolidation: itemsAfterConsolidation,
+      measurement_source: autoScopeResult.measurement_source,
+      rules_evaluated: autoScopeResult.rules_evaluated,
+      rules_triggered: autoScopeResult.rules_triggered,
+      markup_rate: CALC_MARKUP_RATE,
+      crew_size: CALC_CREW_SIZE,
+      estimated_weeks: CALC_ESTIMATED_WEEKS,
+      warnings,
+    },
+  };
+}
+
+// ============================================================================
+// HELPER FUNCTIONS
+// ============================================================================
+
+/**
+ * Reconcile detection input vs output - log warnings for dropped classes
+ *
+ * This function compares the incoming detectionCounts (what frontend sent)
+ * against the generated lineItems (what orchestrator produced). Any detection
+ * class that has count/lf/sf > 0 but no corresponding line item is logged
+ * as a warning for visibility in Railway logs.
+ *
+ * IMPORTANT: This is READ-ONLY logging - no side effects on calculation.
+ */
+function reconcileDetectionOutput(
+  detectionCounts: Record<string, { count: number; total_lf?: number; total_sf?: number }> | undefined,
+  lineItems: CombinedLineItem[]
+): void {
+  console.log('');
+  console.log('[RECONCILIATION] ════════════════════════════════════════════════════');
+  console.log('[RECONCILIATION] Checking detection input vs line item output...');
+
+  if (!detectionCounts || Object.keys(detectionCounts).length === 0) {
+    console.log('[RECONCILIATION] No detection counts received - skipping reconciliation');
+    console.log('[RECONCILIATION] ════════════════════════════════════════════════════');
+    return;
+  }
+
+  // Classes to skip - these are structural/facade classes, not material classes
+  const SKIP_CLASSES = new Set([
+    'building',
+    'exterior wall',
+    'exterior_wall',
+    'facade',
+    'roof',  // Handled by roofing trade
+    'siding',  // Generic siding class - materials come from assigned_material_id
+  ]);
+
+  // Build a set of classes that have line items
+  const classesWithLineItems = new Set<string>();
+
+  for (const item of lineItems) {
+    // Check category
+    if (item.category) {
+      classesWithLineItems.add(item.category.toLowerCase());
+    }
+
+    // Check description for class references (e.g., "Corbel - Decorative")
+    if (item.description) {
+      const descLower = item.description.toLowerCase();
+      // Add common class name extractions from descriptions
+      for (const className of Object.keys(detectionCounts)) {
+        const classLower = className.toLowerCase().replace(/_/g, ' ');
+        if (descLower.includes(classLower)) {
+          classesWithLineItems.add(className.toLowerCase());
+        }
+      }
+    }
+
+    // Check notes for class references
+    if (item.notes) {
+      const notesLower = item.notes.toLowerCase();
+      for (const className of Object.keys(detectionCounts)) {
+        const classLower = className.toLowerCase().replace(/_/g, ' ');
+        if (notesLower.includes(classLower) || notesLower.includes(className.toLowerCase())) {
+          classesWithLineItems.add(className.toLowerCase());
+        }
+      }
+    }
+  }
+
+  // Check each detection class
+  const missingClasses: string[] = [];
+  let totalClasses = 0;
+  let matchedClasses = 0;
+
+  for (const [className, data] of Object.entries(detectionCounts)) {
+    const classLower = className.toLowerCase();
+
+    // Skip structural classes
+    if (SKIP_CLASSES.has(classLower)) {
+      continue;
+    }
+
+    // Check if this class has meaningful data
+    const count = data.count || 0;
+    const totalLf = data.total_lf || 0;
+    const totalSf = data.total_sf || 0;
+
+    if (count <= 0 && totalLf <= 0 && totalSf <= 0) {
+      continue;  // No data for this class
+    }
+
+    totalClasses++;
+
+    // Check if we generated line items for this class
+    const hasLineItem = classesWithLineItems.has(classLower) ||
+                        classesWithLineItems.has(className.replace(/_/g, ' ').toLowerCase());
+
+    if (hasLineItem) {
+      matchedClasses++;
+      console.log(`[RECONCILIATION] ✅ ${className}: count=${count}, lf=${totalLf.toFixed(1)}, sf=${totalSf.toFixed(1)} → line items generated`);
+    } else {
+      missingClasses.push(className);
+      console.log(`[RECONCILIATION] ⚠️  WARNING: Class '${className}' received (count: ${count}, lf: ${totalLf.toFixed(1)}, sf: ${totalSf.toFixed(1)}) but NO LINE ITEMS were generated`);
+    }
+  }
+
+  // Summary
+  console.log('[RECONCILIATION] ────────────────────────────────────────────────────');
+  console.log(`[RECONCILIATION] SUMMARY: ${matchedClasses}/${totalClasses} detection classes produced line items`);
+
+  if (missingClasses.length > 0) {
+    console.log(`[RECONCILIATION] ⚠️  MISSING CLASSES (${missingClasses.length}): ${missingClasses.join(', ')}`);
+    console.log('[RECONCILIATION] These classes were in detectionCounts but no line items reference them.');
+    console.log('[RECONCILIATION] Possible causes: class not in hardcoded handlers, no auto-scope rule, or filtered out.');
+  } else {
+    console.log('[RECONCILIATION] ✅ All detection classes with data have corresponding line items');
+  }
+
+  console.log('[RECONCILIATION] ════════════════════════════════════════════════════');
+  console.log('');
+}
+
+/**
+ * Consolidate line items by pricing_item_id (or SKU as fallback)
+ * Merges multiple items with the same product into a single line item
+ * FIXED: Now rebuilds notes using the combined total raw quantity
+ */
+function consolidateLineItems(lineItems: CombinedLineItem[]): CombinedLineItem[] {
+  const consolidated = new Map<string, CombinedLineItem & { raw_quantity_total?: number }>();
+
+  for (const item of lineItems) {
+    const key = item.pricing_item_id || item.sku;
+
+    if (consolidated.has(key)) {
+      const existing = consolidated.get(key)!;
+      existing.quantity += item.quantity;
+      existing.material_extended += item.material_extended;
+      existing.labor_extended += item.labor_extended;
+      existing.total_extended += item.total_extended;
+      existing.squares_for_labor = (existing.squares_for_labor || 0) + (item.squares_for_labor || 0);
+
+      // Track raw quantity for note rebuilding (SF or LF before conversion)
+      existing.raw_quantity_total = (existing.raw_quantity_total || 0) + (item.raw_quantity || item.quantity);
+
+      // Track all detection IDs for provenance
+      if (item.detection_ids) {
+        existing.detection_ids = [...(existing.detection_ids || []), ...item.detection_ids];
+      } else if (item.detection_id) {
+        existing.detection_ids = [...(existing.detection_ids || []), item.detection_id];
+      }
+      existing.detection_count = (existing.detection_count || 1) + 1;
+    } else {
+      consolidated.set(key, {
+        ...item,
+        detection_ids: item.detection_ids || (item.detection_id ? [item.detection_id] : []),
+        detection_count: 1,
+        squares_for_labor: item.squares_for_labor || 0,
+        raw_quantity_total: item.raw_quantity || item.quantity,
+      });
+    }
+  }
+
+  // Round all monetary values and rebuild notes with total quantities
+  return Array.from(consolidated.values()).map(item => {
+    const roundedQty = Math.round(item.quantity * 100) / 100;
+    const rawTotal = item.raw_quantity_total || 0;
+
+    // Rebuild notes if multiple items were consolidated (detection_count > 1)
+    let finalNotes = item.notes;
+    if (item.detection_count && item.detection_count > 1 && rawTotal > 0) {
+      const unit = item.unit?.toLowerCase() || '';
+      // Extract waste from original note or use default 1.10
+      const wasteMatch = item.notes?.match(/×\s*([\d.]+)\s*waste/);
+      const wasteMultiplier = wasteMatch ? parseFloat(wasteMatch[1]) : 1.10;
+
+      // Determine note format based on unit and original note pattern
+      if (item.notes?.includes('SF/pc') || item.notes?.includes('pieces')) {
+        // SF to pieces conversion - extract coverage from original note or use default
+        const coverageMatch = item.notes.match(/÷\s*([\d.]+)\s*SF\/pc/);
+        const coverage = coverageMatch ? parseFloat(coverageMatch[1]) : 6.58;
+        finalNotes = `${rawTotal.toFixed(0)} SF × ${wasteMultiplier} waste ÷ ${coverage} SF/pc = ${roundedQty} pcs`;
+      } else if (item.notes?.includes('SF') && item.notes?.includes('SQ')) {
+        // SF to squares conversion
+        finalNotes = `${rawTotal.toFixed(0)} SF × ${wasteMultiplier} waste ÷ 100 = ${roundedQty} SQ`;
+      } else if (item.notes?.includes('LF') && (unit === 'ea' || unit === 'pc' || item.notes?.includes('pcs'))) {
+        // LF to pieces conversion - extract piece length from original note or use default
+        const lengthMatch = item.notes.match(/÷\s*([\d.]+)ft/);
+        const pieceLength = lengthMatch ? parseFloat(lengthMatch[1]) : 12;
+        finalNotes = `${rawTotal.toFixed(1)} LF ÷ ${pieceLength}ft × ${wasteMultiplier} waste = ${roundedQty} pcs`;
+      }
+      // Otherwise keep original notes
+    }
+
+    return {
+      ...item,
+      quantity: roundedQty,
+      material_extended: Math.round(item.material_extended * 100) / 100,
+      labor_extended: Math.round(item.labor_extended * 100) / 100,
+      total_extended: Math.round(item.total_extended * 100) / 100,
+      notes: finalNotes,
+    };
+  });
+}
+
+/**
+ * Calculate material quantity based on assignment and pricing info
+ *
+ * Waste factors by category (from pricing_items.waste_factor or defaults):
+ * - lap_siding: 1.10 (10% waste - tight cuts, experienced crews)
+ * - panel/board_batten: 1.10 (10% waste)
+ * - shingle: 1.15 (15% waste - more complex fitting)
+ * - trim: 1.10, corners: 1.12, flashing: 1.10
+ *
+ * Coverage values (from pricing_items.coverage_value or defaults):
+ * - lap_siding (7.25" reveal): 6.58 SF/pc
+ * - panel/board_batten: 40 SF/panel
+ * - shingle: 2.33 SF/pc (100 SF ÷ 43 pcs/square)
+ */
+function calculateMaterialQuantity(
+  assignment: MaterialAssignment,
+  pricing: PricingItem
+): number {
+  const category = pricing.category?.toLowerCase() || '';
+
+  // Use pricing_items.waste_factor if available, otherwise category-aware defaults
+  // Office takeoffs use ~5-10% waste for lap siding, higher for complex materials
+  const categoryWasteDefaults: Record<string, number> = {
+    'lap_siding': 1.10, 'siding': 1.10,
+    'panel': 1.10, 'board_batten': 1.10, 'panel_siding': 1.10,
+    'shingle': 1.15, 'shingle_siding': 1.15, 'shake': 1.15,
+    'trim': 1.10, 'corners': 1.12, 'flashing': 1.10
+  };
+  const wasteMultiplier = pricing.waste_factor || categoryWasteDefaults[category] || 1.10;
+
+  const pricingUnit = pricing.unit?.toLowerCase() || '';
+
+  // For siding: convert SF to squares (100 SF = 1 square)
+  if (assignment.unit === 'SF' && (pricingUnit === 'square' || pricingUnit === 'sq')) {
+    return Math.ceil((assignment.quantity * wasteMultiplier) / 100);
+  }
+
+  // For linear items sold by piece (e.g., 12ft pieces)
+  if (assignment.unit === 'LF' && (pricingUnit === 'ea' || pricingUnit === 'pc' || pricingUnit === 'pieces')) {
+    const pieceLength = pricing.coverage_value || 12; // coverage_value stores piece length for LF items
+    return Math.ceil((assignment.quantity / pieceLength) * wasteMultiplier);
+  }
+
+  // For items sold by the same unit (SF to SF, LF to LF)
+  if (assignment.unit === 'SF' && pricingUnit === 'sf') {
+    return Math.ceil(assignment.quantity * wasteMultiplier);
+  }
+
+  if (assignment.unit === 'LF' && pricingUnit === 'lf') {
+    return Math.ceil(assignment.quantity * wasteMultiplier);
+  }
+
+  // For siding/materials sold by piece with coverage data (e.g., HardiePlank)
+  // Converts SF → ea using coverage_value from pricing_items
+  if (assignment.unit === 'SF' && (pricingUnit === 'ea' || pricingUnit === 'pc' || pricingUnit === 'piece')) {
+    // Category-aware coverage defaults matching office takeoffs:
+    // - Lap siding (7.25" reveal, 12ft plank): 6.58 SF/pc
+    // - B&B panel (4x10): 40 SF/panel
+    // - Shingle: 2.33 SF/pc (100 SF ÷ 43 pcs/square)
+    const categoryCoverageDefaults: Record<string, number> = {
+      'lap_siding': 6.58, 'siding': 6.58,
+      'panel': 40, 'board_batten': 40, 'panel_siding': 40,
+      'shingle': 2.33, 'shingle_siding': 2.33, 'shake': 2.33
+    };
+    const coveragePerPiece = pricing.coverage_value || categoryCoverageDefaults[category] || 6.58;
+    const pieces = Math.ceil((assignment.quantity * wasteMultiplier) / coveragePerPiece);
+
+    console.log(`📐 SF→ea conversion: ${assignment.quantity} SF × ${wasteMultiplier} waste ÷ ${coveragePerPiece} coverage = ${pieces} pieces (category: ${category})`);
+
+    return pieces;
+  }
+
+  // Count-based items (EA to EA)
+  if (assignment.unit === 'EA') {
+    return assignment.quantity;
+  }
+
+  // Default: apply waste factor and return
+  return Math.ceil(assignment.quantity * wasteMultiplier);
+}
+
+// Note: calculateLaborForMaterial removed - labor now calculated separately via calculateInstallationLabor()
+
+/**
+ * Map category to presentation group for consistent Excel output
+ */
+function getPresentationGroup(category?: string): string {
+  const groupMap: Record<string, string> = {
+    // Siding & Underlayment
+    'siding': 'Siding',
+    'lap_siding': 'Siding',
+    'siding_panels': 'Siding',
+    'shingle_siding': 'Siding',
+    'panel_siding': 'Siding',
+    'vertical_siding': 'Siding',
+    'artisan': 'Siding',              // Artisan beaded lap siding (James Hardie)
+    'artisan_siding': 'Siding',       // Alternative artisan category
+    'board_batten': 'Siding',
+    'dutch_lap': 'Siding',
+    'shake_siding': 'Siding',
+    'insulated_siding': 'Siding',
+    'shiplap': 'Siding',
+    'corrugated': 'Siding',
+    'r_panel': 'Siding',
+
+    // Trim & Corners
+    'trim': 'Trim',
+    'starter_strip': 'Trim',
+    'j_channel': 'Trim',
+    'frieze_board': 'Trim',
+    'window_trim': 'Trim',
+    'trim_coil': 'Trim',
+    'corner': 'Corners',
+    'corners': 'Corners',
+    'inside_corner_trim': 'Corners',
+    'outside_corner_trim': 'Corners',
+
+    // Belly Band
+    'belly_band': 'Belly Band',
+    'belly_band_trim': 'Belly Band',
+    'belly_band_flashing': 'Belly Band',
+    'belly_band_fastener': 'Belly Band',
+    'belly_band_caulk': 'Belly Band',
+
+    // Gable Topout
+    'gable_topout': 'Trim',
+    'gable_topout_trim': 'Trim',
+    'gable_topout_flashing': 'Trim',
+
+    // Topout
+    'topout': 'Trim',
+    'topout_trim': 'Trim',
+    'topout_flashing': 'Trim',
+
+    // Soffit & Fascia
+    'soffit': 'Soffit & Fascia',
+    'soffit_panel': 'Soffit & Fascia',
+    'soffit_trim': 'Soffit & Fascia',
+    'soffit_fastener': 'Soffit & Fascia',
+    'fascia': 'Soffit & Fascia',
+    'fascia_board': 'Soffit & Fascia',
+    'fascia_fastener': 'Soffit & Fascia',
+
+    // Flashing & Weatherproofing
+    'flashing': 'Flashing & Weatherproofing',
+    'water_barrier': 'Flashing & Weatherproofing',
+    'house_wrap': 'Flashing & Weatherproofing',
+    'housewrap': 'Flashing & Weatherproofing',
+    'wrb': 'Flashing & Weatherproofing',
+    'weatherproofing': 'Flashing & Weatherproofing',
+    'penetration': 'Flashing & Weatherproofing',
+    'vent': 'Flashing & Weatherproofing',
+    'vents': 'Flashing & Weatherproofing',  // Plural category from pricing_items
+    'gable_vent': 'Flashing & Weatherproofing',
+    'light_fixture': 'Flashing & Weatherproofing',
+    'outlet': 'Flashing & Weatherproofing',
+    'hose_bib': 'Flashing & Weatherproofing',
+    'underlayment': 'Flashing & Weatherproofing',
+    'flashing_tape': 'Flashing & Weatherproofing',
+
+    // Fasteners & Accessories
+    'fasteners': 'Fasteners',
+    'fastener': 'Fasteners',
+    'accessories': 'Accessories',
+    'accessory': 'Accessories',
+
+    // Caulk & Sealants
+    'caulk': 'Caulk & Sealants',
+    'sealant': 'Caulk & Sealants',
+    'sealants': 'Caulk & Sealants',
+    'backer_rod': 'Caulk & Sealants',
+
+    // Architectural Details
+    'corbel': 'Architectural Details',
+    'bracket': 'Architectural Details',
+    'shutter': 'Architectural Details',
+    'post': 'Architectural Details',
+    'column': 'Architectural Details',
+    'architectural': 'Architectural Details',
+
+    // Gutters & Downspouts
+    'gutter': 'Gutters & Downspouts',
+    'gutter_hanger': 'Gutters & Downspouts',
+    'gutter_accessory': 'Gutters & Downspouts',
+    'downspout': 'Gutters & Downspouts',
+    'downspout_bracket': 'Gutters & Downspouts',
+
+    // Roofing Components
+    'eave': 'Roofing Components',
+    'rake': 'Roofing Components',
+    'ridge': 'Roofing Components',
+    'valley': 'Roofing Components',
+    'ice_water_shield': 'Roofing Components',
+
+    // Paint & Primer
+    'paint': 'Paint & Primer',
+  };
+
+  return groupMap[category?.toLowerCase() || ''] || 'Other Materials';
+}
+
+/**
+ * Normalize presentation_group to consistent capitalized format
+ * This ensures both material_assignments and auto-scope items use the same group names
+ */
+function normalizePresentationGroup(group?: string): string {
+  const normalizeMap: Record<string, string> = {
+    // Siding
+    'siding': 'Siding',
+    'siding & underlayment': 'Siding',
+
+    // Trim & Corners
+    'trim': 'Trim',
+    'corners': 'Corners',
+    'corner': 'Corners',
+    'trim & corners': 'Trim',
+
+    // Belly Band
+    'belly band': 'Belly Band',
+    'belly_band': 'Belly Band',
+
+    // Gable Topout
+    'gable_topout': 'Trim',
+    'gable topout': 'Trim',
+
+    // Topout
+    'topout': 'Trim',
+
+    // Soffit & Fascia
+    'soffit': 'Soffit & Fascia',
+    'fascia': 'Soffit & Fascia',
+    'soffit & fascia': 'Soffit & Fascia',
+
+    // Flashing & Weatherproofing
+    'flashing': 'Flashing & Weatherproofing',
+    'flashing & weatherproofing': 'Flashing & Weatherproofing',
+    'house wrap & accessories': 'Flashing & Weatherproofing',
+    'house wrap': 'Flashing & Weatherproofing',
+    'housewrap': 'Flashing & Weatherproofing',
+    'water_barrier': 'Flashing & Weatherproofing',
+    'wrb': 'Flashing & Weatherproofing',
+    'weatherproofing': 'Flashing & Weatherproofing',
+    'penetrations': 'Flashing & Weatherproofing',
+
+    // Fasteners & Accessories
+    'fasteners': 'Fasteners',
+    'fasteners & accessories': 'Fasteners',
+    'accessories': 'Accessories',
+
+    // Caulk & Sealants
+    'caulk & sealants': 'Caulk & Sealants',
+    'caulk': 'Caulk & Sealants',
+    'sealants': 'Caulk & Sealants',
+
+    // Architectural Details
+    'architectural': 'Architectural Details',
+    'architectural details': 'Architectural Details',
+
+    // Gutters & Downspouts
+    'gutter': 'Gutters & Downspouts',
+    'gutters': 'Gutters & Downspouts',
+    'gutters & downspouts': 'Gutters & Downspouts',
+
+    // Roofing Components
+    'roofing': 'Roofing Components',
+    'roofing components': 'Roofing Components',
+
+    // Paint & Primer
+    'paint & primer': 'Paint & Primer',
+    'paint': 'Paint & Primer',
+
+    // Other
+    'other materials': 'Other Materials',
+    'other': 'Other Materials',
+  };
+
+  const lowered = group?.toLowerCase() || '';
+  return normalizeMap[lowered] || group || 'Other Materials';
+}
+
+/**
+ * Get item_order for a presentation group
+ * Higher values appear at the bottom of the group in Excel output
+ */
+function getItemOrder(_presentationGroup: string, _category?: string): number {
+  // All items use default order - section grouping handles organization
+  return 10;
+}
