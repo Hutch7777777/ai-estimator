@@ -218,7 +218,7 @@ export function DashboardOverview() {
               <CardTitle className="font-heading">Recent Activity</CardTitle>
               <CardDescription>Your latest projects</CardDescription>
             </div>
-            <Link href="/project?tab=past">
+            <Link href="/projects">
               <Button variant="ghost" size="sm">
                 View all
                 <ArrowRight className="ml-2 h-4 w-4" />
@@ -239,7 +239,7 @@ export function DashboardOverview() {
                 <p className="mt-2 text-sm text-muted-foreground">
                   Get started by creating your first project
                 </p>
-                <Link href="/project?tab=new">
+                <Link href="/projects/new">
                   <Button className="mt-4">
                     Create Project
                   </Button>
@@ -270,7 +270,7 @@ export function DashboardOverview() {
                       </span>
                     </div>
                   </div>
-                  <Link href={`/project/${project.id}`}>
+                  <Link href={`/projects/${project.id}`}>
                     <Button variant="ghost" size="sm">
                       View
                     </Button>
@@ -290,7 +290,7 @@ export function DashboardOverview() {
         </CardHeader>
         <CardContent>
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            <Link href="/project?tab=new">
+            <Link href="/projects/new">
               <Button variant="outline" className="w-full justify-start h-auto py-4">
                 <FileText className="mr-3 h-5 w-5" />
                 <div className="text-left">
@@ -299,7 +299,7 @@ export function DashboardOverview() {
                 </div>
               </Button>
             </Link>
-            <Link href="/project?tab=past">
+            <Link href="/projects">
               <Button variant="outline" className="w-full justify-start h-auto py-4">
                 <FolderOpen className="mr-3 h-5 w-5" />
                 <div className="text-left">

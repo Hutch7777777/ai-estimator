@@ -19,17 +19,16 @@ import { Logo } from '@/components/logo';
 import { UserMenu } from '@/components/layout/UserMenu';
 import { useOrganization } from '@/lib/hooks/useOrganization';
 
-// Single source of truth for app navigation. Phase A points at the
-// current routes; Phases B/D of the restructure only update hrefs here.
+// Single source of truth for app navigation.
 const NAV_ITEMS = [
-  { title: 'Dashboard', href: '/project', icon: LayoutDashboard, match: /^\/(project$|dashboard(?!\/extractions))/ },
+  { title: 'Dashboard', href: '/dashboard', icon: LayoutDashboard, match: /^\/dashboard/ },
   { title: 'Projects', href: '/projects', icon: FolderOpen, match: /^\/projects/ },
   { title: 'Settings', href: '/account', icon: Settings, match: /^\/account/ },
 ];
 
 const TOOL_ITEMS = [
   // Legacy/standalone tool — pending the Phase-5 wire-or-delete decision.
-  { title: 'PDF Markup', href: '/project?tab=cad', icon: PencilRuler, match: /^\/tools\/cad-markup/ },
+  { title: 'PDF Markup', href: '/tools/cad-markup', icon: PencilRuler, match: /^\/tools\/cad-markup/ },
 ];
 
 export function AppSidebar() {

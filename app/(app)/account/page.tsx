@@ -480,7 +480,7 @@ function AccountSettingsContent() {
         <div className="mx-auto max-w-4xl px-4 py-8">
           <div className="mb-8">
             <Link
-              href="/project"
+              href="/dashboard"
               className="inline-flex items-center text-sm text-muted-foreground hover:text-foreground transition-colors"
             >
               <ArrowLeft className="mr-2 h-4 w-4" />
@@ -509,7 +509,7 @@ function AccountSettingsContent() {
         {/* Header */}
         <div className="mb-8">
           <Link
-            href="/project"
+            href="/dashboard"
             className="inline-flex items-center text-sm text-muted-foreground hover:text-foreground transition-colors"
           >
             <ArrowLeft className="mr-2 h-4 w-4" />

@@ -28,7 +28,7 @@ export default function OnboardingPage() {
         .eq('user_id', user.id)
         .limit(1);
 
-      if (memberships && memberships.length > 0) { router.push('/project'); return; }
+      if (memberships && memberships.length > 0) { router.push('/dashboard'); return; }
       setUser(user);
       setIsCheckingAuth(false);
     };
@@ -57,7 +57,7 @@ export default function OnboardingPage() {
       if (membershipError) { toast.error('Failed to set up membership'); setIsLoading(false); return; }
 
       toast.success('Organization created!');
-      router.push('/project');
+      router.push('/dashboard');
       router.refresh();
     } catch (error) {
       toast.error('An unexpected error occurred');

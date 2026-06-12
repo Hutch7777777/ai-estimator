@@ -197,7 +197,7 @@ const DetectionToolbar = memo(function DetectionToolbar({
     <div className="h-14 bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700 flex items-center px-4 gap-4">
       {/* Dashboard Link */}
       <Link
-        href="/project"
+        href="/dashboard"
         className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors border-r border-gray-200 dark:border-gray-700 pr-4 mr-0"
       >
         <ArrowLeft className="w-4 h-4" />

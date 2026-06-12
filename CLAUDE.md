@@ -58,17 +58,24 @@ Every line item traces back to source measurement via `source_measurement` JSONB
 
 ## Application Routes
 
+All authenticated routes share the persistent app shell (`app/(app)/layout.tsx`: sidebar + breadcrumbs).
+
 | Route | Purpose |
 |-------|---------|
 | `/` | Landing page |
 | `/login`, `/signup` | Authentication |
 | `/onboarding` | New user onboarding |
+| `/dashboard` | Org overview (stats, recent activity) |
+| `/projects` | Projects list + imports/extractions grouped by project |
+| `/projects/new` | Multi-step project creation wizard |
+| `/projects/[id]` | **Project hub** — status, stage stepper, files, takeoff history |
+| `/projects/[id]/review/[jobId]` | **Review flow** — page classification (when needed) → Detection Editor |
+| `/projects/[id]/estimate` | Estimate editor (AG Grid) |
+| `/projects/[id]/takeoff/[takeoffId]` | **Takeoff Viewer** - Materials, labor, paint tables |
 | `/account` | User account settings |
-| `/project` | Project dashboard (create new / view past) |
-| `/projects/[id]` | Estimate editor (AG Grid) |
-| `/projects/[id]/extraction/[jobId]` | **Detection Editor** - Review/edit AI detections |
-| `/takeoffs/[id]` | **Takeoff Viewer** - Materials, labor, paint tables |
-| `/dashboard/extractions/[jobId]/classify` | Classification dashboard |
+| `/tools/cad-markup` | Standalone PDF markup tool (export-only; pending wire-or-delete) |
+
+Legacy paths redirect (nothing 404s): `/project` (+`?tab=`) → new homes; `/projects/[id]/extraction/[jobId]` → `…/review/…`; `/takeoffs/[id]` → `/projects/[id]/takeoff/[id]` (DB lookup); `/dashboard/extractions/[jobId]/classify` → `…/review/…` (DB lookup).
 
 ## Core Features
 

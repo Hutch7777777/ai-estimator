@@ -13,7 +13,7 @@ import { toast } from 'sonner';
 function LoginForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const redirectTo = searchParams.get('redirectTo') || '/project';
+  const redirectTo = searchParams.get('redirectTo') || '/dashboard';
 
   const [isLoading, setIsLoading] = useState(false);
   const [isMagicLinkLoading, setIsMagicLinkLoading] = useState(false);

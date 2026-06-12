@@ -14,7 +14,7 @@ import { BluebeamFreshImportModal } from '@/components/dashboard/BluebeamFreshIm
 
 // Phase C: the wizard still lives on the dashboard tab; Phase D flips this
 // to '/projects/new'.
-const NEW_PROJECT_HREF = '/project?tab=new';
+const NEW_PROJECT_HREF = '/projects/new';
 
 interface AddMeasurementsModalProps {
   open: boolean;
