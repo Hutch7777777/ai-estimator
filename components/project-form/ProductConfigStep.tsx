@@ -25,7 +25,7 @@ import {
   Settings,
   Layers
 } from "lucide-react";
-import { ProjectFormData } from "@/app/project/new/page";
+import { ProjectFormData } from "@/lib/types/project-form";
 import { createClient } from "@/lib/supabase/client";
 import type { TradeConfiguration, ProductCatalog, ShowIfCondition } from "@/lib/types/database";
 import { cn } from "@/lib/utils";

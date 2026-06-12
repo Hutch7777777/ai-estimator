@@ -239,7 +239,7 @@ export function DashboardOverview() {
                 <p className="mt-2 text-sm text-muted-foreground">
                   Get started by creating your first project
                 </p>
-                <Link href="/project/new">
+                <Link href="/project?tab=new">
                   <Button className="mt-4">
                     Create Project
                   </Button>
@@ -290,7 +290,7 @@ export function DashboardOverview() {
         </CardHeader>
         <CardContent>
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            <Link href="/project/new">
+            <Link href="/project?tab=new">
               <Button variant="outline" className="w-full justify-start h-auto py-4">
                 <FileText className="mr-3 h-5 w-5" />
                 <div className="text-left">

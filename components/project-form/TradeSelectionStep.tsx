@@ -4,7 +4,7 @@ import { useEffect } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
-import { ProjectFormData } from "@/app/project/new/page";
+import { ProjectFormData } from "@/lib/types/project-form";
 
 interface TradeSelectionStepProps {
   data: ProjectFormData;

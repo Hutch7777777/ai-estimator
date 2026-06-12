@@ -65,7 +65,6 @@ Every line item traces back to source measurement via `source_measurement` JSONB
 | `/onboarding` | New user onboarding |
 | `/account` | User account settings |
 | `/project` | Project dashboard (create new / view past) |
-| `/project/new` | Multi-step project creation form |
 | `/projects/[id]` | Estimate editor (AG Grid) |
 | `/projects/[id]/extraction/[jobId]` | **Detection Editor** - Review/edit AI detections |
 | `/takeoffs/[id]` | **Takeoff Viewer** - Materials, labor, paint tables |
@@ -93,7 +92,7 @@ Every line item traces back to source measurement via `source_measurement` JSONB
 - RFI email generation
 - Professional Excel export
 
-### Multi-Step Project Form (`/project/new`)
+### Multi-Step Project Form (`/project?tab=new`)
 1. **ProjectInfoStep** - Name, customer, address
 2. **TradeSelectionStep** - Select trades (siding, roofing, windows, gutters)
 3. **ProductConfigStep** - Dynamic product configuration from DB
@@ -208,7 +207,6 @@ Every line item traces back to source measurement via `source_measurement` JSONB
     usePdfRenderer.ts           # PDF.js rendering
     useResizable.ts             # Resizable panels
   /utils
-    excelExport.ts              # Basic Excel export
     excelExportProfessional.ts  # Professional Excel
     exportTakeoffExcel.ts       # Full takeoff export (61KB, includes paint)
     itemHelpers.ts              # Line item calculations

@@ -4,7 +4,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Upload } from "lucide-react";
-import { ProjectFormData } from "@/app/project/new/page";
+import { ProjectFormData } from "@/lib/types/project-form";
 
 interface PDFUploadStepProps {
   data: ProjectFormData;

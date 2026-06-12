@@ -11,7 +11,7 @@ import { TradeSelectionStep } from "@/components/project-form/TradeSelectionStep
 import { ProductConfigStep } from "@/components/project-form/ProductConfigStep";
 import { HoverUploadStep } from "@/components/project-form/HoverUploadStep";
 import { ReviewSubmitStep } from "@/components/project-form/ReviewSubmitStep";
-import { ProjectFormData } from "@/app/project/new/page";
+import { ProjectFormData } from "@/lib/types/project-form";
 
 const TOTAL_STEPS = 5;
 

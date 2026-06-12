@@ -20,7 +20,7 @@ import {
   ChevronLeft,
   Sparkles,
 } from "lucide-react";
-import { ProjectFormData } from "@/app/project/new/page";
+import { ProjectFormData } from "@/lib/types/project-form";
 import { createClient } from "@/lib/supabase/client";
 import { useOrganization } from "@/lib/hooks/useOrganization";
 import { cn } from "@/lib/utils";

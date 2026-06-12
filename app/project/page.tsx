@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { Suspense, useEffect, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { ArrowLeft, BarChart3, Pencil, Layers } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -14,8 +15,20 @@ import { UserMenu } from "@/components/layout/UserMenu";
 // Note: Auth and organization checks are handled by the parent layout.tsx
 // This page only renders when user is authenticated and has an organization
 
-export default function ProjectDashboard() {
+const VALID_TABS = ["overview", "new", "cad", "extractions", "past"];
+
+function ProjectDashboardContent() {
+  const searchParams = useSearchParams();
   const [activeTab, setActiveTab] = useState("overview");
+
+  // Honor ?tab= deep links (e.g. /project?tab=new) — both on initial load
+  // and when an in-page <Link> changes only the query string.
+  useEffect(() => {
+    const tab = searchParams.get("tab");
+    if (tab && VALID_TABS.includes(tab)) {
+      setActiveTab(tab);
+    }
+  }, [searchParams]);
 
   // Simple tab change handler - no forced remount needed
   const handleTabChange = (value: string) => {
@@ -92,5 +105,13 @@ export default function ProjectDashboard() {
         </Tabs>
       </div>
     </div>
+  );
+}
+
+export default function ProjectDashboard() {
+  return (
+    <Suspense fallback={null}>
+      <ProjectDashboardContent />
+    </Suspense>
   );
 }
