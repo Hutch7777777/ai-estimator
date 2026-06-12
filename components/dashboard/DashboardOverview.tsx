@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { StatCard } from "@/components/ui/stat-card";
-import { Badge } from "@/components/ui/badge";
+import { StatusBadge } from "@/components/ui/status-badge";
 import { Button } from "@/components/ui/button";
 import {
   FolderOpen,
@@ -294,9 +294,7 @@ export function DashboardOverview() {
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2">
                       <p className="font-medium truncate">{project.name}</p>
-                      <Badge variant="outline" className="text-xs">
-                        {project.status}
-                      </Badge>
+                      <StatusBadge status={project.status} size="sm">{project.status}</StatusBadge>
                     </div>
                     <div className="flex items-center gap-4 mt-1 text-xs text-muted-foreground">
                       <span className="flex items-center gap-1 font-num">

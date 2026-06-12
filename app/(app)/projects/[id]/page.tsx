@@ -15,7 +15,7 @@ import {
   CheckSquare,
   SearchX,
 } from 'lucide-react';
-import { Badge } from '@/components/ui/badge';
+import { StatusBadge } from '@/components/ui/status-badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -59,12 +59,6 @@ const STAGE_STEPS: Step[] = [
   { id: 3, title: 'Estimate', description: 'Approve & price', icon: Calculator },
   { id: 4, title: 'Export', description: 'Takeoff & Excel', icon: CheckSquare },
 ];
-
-function jobStatusBadgeClass(status: string): string {
-  if (status === 'complete' || status === 'approved') return 'bg-brand/15 text-brand-foreground';
-  if (status === 'failed') return 'bg-destructive/10 text-destructive';
-  return 'bg-muted text-muted-foreground';
-}
 
 function formatDate(iso: string): string {
   return new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
@@ -220,7 +214,7 @@ export default function ProjectHubPage() {
         <div className="min-w-0">
           <h1 className="text-title font-heading truncate">{displayName}</h1>
           <div className="mt-1 flex items-center gap-3 text-sm text-muted-foreground">
-            {project?.status && <Badge variant="outline">{project.status}</Badge>}
+            {project?.status && <StatusBadge status={project.status} size="sm">{project.status}</StatusBadge>}
             {project?.address && <span className="truncate">{project.address}</span>}
             {project?.created_at && <span className="font-num">Created {formatDate(project.created_at)}</span>}
           </div>
@@ -269,7 +263,7 @@ export default function ProjectHubPage() {
                     <p className="text-xs text-muted-foreground font-num">                      {job.total_pages} page{job.total_pages === 1 ? '' : 's'} · {formatDate(job.created_at)}
                     </p>
                   </div>
-                  <Badge className={jobStatusBadgeClass(job.status)}>{job.status}</Badge>
+                  <StatusBadge status={job.status} size="sm">{job.status}</StatusBadge>
                   <Button variant="ghost" size="sm" asChild>
                     <Link href={`/projects/${projectId}/review/${job.id}`}>Review</Link>
                   </Button>
@@ -302,7 +296,7 @@ export default function ProjectHubPage() {
                     <p className="font-medium font-num text-brand-foreground">{formatMoney(takeoff.grand_total)}</p>
                     <p className="text-xs text-muted-foreground font-num">{formatDate(takeoff.created_at)}</p>
                   </div>
-                  {takeoff.status && <Badge variant="outline">{takeoff.status}</Badge>}
+                  {takeoff.status && <StatusBadge status={takeoff.status} size="sm">{takeoff.status}</StatusBadge>}
                   <Button variant="ghost" size="sm" asChild>
                     <Link href={`/projects/${projectId}/takeoff/${takeoff.id}`}>View</Link>
                   </Button>

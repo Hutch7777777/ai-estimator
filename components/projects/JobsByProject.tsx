@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { AlertTriangle, MoreHorizontal, Pencil, RefreshCw, Trash2, FolderOpen } from 'lucide-react';
 import { toast } from 'sonner';
-import { Badge } from '@/components/ui/badge';
+import { StatusBadge } from '@/components/ui/status-badge';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import {
@@ -30,12 +30,6 @@ interface JobRow {
 
 interface ProjectRow extends ProjectNameSource {
   id: string;
-}
-
-function statusBadgeClass(status: string): string {
-  if (status === 'complete' || status === 'approved') return 'bg-brand/15 text-brand-foreground';
-  if (status === 'failed') return 'bg-destructive/10 text-destructive';
-  return 'bg-muted text-muted-foreground';
 }
 
 /**
@@ -174,7 +168,7 @@ export function JobsByProject() {
           {new Date(job.created_at).toLocaleDateString()}
         </p>
       </div>
-      <Badge className={statusBadgeClass(job.status)}>{job.status}</Badge>
+      <StatusBadge status={job.status} size="sm">{job.status}</StatusBadge>
       <Button variant="ghost" size="sm" asChild>
         <Link href={`/projects/${job.project_id ?? '_'}/review/${job.id}`}>Review</Link>
       </Button>
