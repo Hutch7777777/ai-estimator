@@ -31,7 +31,10 @@ const spaceGrotesk = Space_Grotesk({
 });
 
 export const metadata: Metadata = {
-  title: "EstimatePros.ai - Construction Estimation SaaS",
+  title: {
+    default: "EstimatePros.ai — Construction Estimation",
+    template: "%s — EstimatePros.ai",
+  },
   description: "Transform HOVER PDFs into professional Excel takeoffs in minutes",
 };
 
