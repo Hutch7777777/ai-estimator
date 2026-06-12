@@ -2,10 +2,11 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
-import { Loader2, MoreHorizontal, Pencil, Trash2, FolderOpen } from 'lucide-react';
+import { AlertTriangle, MoreHorizontal, Pencil, RefreshCw, Trash2, FolderOpen } from 'lucide-react';
 import { toast } from 'sonner';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Skeleton } from '@/components/ui/skeleton';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -13,8 +14,9 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { createClient } from '@/lib/supabase/client';
-import { useOrganization } from '@/lib/hooks/useOrganization';
+import { useOrganization, isDevBypassEnabled } from '@/lib/hooks/useOrganization';
 import { getJobDisplayName, type ProjectNameSource } from '@/lib/utils/jobDisplayName';
+import { withTimeout } from '@/lib/utils/withTimeout';
 
 interface JobRow {
   id: string;
@@ -50,24 +52,45 @@ export function JobsByProject() {
   const { organization } = useOrganization();
   const [projects, setProjects] = useState<ProjectRow[]>([]);
   const [jobs, setJobs] = useState<JobRow[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [view, setView] = useState<'loading' | 'error' | 'ready'>('loading');
+  const [errorMessage, setErrorMessage] = useState('');
 
   const load = useCallback(async () => {
     if (!organization?.id) return;
-    const supabase = createClient();
-    const [projectsRes, jobsRes] = await Promise.all([
-      supabase
-        .from('projects')
-        .select('id, name, client_name, address')
-        .eq('organization_id', organization.id),
-      supabase
-        .from('extraction_jobs')
-        .select('id, project_id, project_name, status, total_pages, source_pdf_url, created_at')
-        .order('created_at', { ascending: false }),
-    ]);
-    setProjects((projectsRes.data as ProjectRow[] | null) ?? []);
-    setJobs((jobsRes.data as JobRow[] | null) ?? []);
-    setLoading(false);
+    setView('loading');
+    try {
+      if (isDevBypassEnabled()) {
+        // Dev bypass has no Supabase session — anon-key reads come back empty
+        // under RLS. Route through the dev-only service-role API instead.
+        const response = await withTimeout(fetch(`/api/dev/org-data?list=${organization.id}`));
+        if (!response.ok) throw new Error(`Dev data route failed (HTTP ${response.status})`);
+        const data = await response.json();
+        setProjects((data.projects as ProjectRow[] | null) ?? []);
+        setJobs((data.jobs as JobRow[] | null) ?? []);
+      } else {
+        const supabase = createClient();
+        const [projectsRes, jobsRes] = await withTimeout(
+          Promise.all([
+            supabase
+              .from('projects')
+              .select('id, name, client_name, address')
+              .eq('organization_id', organization.id),
+            supabase
+              .from('extraction_jobs')
+              .select('id, project_id, project_name, status, total_pages, source_pdf_url, created_at')
+              .order('created_at', { ascending: false }),
+          ])
+        );
+        if (projectsRes.error) throw new Error(projectsRes.error.message);
+        if (jobsRes.error) throw new Error(jobsRes.error.message);
+        setProjects((projectsRes.data as ProjectRow[] | null) ?? []);
+        setJobs((jobsRes.data as JobRow[] | null) ?? []);
+      }
+      setView('ready');
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : 'Failed to load imports');
+      setView('error');
+    }
   }, [organization?.id]);
 
   useEffect(() => {
@@ -101,10 +124,25 @@ export function JobsByProject() {
     }
   };
 
-  if (loading) {
+  if (view === 'loading') {
     return (
-      <div className="flex items-center justify-center py-10">
-        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+      <div className="space-y-3">
+        <Skeleton className="h-10 w-full" />
+        <Skeleton className="h-10 w-full" />
+        <Skeleton className="h-10 w-full" />
+      </div>
+    );
+  }
+
+  if (view === 'error') {
+    return (
+      <div className="rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-6 text-center space-y-3">
+        <AlertTriangle className="mx-auto h-6 w-6 text-destructive" />
+        <p className="text-sm text-muted-foreground">{errorMessage}</p>
+        <Button variant="outline" size="sm" onClick={load}>
+          <RefreshCw className="mr-2 h-4 w-4" />
+          Retry
+        </Button>
       </div>
     );
   }

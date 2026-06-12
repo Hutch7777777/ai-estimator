@@ -14,8 +14,12 @@ import {
   FileText,
   ArrowRight,
   Calendar,
+  AlertTriangle,
+  RefreshCw,
 } from "lucide-react";
-import { useOrganization } from "@/lib/hooks/useOrganization";
+import { Skeleton } from "@/components/ui/skeleton";
+import { useOrganization, isDevBypassEnabled } from "@/lib/hooks/useOrganization";
+import { withTimeout } from "@/lib/utils/withTimeout";
 import Link from "next/link";
 
 interface ProjectStats {
@@ -47,12 +51,13 @@ export function DashboardOverview() {
     lost: 0,
   });
   const [recentProjects, setRecentProjects] = useState<RecentProject[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [view, setView] = useState<'loading' | 'error' | 'ready'>('loading');
+  const [errorMessage, setErrorMessage] = useState('');
 
   useEffect(() => {
     // Only load data if we have an organization
     if (!organization) {
-      setLoading(false);
+      setView('ready');
       return;
     }
 
@@ -61,29 +66,38 @@ export function DashboardOverview() {
 
   const loadDashboardData = async () => {
     if (!organization) return;
+    setView('loading');
 
     try {
-      const url = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/rest/v1/projects?select=*&organization_id=eq.${organization.id}&order=created_at.desc`;
-      console.log('[DashboardOverview] Fetching projects with URL:', url);
+      let projects: any[];
 
-      // Use direct fetch since Supabase JS client has issues
-      const response = await fetch(
-        url,
-        {
-          headers: {
-            'apikey': process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-            'Authorization': `Bearer ${process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY}`
-          }
+      if (isDevBypassEnabled()) {
+        // Dev bypass has no Supabase session — anon-key reads come back empty
+        // under RLS. Route through the dev-only service-role API instead.
+        const devResponse = await withTimeout(fetch(`/api/dev/org-data?list=${organization.id}`));
+        if (!devResponse.ok) throw new Error(`Dev data route failed (HTTP ${devResponse.status})`);
+        projects = (await devResponse.json()).projects ?? [];
+      } else {
+        const url = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/rest/v1/projects?select=*&organization_id=eq.${organization.id}&order=created_at.desc`;
+
+        // Use direct fetch since Supabase JS client has issues
+        const response = await withTimeout(
+          fetch(url, {
+            headers: {
+              'apikey': process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+              'Authorization': `Bearer ${process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY}`
+            }
+          })
+        );
+
+        if (!response.ok) {
+          const errorBody = await response.text();
+          console.error('Supabase error:', response.status, errorBody);
+          throw new Error(`HTTP ${response.status}: ${errorBody}`);
         }
-      );
 
-      if (!response.ok) {
-        const errorBody = await response.text();
-        console.error('Supabase error:', response.status, errorBody);
-        throw new Error(`HTTP ${response.status}: ${errorBody}`);
+        projects = await response.json();
       }
-
-      const projects = await response.json();
 
       if (projects) {
         // Calculate statistics
@@ -105,10 +119,11 @@ export function DashboardOverview() {
         // Get recent 5 projects
         setRecentProjects(projects.slice(0, 5) as RecentProject[]);
       }
+      setView('ready');
     } catch (error) {
       console.error("Error loading dashboard data:", error);
-    } finally {
-      setLoading(false);
+      setErrorMessage(error instanceof Error ? error.message : 'Failed to load dashboard');
+      setView('error');
     }
   };
 
@@ -142,6 +157,35 @@ export function DashboardOverview() {
   // Calculate win rate
   const completedProjects = stats.won + stats.lost;
   const winRate = completedProjects > 0 ? Math.round((stats.won / completedProjects) * 100) : 0;
+
+  if (view === 'loading') {
+    return (
+      <div className="space-y-8">
+        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+          <Skeleton className="h-28" />
+          <Skeleton className="h-28" />
+          <Skeleton className="h-28" />
+          <Skeleton className="h-28" />
+        </div>
+        <Skeleton className="h-64 w-full" />
+        <Skeleton className="h-48 w-full" />
+      </div>
+    );
+  }
+
+  if (view === 'error') {
+    return (
+      <div className="rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-10 text-center space-y-3">
+        <AlertTriangle className="mx-auto h-8 w-8 text-destructive" />
+        <p className="font-medium">Couldn’t load dashboard data</p>
+        <p className="text-sm text-muted-foreground">{errorMessage}</p>
+        <Button variant="outline" onClick={loadDashboardData}>
+          <RefreshCw className="mr-2 h-4 w-4" />
+          Retry
+        </Button>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-8">
@@ -228,11 +272,7 @@ export function DashboardOverview() {
         </CardHeader>
         <CardContent>
           <div className="space-y-4">
-            {loading ? (
-              <div className="text-center py-8 text-muted-foreground">
-                Loading recent projects...
-              </div>
-            ) : recentProjects.length === 0 ? (
+            {recentProjects.length === 0 ? (
               <div className="text-center py-8">
                 <FileText className="mx-auto h-12 w-12 text-muted-foreground/50" />
                 <h3 className="mt-4 text-sm font-medium text-foreground">No projects yet</h3>

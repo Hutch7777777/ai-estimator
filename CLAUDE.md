@@ -324,7 +324,21 @@ ANTHROPIC_API_KEY=your-key
 
 # n8n Webhook (Optional)
 NEXT_PUBLIC_N8N_WEBHOOK_URL=https://your-n8n.com/webhook/process
+
+# Dev auth bypass (LOCAL ONLY — see "Dev auth bypass" below)
+NEXT_PUBLIC_DEV_BYPASS_AUTH=true
+SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
 ```
+
+## Dev Auth Bypass
+
+`NEXT_PUBLIC_DEV_BYPASS_AUTH=true` (localhost only — `lib/hooks/useOrganization.tsx:isDevBypassEnabled`) skips Supabase auth and uses the real Exterior Finishes org id. Because there is **no session**, anon-key reads return nothing under RLS — so the app-shell data views (project hub, projects list, dashboard, breadcrumb names) route their reads through **`/api/dev/org-data`**, a dev-only endpoint using the service-role key.
+
+Safety guards on that endpoint:
+1. A **deployed** build (Railway/CI env detected) with the flag set **throws at module load** — it cannot ship enabled. Local `npm run build` with the flag is allowed (the route is inert there per guard 2).
+2. At runtime it 404s unless `NODE_ENV === 'development'` **and** the flag is `true` — only the local dev server ever serves data.
+
+All app-shell reads are wrapped in a 10s timeout (`lib/utils/withTimeout.ts`) with explicit loading-skeleton / error-with-retry / not-found states — an empty or hung read must never render as an infinite spinner.
 
 ## Key Patterns
 

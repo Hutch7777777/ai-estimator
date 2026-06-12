@@ -9,7 +9,7 @@ const LOADING_TIMEOUT_MS = 8000; // 8 second timeout to prevent infinite loading
 // =============================================================================
 // DEV AUTH BYPASS - For local development only
 // =============================================================================
-const isDevBypassEnabled = () => {
+export const isDevBypassEnabled = () => {
   if (typeof window === 'undefined') return false;
   const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
   const bypassEnabled = process.env.NEXT_PUBLIC_DEV_BYPASS_AUTH === 'true';
