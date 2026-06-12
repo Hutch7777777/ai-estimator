@@ -1,37 +1,11 @@
-'use client';
+import { redirect } from 'next/navigation';
 
-import { useParams, useRouter } from 'next/navigation';
-import { DetectionEditor } from '@/components/detection-editor';
-import { toast } from 'sonner';
-
-export default function ExtractionReviewPage() {
-  const params = useParams();
-  const router = useRouter();
-
-  const projectId = params.id as string;
-  const jobId = params.jobId as string;
-
-  const handleComplete = () => {
-    toast.success('Extraction approved successfully');
-    // Navigate back to project page
-    router.push(`/projects/${projectId}`);
-  };
-
-  const handleError = (error: Error) => {
-    console.error('Detection editor error:', error);
-    toast.error(error.message || 'An error occurred');
-  };
-
-  return (
-    <div className="h-screen flex flex-col">
-      <div className="flex-1 min-h-0">
-        <DetectionEditor
-          jobId={jobId}
-          projectId={projectId}
-          onComplete={handleComplete}
-          onError={handleError}
-        />
-      </div>
-    </div>
-  );
+/** Legacy path: /projects/[id]/extraction/[jobId] → /projects/[id]/review/[jobId]. */
+export default async function LegacyExtractionRedirect({
+  params,
+}: {
+  params: Promise<{ id: string; jobId: string }>;
+}) {
+  const { id, jobId } = await params;
+  redirect(`/projects/${id}/review/${jobId}`);
 }

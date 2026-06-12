@@ -5186,7 +5186,7 @@ export default function DetectionEditor({
                   onClick={() => {
                     setShowApprovalResults(false);
                     if (approvalResult?.takeoff_id) {
-                      router.push(`/takeoffs/${approvalResult.takeoff_id}`);
+                      router.push(`/projects/${projectId}/takeoff/${approvalResult.takeoff_id}`);
                     } else {
                       onComplete?.();
                     }

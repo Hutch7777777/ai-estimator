@@ -5,15 +5,15 @@ import { SidebarAutoCollapse } from '@/components/layout/SidebarAutoCollapse';
 export async function generateMetadata({
   params,
 }: {
-  params: Promise<{ id: string }>;
+  params: Promise<{ id: string; takeoffId: string }>;
 }): Promise<Metadata> {
-  const { id } = await params;
+  const { takeoffId } = await params;
   try {
     const supabase = await createClient();
     const { data } = await supabase
       .from('takeoffs')
       .select('project_name')
-      .eq('id', id)
+      .eq('id', takeoffId)
       .single();
     if (data?.project_name) {
       return { title: `Takeoff — ${data.project_name}` };

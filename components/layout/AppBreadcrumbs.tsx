@@ -13,7 +13,7 @@ interface Crumb {
 
 // Phase A: the projects list doesn't exist yet — point at the current
 // dashboard tab. Phase B/D flip this to '/projects'.
-const PROJECTS_HREF = '/project?tab=past';
+const PROJECTS_HREF = '/projects';
 
 // Module-level cache so navigating between a project's pages doesn't refetch
 // the same display names.

@@ -51,7 +51,7 @@ export function TakeoffHeader({
       <div className="flex items-center gap-2">
         {projectId && extractionJobId && (
           <Link
-            href={`/projects/${projectId}/extraction/${extractionJobId}`}
+            href={`/projects/${projectId}/review/${extractionJobId}`}
             className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white hover:bg-gray-100 dark:hover:bg-gray-800 rounded-md transition-colors"
           >
             <ArrowLeft className="w-4 h-4" />

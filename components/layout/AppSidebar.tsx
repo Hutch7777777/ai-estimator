@@ -23,7 +23,7 @@ import { useOrganization } from '@/lib/hooks/useOrganization';
 // current routes; Phases B/D of the restructure only update hrefs here.
 const NAV_ITEMS = [
   { title: 'Dashboard', href: '/project', icon: LayoutDashboard, match: /^\/(project$|dashboard(?!\/extractions))/ },
-  { title: 'Projects', href: '/project?tab=past', icon: FolderOpen, match: /^\/projects/ },
+  { title: 'Projects', href: '/projects', icon: FolderOpen, match: /^\/projects/ },
   { title: 'Settings', href: '/account', icon: Settings, match: /^\/account/ },
 ];
 

@@ -246,7 +246,7 @@ export function BluebeamFreshImportModal({
 
   const handleReview = () => {
     if (result?.job_id) {
-      router.push(`/projects/${projectId}/extraction/${result.job_id}`);
+      router.push(`/projects/${projectId}/review/${result.job_id}`);
       onOpenChange(false);
     }
   };

@@ -473,14 +473,14 @@ export function ExtractionsTable() {
                   <div className="flex items-center justify-end gap-2">
                     {job.status === "classified" ? (
                       <Button variant="outline" size="sm" asChild>
-                        <Link href={`/dashboard/extractions/${job.id}/classify`}>
+                        <Link href={`/projects/${job.project_id ?? "_"}/review/${job.id}`}>
                           <Eye className="mr-2 h-4 w-4" />
                           Review
                         </Link>
                       </Button>
                     ) : (job.status === "complete" || job.status === "approved") && job.project_id ? (
                       <Button variant="outline" size="sm" asChild>
-                        <Link href={`/projects/${job.project_id}/extraction/${job.id}`}>
+                        <Link href={`/projects/${job.project_id}/review/${job.id}`}>
                           <Eye className="mr-2 h-4 w-4" />
                           Review
                         </Link>
