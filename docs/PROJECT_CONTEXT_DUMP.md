@@ -6,7 +6,7 @@
 
 ## 1. Project Overview
 
-**Name:** AI Estimator / Estimate.ai
+**Name:** AI Estimator / EstimatePros.ai
 **Framework:** Next.js 16 with React 19, TypeScript 5, Tailwind CSS 4
 **Database:** Supabase (PostgreSQL with RLS)
 **Purpose:** Transform HOVER measurement PDFs into professional Excel takeoffs for construction contractors

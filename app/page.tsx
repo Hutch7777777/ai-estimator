@@ -347,7 +347,7 @@ export default function Home() {
 
           <div className="mt-12 pt-8 border-t text-center">
             <p className="text-sm text-muted-foreground">
-              &copy; {new Date().getFullYear()} Estimate.ai. Built for Exterior Finishes.
+              &copy; {new Date().getFullYear()} EstimatePros.ai. Built for Exterior Finishes.
             </p>
           </div>
         </div>

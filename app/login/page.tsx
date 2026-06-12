@@ -122,7 +122,7 @@ function LoginForm() {
         {/* Logo */}
         <div className="text-center">
           <Link href="/" className="inline-flex items-center">
-            <span className="font-mono text-2xl font-bold text-[#0f172a]">ESTIMATE</span>
+            <span className="font-mono text-2xl font-bold text-[#0f172a]">EstimatePros</span>
             <span className="font-mono text-2xl font-bold text-[#00cc6a]">.ai</span>
           </Link>
           <h2 className="mt-6 text-xl font-semibold text-[#0f172a] font-heading">Welcome back</h2>

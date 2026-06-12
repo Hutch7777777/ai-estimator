@@ -37,7 +37,7 @@ export function Logo({ className, size = "md", variant = "full" }: LogoProps) {
 
       {variant === "full" && (
         <div className={cn("font-mono font-bold tracking-tight", sizes[size].text)}>
-          <span className="text-[#0f172a]">ESTIMATE</span>
+          <span className="text-[#0f172a]">EstimatePros</span>
           <span className="text-[#00cc6a]">.ai</span>
         </div>
       )}

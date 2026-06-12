@@ -1148,7 +1148,7 @@ function AccountSettingsContent() {
                     className="block p-3 rounded-lg border border-[#e2e8f0] hover:border-[#00cc6a] hover:bg-[#f8fafc] transition-colors"
                   >
                     <p className="font-medium text-[#0f172a]">Documentation</p>
-                    <p className="text-sm text-[#64748b]">Learn how to use Estimate.ai</p>
+                    <p className="text-sm text-[#64748b]">Learn how to use EstimatePros.ai</p>
                   </a>
                   <a
                     href="#"
