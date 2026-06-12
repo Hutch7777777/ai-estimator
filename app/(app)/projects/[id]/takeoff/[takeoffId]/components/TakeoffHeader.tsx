@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import { Button } from '@/components/ui/button';
 import { ArrowLeft, Download, Loader2, Home, FileSpreadsheet, FileImage, Mail, FileDown } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 
@@ -59,7 +60,7 @@ export function TakeoffHeader({
           </Link>
         )}
         <Link
-          href="/project"
+          href="/dashboard"
           className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white hover:bg-gray-100 dark:hover:bg-gray-800 rounded-md transition-colors"
         >
           <Home className="w-4 h-4" />
@@ -149,18 +150,14 @@ export function TakeoffHeader({
               RFI
             </button>
           )}
-          <button
-            onClick={onDownloadExcel}
-            disabled={isDownloading}
-            className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-green-600 hover:bg-green-700 rounded-lg disabled:opacity-50 transition-colors"
-          >
+          <Button onClick={onDownloadExcel} disabled={isDownloading}>
             {isDownloading ? (
               <Loader2 className="w-4 h-4 animate-spin" />
             ) : (
               <Download className="w-4 h-4" />
             )}
             Download Excel
-          </button>
+          </Button>
         </div>
       </div>
     </div>

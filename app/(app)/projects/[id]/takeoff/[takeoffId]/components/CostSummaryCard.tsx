@@ -59,7 +59,7 @@ export function CostSummaryCard({ totals }: CostSummaryCardProps) {
           {/* Materials Card */}
           <div className="bg-gray-50 dark:bg-gray-800/50 rounded-lg p-4 border border-gray-200 dark:border-gray-700">
             <div className="flex items-center gap-3 mb-2">
-              <div className="w-8 h-8 rounded-full bg-blue-100 dark:bg-blue-900/50 flex items-center justify-center">
+              <div className="w-8 h-8 rounded-full bg-ink/7 dark:bg-gray-800 flex items-center justify-center">
                 <Package className="w-4 h-4 text-muted-foreground" />
               </div>
               <span className="text-sm font-medium text-gray-600 dark:text-gray-400">Materials</span>
@@ -73,8 +73,8 @@ export function CostSummaryCard({ totals }: CostSummaryCardProps) {
           {totals.paint_cost !== undefined && totals.paint_cost > 0 && (
             <div className="bg-gray-50 dark:bg-gray-800/50 rounded-lg p-4 border border-gray-200 dark:border-gray-700">
               <div className="flex items-center gap-3 mb-2">
-                <div className="w-8 h-8 rounded-full bg-fuchsia-100 dark:bg-fuchsia-900/50 flex items-center justify-center">
-                  <Paintbrush className="w-4 h-4 text-fuchsia-600 dark:text-fuchsia-400" />
+                <div className="w-8 h-8 rounded-full bg-ink/7 dark:bg-gray-800 flex items-center justify-center">
+                  <Paintbrush className="w-4 h-4 text-muted-foreground" />
                 </div>
                 <span className="text-sm font-medium text-gray-600 dark:text-gray-400">Paint</span>
               </div>
@@ -87,8 +87,8 @@ export function CostSummaryCard({ totals }: CostSummaryCardProps) {
           {/* Labor Card */}
           <div className="bg-gray-50 dark:bg-gray-800/50 rounded-lg p-4 border border-gray-200 dark:border-gray-700">
             <div className="flex items-center gap-3 mb-2">
-              <div className="w-8 h-8 rounded-full bg-amber-100 dark:bg-amber-900/50 flex items-center justify-center">
-                <Wrench className="w-4 h-4 text-amber-600 dark:text-amber-400" />
+              <div className="w-8 h-8 rounded-full bg-ink/7 dark:bg-gray-800 flex items-center justify-center">
+                <Wrench className="w-4 h-4 text-muted-foreground" />
               </div>
               <span className="text-sm font-medium text-gray-600 dark:text-gray-400">Labor</span>
             </div>
@@ -100,8 +100,8 @@ export function CostSummaryCard({ totals }: CostSummaryCardProps) {
           {/* Overhead Card */}
           <div className="bg-gray-50 dark:bg-gray-800/50 rounded-lg p-4 border border-gray-200 dark:border-gray-700">
             <div className="flex items-center gap-3 mb-2">
-              <div className="w-8 h-8 rounded-full bg-purple-100 dark:bg-purple-900/50 flex items-center justify-center">
-                <Receipt className="w-4 h-4 text-purple-600 dark:text-purple-400" />
+              <div className="w-8 h-8 rounded-full bg-ink/7 dark:bg-gray-800 flex items-center justify-center">
+                <Receipt className="w-4 h-4 text-muted-foreground" />
               </div>
               <span className="text-sm font-medium text-gray-600 dark:text-gray-400">Overhead</span>
             </div>

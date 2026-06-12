@@ -28,6 +28,9 @@ interface HubProject {
   name: string | null;
   client_name: string | null;
   address: string | null;
+  city?: string | null;
+  state?: string | null;
+  zip_code?: string | null;
   status: string | null;
   created_at: string;
 }
@@ -39,6 +42,7 @@ interface HubJob {
   total_pages: number;
   source_pdf_url: string | null;
   created_at: string;
+  completed_at?: string | null;
 }
 
 interface HubTakeoff {
@@ -99,21 +103,16 @@ export default function ProjectHubPage() {
         takeoffRows = data.takeoffs ?? [];
       } else {
         const supabase = createClient();
-        const [projectRes, jobsRes, takeoffsRes] = await withTimeout(
+        const [projectRes, jobsRes] = await withTimeout(
           Promise.all([
             supabase
               .from('projects')
-              .select('id, name, client_name, address, status, created_at')
+              .select('id, name, client_name, address, city, state, zip_code, status, created_at')
               .eq('id', projectId)
               .maybeSingle(),
             supabase
               .from('extraction_jobs')
-              .select('id, project_name, status, total_pages, source_pdf_url, created_at')
-              .eq('project_id', projectId)
-              .order('created_at', { ascending: false }),
-            supabase
-              .from('takeoffs')
-              .select('id, status, grand_total, created_at')
+              .select('id, project_name, status, total_pages, source_pdf_url, created_at, completed_at')
               .eq('project_id', projectId)
               .order('created_at', { ascending: false }),
           ])
@@ -121,6 +120,20 @@ export default function ProjectHubPage() {
         if (projectRes.error) throw new Error(projectRes.error.message);
         projectRow = (projectRes.data as HubProject | null) ?? null;
         jobRows = (jobsRes.data as HubJob[] | null) ?? [];
+
+        // Takeoffs: n8n keys some takeoff rows by the EXTRACTION JOB id
+        // rather than the project id (the extraction_id = job_id confusion
+        // family — CONFIRMED_WORK_PLAN.md finding #1/#3). The viewer loads by
+        // takeoff id alone so it renders either way; the hub must accept both
+        // keys. Read-side fix only — no schema change.
+        const takeoffKeys = [projectId, ...jobRows.map((j) => j.id)];
+        const takeoffsRes = await withTimeout(
+          supabase
+            .from('takeoffs')
+            .select('id, status, grand_total, created_at')
+            .in('project_id', takeoffKeys)
+            .order('created_at', { ascending: false })
+        );
         takeoffRows = (takeoffsRes.data as HubTakeoff[] | null) ?? [];
       }
 
@@ -202,10 +215,48 @@ export default function ProjectHubPage() {
           ? 2
           : 1;
 
-  // "City, ST 55104" line for the title block: everything after the street.
-  const projectLocality = project?.address?.includes(',')
-    ? project.address.split(',').slice(1).join(',').trim()
-    : null;
+  // Status pill derives from pipeline state — projects.status goes stale (the
+  // pipeline never writes it back), and the header must not contradict the
+  // rows below it. Fallback to the column only when nothing has happened yet.
+  const derivedStatus =
+    takeoffs.length > 0 ? 'approved' : jobs[0]?.status ?? project?.status ?? 'pending';
+
+  // "City, ST 55104" line: prefer the structured columns; fall back to
+  // whatever follows the street in the freeform address.
+  const localityFromColumns = [
+    project?.city,
+    [project?.state, project?.zip_code].filter(Boolean).join(' '),
+  ]
+    .filter(Boolean)
+    .join(', ');
+  const projectLocality =
+    localityFromColumns ||
+    (project?.address?.includes(',') ? project.address.split(',').slice(1).join(',').trim() : null);
+
+  // Per-stage event dates: Upload = earliest import, Review = approval,
+  // Estimate = first takeoff, Export = latest takeoff. Guard: never show a
+  // later date left of an earlier one — a date earlier than anything already
+  // shown to its left is hidden.
+  const jobsOldestFirst = [...jobs].reverse();
+  const approvalIso =
+    jobs
+      .filter((j) => j.status === 'approved')
+      .map((j) => j.completed_at ?? j.created_at)
+      .sort()[0] ?? null;
+  const rawStageDates: Array<string | null> = [
+    jobsOldestFirst[0]?.created_at ?? project?.created_at ?? null,
+    approvalIso,
+    takeoffs[takeoffs.length - 1]?.created_at ?? null,
+    takeoffs.length > 1 ? takeoffs[0]?.created_at ?? null : null,
+  ];
+  let latestShown = 0;
+  const stageDates = rawStageDates.map((iso) => {
+    if (!iso) return null;
+    const t = new Date(iso).getTime();
+    if (t < latestShown) return null;
+    latestShown = t;
+    return stageDate(iso);
+  });
 
   return (
     <div className="mx-auto w-full max-w-[1200px] px-4 py-6 sm:px-6 space-y-6">
@@ -216,9 +267,7 @@ export default function ProjectHubPage() {
         <div className="min-w-0">
           <div className="flex items-center gap-3">
             <h1 className="text-title font-heading truncate">{displayName}</h1>
-            {project?.status && (
-              <StatusBadge status={project.status} size="sm">{project.status}</StatusBadge>
-            )}
+            <StatusBadge status={derivedStatus} size="sm">{derivedStatus}</StatusBadge>
           </div>
         </div>
         <div className="flex flex-col items-end gap-3">
@@ -255,11 +304,10 @@ export default function ProjectHubPage() {
         <CardContent className="pt-6 px-8">
           <DimensionStepper
             stages={[
-              { id: 1, label: 'Upload', date: stageDate(project?.created_at) },
-              // jobs are ordered newest-first; the earliest job marks Review
-              { id: 2, label: 'Review', date: stageDate(jobs[jobs.length - 1]?.created_at) },
-              { id: 3, label: 'Estimate', date: stageDate(jobs.find((j) => j.status === 'approved')?.created_at) },
-              { id: 4, label: 'Export', date: stageDate(takeoffs[0]?.created_at) },
+              { id: 1, label: 'Upload', date: stageDates[0] },
+              { id: 2, label: 'Review', date: stageDates[1] },
+              { id: 3, label: 'Estimate', date: stageDates[2] },
+              { id: 4, label: 'Export', date: stageDates[3] },
             ]}
             currentStage={currentStep}
           />

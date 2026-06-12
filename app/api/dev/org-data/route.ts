@@ -51,26 +51,33 @@ export async function GET(request: NextRequest) {
     // ?hub=<projectId> → { project, jobs, takeoffs }
     const hubProjectId = searchParams.get('hub');
     if (hubProjectId) {
-      const [projectRes, jobsRes, takeoffsRes] = await Promise.all([
+      const [projectRes, jobsRes] = await Promise.all([
         supabase
           .from('projects')
-          .select('id, name, client_name, address, status, created_at')
+          .select('id, name, client_name, address, city, state, zip_code, status, created_at')
           .eq('id', hubProjectId)
           .maybeSingle(),
         supabase
           .from('extraction_jobs')
-          .select('id, project_name, status, total_pages, source_pdf_url, created_at')
-          .eq('project_id', hubProjectId)
-          .order('created_at', { ascending: false }),
-        supabase
-          .from('takeoffs')
-          .select('id, status, grand_total, created_at')
+          .select('id, project_name, status, total_pages, source_pdf_url, created_at, completed_at')
           .eq('project_id', hubProjectId)
           .order('created_at', { ascending: false }),
       ]);
+
+      // Takeoffs may be keyed by the extraction job id instead of the project
+      // id (extraction_id = job_id family) — accept both keys, mirroring the
+      // hub's client-side query.
+      const jobRows = jobsRes.data ?? [];
+      const takeoffKeys = [hubProjectId, ...jobRows.map((j: { id: string }) => j.id)];
+      const takeoffsRes = await supabase
+        .from('takeoffs')
+        .select('id, status, grand_total, created_at')
+        .in('project_id', takeoffKeys)
+        .order('created_at', { ascending: false });
+
       return NextResponse.json({
         project: projectRes.data ?? null,
-        jobs: jobsRes.data ?? [],
+        jobs: jobRows,
         takeoffs: takeoffsRes.data ?? [],
       });
     }

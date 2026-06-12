@@ -93,7 +93,7 @@ export function ColorSwatch({ color, label, hex, selected, onClick, className }:
         "group relative flex flex-col items-center gap-2 rounded-lg border-2 p-3 transition-all",
         selected
           ? "border-ink bg-ink/7 shadow-sm ring-2 ring-ink/15"
-          : "border-border hover:border-brand/50 hover:bg-muted",
+          : "border-border hover:border-ink/30 hover:bg-muted",
         className
       )}
     >
@@ -103,7 +103,7 @@ export function ColorSwatch({ color, label, hex, selected, onClick, className }:
           className={cn(
             "h-12 w-12 rounded-full border-2 shadow-sm transition-transform group-hover:scale-105",
             selected
-              ? "border-brand"
+              ? "border-ink"
               : needsStrongerBorder
                 ? "border-muted-foreground"
                 : "border-border"
@@ -128,7 +128,7 @@ export function ColorSwatch({ color, label, hex, selected, onClick, className }:
       <span
         className={cn(
           "text-xs font-medium text-center transition-colors",
-          selected ? "text-brand-foreground" : "text-muted-foreground group-hover:text-foreground"
+          selected ? "text-ink" : "text-muted-foreground group-hover:text-foreground"
         )}
       >
         {label}

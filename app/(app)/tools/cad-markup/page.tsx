@@ -16,7 +16,7 @@ export const metadata: Metadata = {
 export default function CadMarkupToolPage() {
   return (
     <div className="mx-auto w-full max-w-[1600px] px-4 py-6 sm:px-6">
-      <div className="mb-4 rounded-lg border border-brand/30 bg-brand/5 px-4 py-3 text-sm">
+      <div className="mb-4 rounded-lg border border-ink/20 bg-ink/5 px-4 py-3 text-sm">
         <p className="font-medium">Standalone tool</p>
         <p className="text-muted-foreground">
           Markups made here export to CSV/Excel/JSON only — they do not flow into estimates or

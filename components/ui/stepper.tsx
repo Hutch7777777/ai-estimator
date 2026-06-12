@@ -67,7 +67,7 @@ export function Stepper({
                   className={cn(
                     "flex h-10 w-10 shrink-0 items-center justify-center rounded-full border-2 transition-all",
                     complete &&
-                      "border-brand bg-brand text-white",
+                      "border-brand bg-brand text-primary-foreground",
                     current &&
                       "border-brand bg-white text-brand-foreground shadow-sm ring-4 ring-brand/10",
                     !complete &&
@@ -156,7 +156,7 @@ export function Stepper({
                   className={cn(
                     "flex h-10 w-10 shrink-0 items-center justify-center rounded-full border-2 transition-all",
                     complete &&
-                      "border-brand bg-brand text-white",
+                      "border-brand bg-brand text-primary-foreground",
                     current &&
                       "border-brand bg-white text-brand-foreground shadow-sm ring-4 ring-brand/10",
                     !complete &&

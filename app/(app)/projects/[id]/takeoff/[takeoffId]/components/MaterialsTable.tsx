@@ -29,49 +29,26 @@ const SECTION_ORDER: Record<string, number> = {
   'overhead': 99,
 };
 
-const PRESENTATION_GROUP_COLORS: Record<string, { bg: string; text: string; border: string }> = {
-  cladding: {
-    bg: 'bg-blue-100 dark:bg-blue-900/30',
-    text: 'text-blue-800 dark:text-blue-200',
-    border: 'border-blue-200 dark:border-blue-800',
-  },
-  trims: {
-    bg: 'bg-purple-100 dark:bg-purple-900/30',
-    text: 'text-purple-800 dark:text-purple-200',
-    border: 'border-purple-200 dark:border-purple-800',
-  },
-  metals_flashings: {
-    bg: 'bg-orange-100 dark:bg-orange-900/30',
-    text: 'text-orange-800 dark:text-orange-200',
-    border: 'border-orange-200 dark:border-orange-800',
-  },
-  waterproofing: {
-    bg: 'bg-green-100 dark:bg-green-900/30',
-    text: 'text-green-800 dark:text-green-200',
-    border: 'border-green-200 dark:border-green-800',
-  },
-  accessories: {
-    bg: 'bg-amber-100 dark:bg-amber-900/30',
-    text: 'text-amber-800 dark:text-amber-200',
-    border: 'border-amber-200 dark:border-amber-800',
-  },
-  soffit: {
-    bg: 'bg-teal-100 dark:bg-teal-900/30',
-    text: 'text-teal-800 dark:text-teal-200',
-    border: 'border-teal-200 dark:border-teal-800',
-  },
-  gutters: {
-    bg: 'bg-cyan-100 dark:bg-cyan-900/30',
-    text: 'text-cyan-800 dark:text-cyan-200',
-    border: 'border-cyan-200 dark:border-cyan-800',
-  },
+// Plan Room grammar: section rows are quiet — one ink scheme for every
+// presentation group (the per-group rainbow tints are gone). The map keeps
+// its shape so group keys remain documented.
+const INK_GROUP_COLORS = {
+  bg: 'bg-ink/5 dark:bg-gray-800',
+  text: 'text-ink dark:text-gray-200',
+  border: 'border-border dark:border-gray-700',
 };
 
-const DEFAULT_GROUP_COLORS = {
-  bg: 'bg-gray-100 dark:bg-gray-800',
-  text: 'text-gray-800 dark:text-gray-200',
-  border: 'border-gray-200 dark:border-gray-700',
+const PRESENTATION_GROUP_COLORS: Record<string, { bg: string; text: string; border: string }> = {
+  cladding: INK_GROUP_COLORS,
+  trims: INK_GROUP_COLORS,
+  metals_flashings: INK_GROUP_COLORS,
+  waterproofing: INK_GROUP_COLORS,
+  accessories: INK_GROUP_COLORS,
+  soffit: INK_GROUP_COLORS,
+  gutters: INK_GROUP_COLORS,
 };
+
+const DEFAULT_GROUP_COLORS = INK_GROUP_COLORS;
 
 /**
  * Maps legacy presentation_group values to the new consolidated groups.

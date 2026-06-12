@@ -69,7 +69,7 @@ export default function OnboardingPage() {
   if (isCheckingAuth) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-muted">
-        <Loader2 className="h-8 w-8 animate-spin text-brand-foreground" />
+        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
       </div>
     );
   }
@@ -78,8 +78,8 @@ export default function OnboardingPage() {
     <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-white via-white to-accent/20 px-4">
       <div className="w-full max-w-md space-y-8">
         <div className="text-center">
-          <div className="mx-auto h-16 w-16 rounded-lg bg-brand/15 flex items-center justify-center mb-6">
-            <Sparkles className="h-8 w-8 text-brand-foreground" />
+          <div className="mx-auto h-16 w-16 rounded-lg bg-ink/7 flex items-center justify-center mb-6">
+            <Sparkles className="h-8 w-8 text-muted-foreground" />
           </div>
           <h1 className="text-2xl font-bold text-foreground font-heading">
             Welcome, {user?.user_metadata?.full_name || user?.email?.split('@')[0]}!
@@ -106,9 +106,9 @@ export default function OnboardingPage() {
         <div className="bg-white border border-border rounded-lg p-6 shadow-sm">
           <h3 className="font-medium text-foreground mb-3">What's next?</h3>
           <ul className="space-y-3 text-sm text-muted-foreground">
-            <li className="flex items-center gap-3"><span className="h-2 w-2 rounded-full bg-brand" />Upload your first HOVER PDF</li>
-            <li className="flex items-center gap-3"><span className="h-2 w-2 rounded-full bg-brand" />AI extracts all measurements</li>
-            <li className="flex items-center gap-3"><span className="h-2 w-2 rounded-full bg-brand" />Download professional Excel takeoff</li>
+            <li className="flex items-center gap-3"><span className="h-2 w-2 rounded-full bg-ink/40" />Upload your first HOVER PDF</li>
+            <li className="flex items-center gap-3"><span className="h-2 w-2 rounded-full bg-ink/40" />AI extracts all measurements</li>
+            <li className="flex items-center gap-3"><span className="h-2 w-2 rounded-full bg-ink/40" />Download professional Excel takeoff</li>
           </ul>
         </div>
       </div>
