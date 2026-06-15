@@ -1,5 +1,5 @@
-import { createClient } from '@/lib/supabase/server';
 import { NextResponse } from 'next/server';
+import { requireExtractionJobAccess, requireProjectAccess } from '@/lib/api/access';
 
 // =============================================================================
 // Types
@@ -59,14 +59,26 @@ export async function GET(request: Request) {
       );
     }
 
-    const supabase = await createClient();
-
     let jobId: string;
+    let supabase;
 
     // Get job ID either from parameter or by looking up from project
     if (jobIdParam) {
-      jobId = jobIdParam;
+      const jobAccess = await requireExtractionJobAccess(jobIdParam, {
+        claimedProjectId: projectId,
+      });
+      if (!jobAccess.ok) {
+        return jobAccess.response;
+      }
+      supabase = jobAccess.ctx.supabase;
+      jobId = jobAccess.data.id;
     } else {
+      const projectAccess = await requireProjectAccess(projectId);
+      if (!projectAccess.ok) {
+        return projectAccess.response;
+      }
+      supabase = projectAccess.ctx.supabase;
+
       // Find the extraction job for this project
       const { data: jobData, error: jobError } = await supabase
         .from('extraction_jobs')

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import Anthropic from '@anthropic-ai/sdk';
-import { createClient } from '@/lib/supabase/server';
+import { requireExtractionPageAccess, trustedPageImageUrl } from '@/lib/api/access';
 import type {
   TextAnnotation,
   SurveyResult,
@@ -270,6 +270,19 @@ export async function POST(request: NextRequest): Promise<NextResponse<ExtractMa
       );
     }
 
+    const pageAccess = await requireExtractionPageAccess(pageId, { claimedJobId: jobId });
+    if (!pageAccess.ok) {
+      return pageAccess.response;
+    }
+
+    const trustedImage = trustedPageImageUrl(pageAccess.data);
+    if (!trustedImage) {
+      return NextResponse.json(
+        { success: false, pageId, version: 'v2', error: 'Page image not found' },
+        { status: 404 }
+      );
+    }
+
     console.log(`\n[extract-material-callouts-v2] ========================================`);
     console.log(`[extract-material-callouts-v2] Processing page ${pageId} (page #${pageNumber || 'unknown'})`);
     console.log(`[extract-material-callouts-v2] Using TWO-PASS extraction`);
@@ -302,7 +315,7 @@ export async function POST(request: NextRequest): Promise<NextResponse<ExtractMa
           content: [
             {
               type: 'image',
-              source: { type: 'url', url: imageUrl },
+              source: { type: 'url', url: trustedImage },
             },
             {
               type: 'text',
@@ -388,7 +401,7 @@ export async function POST(request: NextRequest): Promise<NextResponse<ExtractMa
               content: [
                 {
                   type: 'image',
-                  source: { type: 'url', url: imageUrl },
+                  source: { type: 'url', url: trustedImage },
                 },
                 {
                   type: 'text',
@@ -484,7 +497,7 @@ export async function POST(request: NextRequest): Promise<NextResponse<ExtractMa
     // =========================================================================
     // SAVE TO DATABASE
     // =========================================================================
-    const supabase = await createClient();
+    const supabase = pageAccess.ctx.supabase;
     const processingTime = Date.now() - startTime;
 
     const extractionResult: MaterialExtractionV2Result = {
@@ -632,7 +645,12 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       );
     }
 
-    const supabase = await createClient();
+    const pageAccess = await requireExtractionPageAccess(pageId);
+    if (!pageAccess.ok) {
+      return pageAccess.response;
+    }
+
+    const supabase = pageAccess.ctx.supabase;
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const { data: page, error } = await (supabase as any)

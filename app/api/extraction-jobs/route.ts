@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@/lib/supabase/server';
+import { requireProjectAccess } from '@/lib/api/access';
 
 // =============================================================================
 // Extraction Jobs API Route
@@ -34,7 +34,12 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       );
     }
 
-    const supabase = await createClient();
+    const projectAccess = await requireProjectAccess(projectId);
+    if (!projectAccess.ok) {
+      return projectAccess.response;
+    }
+
+    const supabase = projectAccess.ctx.supabase;
     console.log('[extraction-jobs] Querying extraction_jobs for project_id:', projectId);
 
     const { data: jobs, error } = await supabase

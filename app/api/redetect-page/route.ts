@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@/lib/supabase/server';
-import { createClient as createSupabaseClient } from '@supabase/supabase-js';
+import { requireExtractionPageAccess, trustedPageImageUrl } from '@/lib/api/access';
 
 // =============================================================================
 // Redetect Page API Route
@@ -10,13 +9,6 @@ import { createClient as createSupabaseClient } from '@supabase/supabase-js';
 const EXTRACTION_API_BASE =
   process.env.NEXT_PUBLIC_EXTRACTION_API_URL ||
   'https://extraction-api-production.up.railway.app';
-
-// Create untyped Supabase client for extraction_detections_draft operations
-// (This table is not in the generated types)
-const getUntypedSupabaseClient = () => createSupabaseClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-);
 
 interface ExtractionPageRecord {
   id: string;
@@ -66,25 +58,20 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       );
     }
 
-    // Get page details from database
-    const supabase = await createClient();
+    const pageAccess = await requireExtractionPageAccess(page_id);
+    if (!pageAccess.ok) {
+      return pageAccess.response;
+    }
 
-    const { data: pageData, error: pageError } = await supabase
-      .from('extraction_pages')
-      .select('id, job_id, page_number, image_url, original_image_url, page_type, elevation_name')
-      .eq('id', page_id)
-      .single();
-
-    if (pageError || !pageData) {
-      console.error('[redetect-page] Page fetch error:', pageError);
+    const supabase = pageAccess.ctx.supabase;
+    const page = pageAccess.data as ExtractionPageRecord;
+    const imageUrl = trustedPageImageUrl(page);
+    if (!imageUrl) {
       return NextResponse.json(
-        { success: false, error: 'Page not found' },
+        { success: false, error: 'Page image not found' },
         { status: 404 }
       );
     }
-
-    const page = pageData as ExtractionPageRecord;
-    const imageUrl = page.original_image_url || page.image_url;
 
     console.log('[redetect-page] Found page:', {
       id: page.id,
@@ -138,11 +125,9 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     if (result.success && result.detections && result.detections.length > 0) {
       console.log('[redetect-page] Saving', result.detections.length, 'detections to draft table...');
 
-      // Use untyped client for extraction_detections_draft operations
-      const untypedSupabase = getUntypedSupabaseClient();
-
       // First, mark existing draft detections as deleted
-      const { error: deleteError } = await untypedSupabase
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { error: deleteError } = await (supabase as any)
         .from('extraction_detections_draft')
         .update({ is_deleted: true })
         .eq('page_id', page_id);
@@ -166,7 +151,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         updated_at: new Date().toISOString(),
       }));
 
-      const { data: insertedData, error: insertError } = await untypedSupabase
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { data: insertedData, error: insertError } = await (supabase as any)
         .from('extraction_detections_draft')
         .insert(detectionsToInsert)
         .select();

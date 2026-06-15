@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import Anthropic from '@anthropic-ai/sdk';
-import { createClient } from '@/lib/supabase/server';
 import type { MaterialCallout } from '@/lib/types/extraction';
+import { requireExtractionPageAccess, trustedPageImageUrl } from '@/lib/api/access';
 
 // =============================================================================
 // Material Callout Extraction API Route
@@ -128,6 +128,19 @@ export async function POST(request: NextRequest): Promise<NextResponse<ExtractMa
       );
     }
 
+    const pageAccess = await requireExtractionPageAccess(pageId, { claimedJobId: jobId });
+    if (!pageAccess.ok) {
+      return pageAccess.response;
+    }
+
+    const trustedImage = trustedPageImageUrl(pageAccess.data);
+    if (!trustedImage) {
+      return NextResponse.json(
+        { success: false, pageId, error: 'Page image not found' },
+        { status: 404 }
+      );
+    }
+
     console.log(`[extract-material-callouts] Processing page ${pageId} (page #${pageNumber || 'unknown'})`);
 
     // 2. Validate API key
@@ -156,7 +169,7 @@ export async function POST(request: NextRequest): Promise<NextResponse<ExtractMa
               type: 'image',
               source: {
                 type: 'url',
-                url: imageUrl,
+                url: trustedImage,
               },
             },
             {
@@ -226,7 +239,7 @@ export async function POST(request: NextRequest): Promise<NextResponse<ExtractMa
     }
 
     // 8. Store in Supabase (extraction_pages.material_callouts)
-    const supabase = await createClient();
+    const supabase = pageAccess.ctx.supabase;
 
     // Using type assertion since material_callouts column exists but isn't in generated types
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -335,7 +348,12 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       );
     }
 
-    const supabase = await createClient();
+    const pageAccess = await requireExtractionPageAccess(pageId);
+    if (!pageAccess.ok) {
+      return pageAccess.response;
+    }
+
+    const supabase = pageAccess.ctx.supabase;
 
     // Using type assertion since material_callouts column exists but isn't in generated types
     // eslint-disable-next-line @typescript-eslint/no-explicit-any

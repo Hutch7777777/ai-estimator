@@ -1,5 +1,5 @@
-import { createClient } from '@/lib/supabase/server';
 import { NextRequest, NextResponse } from 'next/server';
+import { requireExtractionJobAccess } from '@/lib/api/access';
 
 // =============================================================================
 // DELETE Handler - Delete extraction job
@@ -19,16 +19,12 @@ export async function DELETE(
       );
     }
 
-    const supabase = await createClient();
-
-    // Verify user is authenticated
-    const { data: { user }, error: authError } = await supabase.auth.getUser();
-    if (authError || !user) {
-      return NextResponse.json(
-        { success: false, error: 'Unauthorized' },
-        { status: 401 }
-      );
+    const access = await requireExtractionJobAccess(id);
+    if (!access.ok) {
+      return access.response;
     }
+
+    const supabase = access.ctx.supabase;
 
     // Fetch the job to verify it exists and check status
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -105,7 +101,12 @@ export async function PATCH(
       );
     }
 
-    const supabase = await createClient();
+    const access = await requireExtractionJobAccess(id);
+    if (!access.ok) {
+      return access.response;
+    }
+
+    const supabase = access.ctx.supabase;
 
     // Use any to bypass type checking since extraction_jobs might not be in the generated types
     // eslint-disable-next-line @typescript-eslint/no-explicit-any

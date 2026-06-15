@@ -1,6 +1,5 @@
-import { createClient } from '@/lib/supabase/server';
-import { createServiceClient } from '@/lib/supabase/service';
 import { NextResponse } from 'next/server';
+import { requireTakeoffAccess } from '@/lib/api/access';
 
 // =============================================================================
 // Types
@@ -67,17 +66,18 @@ interface OverheadItem {
 // GET Handler
 // =============================================================================
 
-function isDevBypassServerEnabled(): boolean {
-  return process.env.NODE_ENV === 'development' && process.env.NEXT_PUBLIC_DEV_BYPASS_AUTH === 'true';
-}
-
 export async function GET(
   _request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     const { id } = await params;
-    const supabase = isDevBypassServerEnabled() ? createServiceClient() : await createClient();
+    const access = await requireTakeoffAccess(id);
+    if (!access.ok) {
+      return access.response;
+    }
+
+    const supabase = access.ctx.supabase;
 
     // Get takeoff header
     const { data: takeoffData, error: takeoffError } = await supabase

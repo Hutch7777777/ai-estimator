@@ -1,5 +1,5 @@
-import { createClient } from '@/lib/supabase/server';
 import { NextResponse } from 'next/server';
+import { requireTakeoffAccess } from '@/lib/api/access';
 
 /**
  * Debug endpoint to check takeoff data directly from the database.
@@ -13,7 +13,12 @@ export async function GET(
 ) {
   try {
     const { id } = await params;
-    const supabase = await createClient();
+    const access = await requireTakeoffAccess(id);
+    if (!access.ok) {
+      return access.response;
+    }
+
+    const supabase = access.ctx.supabase;
 
     console.log('[debug-takeoff] Checking takeoff ID:', id);
 

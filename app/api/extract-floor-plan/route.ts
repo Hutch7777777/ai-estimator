@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import Anthropic from '@anthropic-ai/sdk';
-import { createClient } from '@/lib/supabase/server';
 import type { FloorPlanData, ExteriorCorner, ExteriorWallSegment, CornerSummary } from '@/lib/types/extraction';
+import { requireExtractionPageAccess, trustedPageImageUrl } from '@/lib/api/access';
 
 // =============================================================================
 // Floor Plan Extraction API Route
@@ -233,6 +233,19 @@ export async function POST(request: NextRequest): Promise<NextResponse<ExtractFl
       );
     }
 
+    const pageAccess = await requireExtractionPageAccess(pageId, { claimedJobId: jobId });
+    if (!pageAccess.ok) {
+      return pageAccess.response;
+    }
+
+    const trustedImage = trustedPageImageUrl(pageAccess.data);
+    if (!trustedImage) {
+      return NextResponse.json(
+        { success: false, pageId, error: 'Page image not found' },
+        { status: 404 }
+      );
+    }
+
     console.log(`[extract-floor-plan] Processing page ${pageId} (page #${pageNumber || 'unknown'})`);
 
     // 2. Validate API key
@@ -267,7 +280,7 @@ export async function POST(request: NextRequest): Promise<NextResponse<ExtractFl
               type: 'image',
               source: {
                 type: 'url',
-                url: imageUrl,
+                url: trustedImage,
               },
             },
             {
@@ -398,7 +411,7 @@ export async function POST(request: NextRequest): Promise<NextResponse<ExtractFl
     console.log(`  - Confidence: ${Math.round(floorPlanData.confidence * 100)}%`);
 
     // 13. Store in Supabase (extraction_pages.floor_plan_data)
-    const supabase = await createClient();
+    const supabase = pageAccess.ctx.supabase;
 
     // Using type assertion since floor_plan_data column may not be in generated types yet
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -527,7 +540,12 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       );
     }
 
-    const supabase = await createClient();
+    const pageAccess = await requireExtractionPageAccess(pageId);
+    if (!pageAccess.ok) {
+      return pageAccess.response;
+    }
+
+    const supabase = pageAccess.ctx.supabase;
 
     // Using type assertion since floor_plan_data column may not be in generated types
     // eslint-disable-next-line @typescript-eslint/no-explicit-any

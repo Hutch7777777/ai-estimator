@@ -19,9 +19,9 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@/lib/supabase/server';
 import { analyzeLayout } from '@/lib/azure-doc-intel';
 import { mapAzureResultToScheduleData } from '@/lib/azure-schedule-mapper';
+import { requireExtractionPageAccess, trustedPageImageUrl } from '@/lib/api/access';
 
 export async function POST(request: NextRequest) {
   try {
@@ -35,11 +35,24 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    const pageAccess = await requireExtractionPageAccess(pageId, { claimedJobId: jobId });
+    if (!pageAccess.ok) {
+      return pageAccess.response;
+    }
+
+    const trustedImage = trustedPageImageUrl(pageAccess.data);
+    if (!trustedImage) {
+      return NextResponse.json(
+        { success: false, error: 'Page image not found' },
+        { status: 404 }
+      );
+    }
+
     console.log(`[Azure Schedule] Starting extraction for page ${pageId}`);
     const startTime = Date.now();
 
     // ── Call Azure Document Intelligence ──
-    const layoutResult = await analyzeLayout({ url: imageUrl });
+    const layoutResult = await analyzeLayout({ url: trustedImage });
 
     const elapsedMs = Date.now() - startTime;
     console.log(`[Azure Schedule] Layout analysis completed in ${elapsedMs}ms`);
@@ -68,10 +81,11 @@ export async function POST(request: NextRequest) {
     // ── Store results in Supabase (same as existing route) ──
     if (jobId || pageId) {
       try {
-        const supabase = await createClient();
+        const supabase = pageAccess.ctx.supabase;
 
         // Update extraction_pages.ocr_data
         // Using type assertion since ocr_* columns exist but aren't in generated types
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const { error: pageError } = await (supabase as any)
           .from('extraction_pages')
           .update({
@@ -88,6 +102,7 @@ export async function POST(request: NextRequest) {
         // Update extraction_jobs.results_summary with counts
         // Using type assertion since results_summary column isn't in generated types
         if (jobId) {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
           const { data: jobData } = await (supabase as any)
             .from('extraction_jobs')
             .select('results_summary')
@@ -107,6 +122,7 @@ export async function POST(request: NextRequest) {
             },
           };
 
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
           const { error: jobError } = await (supabase as any)
             .from('extraction_jobs')
             .update({ results_summary: updatedSummary })

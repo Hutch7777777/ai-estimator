@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import Anthropic from '@anthropic-ai/sdk';
+import { requireExtractionPageAccess, trustedPageImageUrl } from '@/lib/api/access';
 
 // =============================================================================
 // Schedule Structure Analysis API Route
@@ -209,6 +210,19 @@ export async function POST(request: NextRequest): Promise<NextResponse<AnalyzeSt
       );
     }
 
+    const pageAccess = await requireExtractionPageAccess(pageId);
+    if (!pageAccess.ok) {
+      return pageAccess.response;
+    }
+
+    const trustedImage = trustedPageImageUrl(pageAccess.data);
+    if (!trustedImage) {
+      return NextResponse.json(
+        { success: false, pageId, error: 'Page image not found' },
+        { status: 404 }
+      );
+    }
+
     // 2. Validate API key
     const apiKey = process.env.ANTHROPIC_API_KEY;
     if (!apiKey) {
@@ -237,7 +251,7 @@ export async function POST(request: NextRequest): Promise<NextResponse<AnalyzeSt
               type: 'image',
               source: {
                 type: 'url',
-                url: imageUrl,
+                url: trustedImage,
               },
             },
             {

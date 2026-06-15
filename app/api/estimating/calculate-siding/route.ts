@@ -21,7 +21,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@/lib/supabase/server';
+import { requireExtractionJobAccess } from '@/lib/api/access';
 import { buildSidingRefData } from '@/lib/estimating/refData';
 import { normalizeDetectionEditorApprovalPayload } from '@/packages/estimating-engine/src/index';
 import { calculateSidingTakeoff } from '@/packages/estimating-engine/src/orchestrators/sidingOrchestratorV2';
@@ -57,66 +57,15 @@ export async function POST(request: NextRequest) {
       : null;
 
   // -------------------------------------------------------------------------
-  // 3. Auth (mirrors normalize-approval)
+  // 3. Auth + job/project ownership
   // -------------------------------------------------------------------------
-  const supabase = await createClient();
-
-  const devBypass = process.env.NEXT_PUBLIC_DEV_BYPASS_AUTH === 'true';
-
-  if (!devBypass) {
-    const {
-      data: { user },
-      error: authError,
-    } = await supabase.auth.getUser();
-
-    if (authError || !user) {
-      return NextResponse.json(
-        { success: false, error: 'Unauthorized' },
-        { status: 401 }
-      );
-    }
+  const access = await requireExtractionJobAccess(jobId, { claimedProjectId });
+  if (!access.ok) {
+    return access.response;
   }
 
-  // -------------------------------------------------------------------------
-  // 4. Job ownership via RLS
-  // -------------------------------------------------------------------------
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data: jobRow, error: jobError } = await (supabase as any)
-    .from('extraction_jobs')
-    .select('id, project_id')
-    .eq('id', jobId)
-    .maybeSingle();
-
-  if (jobError) {
-    return NextResponse.json(
-      { success: false, error: 'Failed to verify job ownership', details: jobError.message },
-      { status: 500 }
-    );
-  }
-  if (!jobRow) {
-    // Don't leak existence — same 403 the normalize route returns.
-    return NextResponse.json(
-      { success: false, error: 'Forbidden' },
-      { status: 403 }
-    );
-  }
-
-  // -------------------------------------------------------------------------
-  // 5. Project consistency
-  // -------------------------------------------------------------------------
-  if (
-    claimedProjectId !== null &&
-    jobRow.project_id !== null &&
-    claimedProjectId !== jobRow.project_id
-  ) {
-    return NextResponse.json(
-      { success: false, error: 'project_id does not match job' },
-      { status: 400 }
-    );
-  }
-
-  // The job's project_id is the trusted value. Use it for downstream lookups.
-  const projectId: string | undefined = jobRow.project_id ?? undefined;
+  const supabase = access.ctx.supabase;
+  const projectId = access.data.project_id;
 
   // -------------------------------------------------------------------------
   // 6. Normalize the payload via the n8n V9.2 mirror
@@ -135,40 +84,30 @@ export async function POST(request: NextRequest) {
   }
 
   // -------------------------------------------------------------------------
-  // 7. Resolve organization_id. Priority order:
-  //    1. `normalized.organization_id` — V9.2 mirror passes the body's value through.
-  //    2. `body.organization_id` — same value pre-normalize, in case the
-  //       normalizer's pass-through shape ever drops it.
-  //    3. `projects.organization_id` via cookie-scoped client — last-resort
-  //       fallback for jobs whose payload didn't carry the id (RLS may block).
-  //
-  //    `body.organization_id` is read for refData lookup ONLY (org overhead +
-  //    pricing overrides). The auth gate (steps 3–5) already validated the
-  //    user owns this job's project — there is no privilege escalation here.
-  //    Production n8n trusts the same value via Build Coordinator Payload →
-  //    Parse Input → siding-estimator orchestrator.
+  // 7. Resolve organization_id from the trusted project row.
+  //    Request payload organization ids are treated as claims only. They may be
+  //    passed through by the n8n mirror, but they must never decide which org's
+  //    pricing overrides or overhead config are used.
   // -------------------------------------------------------------------------
-  let organizationId: string | undefined;
+  const trustedOrganizationId =
+    typeof access.data.project?.organization_id === 'string'
+      ? access.data.project.organization_id.trim()
+      : '';
   const normalizedOrgId =
     typeof normalized.organization_id === 'string' ? normalized.organization_id.trim() : '';
   const bodyOrgId =
     typeof body.organization_id === 'string' ? (body.organization_id as string).trim() : '';
 
-  if (normalizedOrgId.length > 0) {
-    organizationId = normalizedOrgId;
-  } else if (bodyOrgId.length > 0) {
-    organizationId = bodyOrgId;
-  } else if (projectId) {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { data: projectRow } = await (supabase as any)
-      .from('projects')
-      .select('organization_id')
-      .eq('id', projectId)
-      .maybeSingle();
-    if (projectRow?.organization_id) {
-      organizationId = String(projectRow.organization_id);
-    }
+  const claimedOrgIds = Array.from(new Set([normalizedOrgId, bodyOrgId].filter(Boolean)));
+  const mismatchedOrgId = claimedOrgIds.find((id) => trustedOrganizationId && id !== trustedOrganizationId);
+  if (mismatchedOrgId) {
+    return NextResponse.json(
+      { success: false, error: 'organization_id does not match project' },
+      { status: 400 }
+    );
   }
+
+  const organizationId = trustedOrganizationId || undefined;
 
   // The normalized output preserves the original shape; pricing IDs come from
   // material_assignments[*].pricing_item_id (or the legacy `assigned_material_id` /

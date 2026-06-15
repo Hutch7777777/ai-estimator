@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@/lib/supabase/server';
+import { requireExtractionJobAccess } from '@/lib/api/access';
 import type {
   RFIItem,
   RFIListData,
@@ -247,9 +247,14 @@ export async function POST(request: NextRequest): Promise<NextResponse<GenerateR
       );
     }
 
+    const jobAccess = await requireExtractionJobAccess(job_id);
+    if (!jobAccess.ok) {
+      return jobAccess.response;
+    }
+
     console.log(`[generate-rfi] Generating RFI for job ${job_id}`);
 
-    const supabase = await createClient();
+    const supabase = jobAccess.ctx.supabase;
 
     // Fetch notes_specs_data from the job
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -430,7 +435,12 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       );
     }
 
-    const supabase = await createClient();
+    const jobAccess = await requireExtractionJobAccess(jobId);
+    if (!jobAccess.ok) {
+      return jobAccess.response;
+    }
+
+    const supabase = jobAccess.ctx.supabase;
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const { data: job, error } = await (supabase as any)
@@ -516,7 +526,12 @@ export async function PUT(request: NextRequest): Promise<NextResponse> {
     rfi_list_data.summary = calculateSummary(rfi_list_data.items);
     rfi_list_data.updated_at = new Date().toISOString();
 
-    const supabase = await createClient();
+    const jobAccess = await requireExtractionJobAccess(job_id);
+    if (!jobAccess.ok) {
+      return jobAccess.response;
+    }
+
+    const supabase = jobAccess.ctx.supabase;
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const { error: updateError } = await (supabase as any)

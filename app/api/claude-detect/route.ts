@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import Anthropic from '@anthropic-ai/sdk';
 import { PDFDocument } from 'pdf-lib';
+import { requireApiAuth } from '@/lib/api/access';
 
 // =============================================================================
 // Claude Analysis API Route
@@ -302,6 +303,11 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       );
     }
 
+    const auth = await requireApiAuth();
+    if (!auth.ok) {
+      return auth.response;
+    }
+
     // 3. Get API key
     const apiKey = process.env.ANTHROPIC_API_KEY;
     if (!apiKey) {
@@ -504,7 +510,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
           const structuredTextContent = structuredMessage.content.find(block => block.type === 'text');
           if (structuredTextContent && structuredTextContent.type === 'text') {
             // Clean up the response - remove any markdown code blocks
-            let jsonText = structuredTextContent.text
+            const jsonText = structuredTextContent.text
               .replace(/```json\n?/g, '')
               .replace(/```\n?/g, '')
               .trim();

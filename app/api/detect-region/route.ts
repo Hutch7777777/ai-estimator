@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@/lib/supabase/server';
 import { v4 as uuidv4 } from 'uuid';
+import { requireExtractionPageAccess, trustedPageImageUrl } from '@/lib/api/access';
 
 // =============================================================================
 // Detect Region API Route
@@ -15,7 +15,7 @@ const ROBOFLOW_WORKFLOW_URL = process.env.ROBOFLOW_WORKFLOW_URL ||
 
 interface RegionDetectRequest {
   page_id: string;
-  image_url: string;
+  image_url?: string;
   region: {
     x: number;
     y: number;
@@ -54,15 +54,6 @@ interface RoboflowResponse {
   };
 }
 
-interface ExtractionPageRecord {
-  id: string;
-  job_id: string;
-  page_number: number;
-  original_image_url: string | null;
-  original_width: number | null;
-  original_height: number | null;
-}
-
 export async function POST(request: NextRequest): Promise<NextResponse> {
   console.log('[detect-region] ========================================');
   console.log('[detect-region] API called at:', new Date().toISOString());
@@ -83,16 +74,18 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     const { page_id, image_url, region, confidence_threshold = 0.3 } = body;
 
     console.log('[detect-region] Page ID:', page_id);
-    console.log('[detect-region] Image URL:', image_url?.substring(0, 80) + '...');
+    if (image_url) {
+      console.log('[detect-region] Ignoring client image URL claim:', image_url.substring(0, 80) + '...');
+    }
     console.log('[detect-region] Region:', JSON.stringify(region));
     console.log('[detect-region] Confidence threshold:', confidence_threshold);
     console.log('[detect-region] ROBOFLOW_API_KEY exists:', !!ROBOFLOW_API_KEY);
 
     // Validate required fields
-    if (!page_id || !image_url || !region) {
+    if (!page_id || !region) {
       console.error('[detect-region] Missing required fields');
       return NextResponse.json(
-        { success: false, error: 'page_id, image_url, and region are required' },
+        { success: false, error: 'page_id and region are required' },
         { status: 400 }
       );
     }
@@ -115,26 +108,20 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       );
     }
 
-    // Database lookup is optional - we already have the image_url from the request
-    // This just provides additional context like page dimensions
-    console.log('[detect-region] Attempting database lookup (optional)...');
-    try {
-      const supabase = await createClient();
-      const { data: pageData, error: pageError } = await supabase
-        .from('extraction_pages')
-        .select('id, job_id, page_number, original_image_url, original_width, original_height')
-        .eq('id', page_id)
-        .single();
-
-      if (pageData) {
-        const page = pageData as ExtractionPageRecord;
-        console.log('[detect-region] Page found:', page.original_width, 'x', page.original_height);
-      } else if (pageError) {
-        console.warn('[detect-region] Page lookup warning:', pageError.message);
-      }
-    } catch (dbError) {
-      console.warn('[detect-region] Database lookup failed (continuing):', dbError instanceof Error ? dbError.message : 'Unknown error');
+    const pageAccess = await requireExtractionPageAccess(page_id);
+    if (!pageAccess.ok) {
+      return pageAccess.response;
     }
+
+    const trustedImage = trustedPageImageUrl(pageAccess.data);
+    if (!trustedImage) {
+      return NextResponse.json(
+        { success: false, error: 'Page image not found' },
+        { status: 404 }
+      );
+    }
+    console.log('[detect-region] Authorized page image:', trustedImage.substring(0, 80) + '...');
+    console.log('[detect-region] Page dimensions:', pageAccess.data.original_width, 'x', pageAccess.data.original_height);
 
     // Call Roboflow Workflow API (same format as extraction-api)
     console.log('[detect-region] Calling Roboflow Workflow API...');
@@ -145,7 +132,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       inputs: {
         image: {
           type: 'url',
-          value: image_url,
+          value: trustedImage,
         },
       },
     };

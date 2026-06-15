@@ -6,7 +6,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@/lib/supabase/server';
+import { requireExtractionPageAccess } from '@/lib/api/access';
 
 export async function GET(
   request: NextRequest,
@@ -22,9 +22,15 @@ export async function GET(
       );
     }
 
-    const supabase = await createClient();
+    const pageAccess = await requireExtractionPageAccess(pageId);
+    if (!pageAccess.ok) {
+      return pageAccess.response;
+    }
+
+    const supabase = pageAccess.ctx.supabase;
 
     // Fetch page with ocr_data
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const { data, error } = await (supabase as any)
       .from('extraction_pages')
       .select('id, page_number, page_type, ocr_data, ocr_status, ocr_processed_at')

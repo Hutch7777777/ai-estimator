@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import Anthropic from '@anthropic-ai/sdk';
-import { createClient } from '@/lib/supabase/server';
+import { requireExtractionJobAccess } from '@/lib/api/access';
 
 // =============================================================================
 // Notes & Specifications Extraction API Route
@@ -175,6 +175,11 @@ export async function POST(request: NextRequest): Promise<NextResponse<ExtractNo
       );
     }
 
+    const jobAccess = await requireExtractionJobAccess(job_id);
+    if (!jobAccess.ok) {
+      return jobAccess.response;
+    }
+
     console.log(`[extract-notes-specs] Processing job ${job_id}, include_all_pages: ${include_all_pages}`);
 
     // 2. Validate API key
@@ -188,7 +193,7 @@ export async function POST(request: NextRequest): Promise<NextResponse<ExtractNo
     }
 
     // 3. Fetch relevant pages from database
-    const supabase = await createClient();
+    const supabase = jobAccess.ctx.supabase;
 
     // Get pages that likely contain specs (cover, other, detail, elevation, section)
     const pageTypes = include_all_pages
@@ -198,7 +203,7 @@ export async function POST(request: NextRequest): Promise<NextResponse<ExtractNo
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const { data: pages, error: pagesError } = await (supabase as any)
       .from('extraction_pages')
-      .select('id, page_number, page_type, image_url')
+      .select('id, page_number, page_type, image_url, original_image_url')
       .eq('job_id', job_id)
       .in('page_type', pageTypes)
       .order('page_number');
@@ -226,11 +231,11 @@ export async function POST(request: NextRequest): Promise<NextResponse<ExtractNo
     const anthropic = new Anthropic({ apiKey });
 
     // 5. Build multi-image message content
-    const imageContents: Anthropic.ImageBlockParam[] = pagesToAnalyze.map((page: { image_url: string; page_number: number; page_type: string }) => ({
+    const imageContents: Anthropic.ImageBlockParam[] = pagesToAnalyze.map((page: { image_url: string; original_image_url?: string | null; page_number: number; page_type: string }) => ({
       type: 'image' as const,
       source: {
         type: 'url' as const,
-        url: page.image_url,
+        url: page.original_image_url || page.image_url,
       },
     }));
 
@@ -403,7 +408,12 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       );
     }
 
-    const supabase = await createClient();
+    const jobAccess = await requireExtractionJobAccess(jobId);
+    if (!jobAccess.ok) {
+      return jobAccess.response;
+    }
+
+    const supabase = jobAccess.ctx.supabase;
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const { data: job, error } = await (supabase as any)

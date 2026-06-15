@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import Anthropic from '@anthropic-ai/sdk';
-import { createClient } from '@/lib/supabase/server';
 import type { RoofPlanData, RoofSlope, RoofLinearElement, RoofFeature, RoofMaterialCallout, RoofLinearSummary } from '@/lib/types/extraction';
+import { requireExtractionPageAccess, trustedPageImageUrl } from '@/lib/api/access';
 
 // =============================================================================
 // Roof Plan Extraction API Route
@@ -260,6 +260,19 @@ export async function POST(request: NextRequest): Promise<NextResponse<ExtractRo
       );
     }
 
+    const pageAccess = await requireExtractionPageAccess(pageId, { claimedJobId: jobId });
+    if (!pageAccess.ok) {
+      return pageAccess.response;
+    }
+
+    const trustedImage = trustedPageImageUrl(pageAccess.data);
+    if (!trustedImage) {
+      return NextResponse.json(
+        { success: false, pageId, error: 'Page image not found' },
+        { status: 404 }
+      );
+    }
+
     console.log(`[extract-roof-plan] Processing page ${pageId} (page #${pageNumber || 'unknown'})`);
 
     // 2. Validate API key
@@ -294,7 +307,7 @@ export async function POST(request: NextRequest): Promise<NextResponse<ExtractRo
               type: 'image',
               source: {
                 type: 'url',
-                url: imageUrl,
+                url: trustedImage,
               },
             },
             {
@@ -422,7 +435,7 @@ export async function POST(request: NextRequest): Promise<NextResponse<ExtractRo
     console.log(`  - Confidence: ${Math.round(roofPlanData.confidence * 100)}%`);
 
     // 9. Store in Supabase (extraction_pages.roof_plan_data)
-    const supabase = await createClient();
+    const supabase = pageAccess.ctx.supabase;
 
     // Using type assertion since roof_plan_data column may not be in generated types yet
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -533,7 +546,12 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       );
     }
 
-    const supabase = await createClient();
+    const pageAccess = await requireExtractionPageAccess(pageId);
+    if (!pageAccess.ok) {
+      return pageAccess.response;
+    }
+
+    const supabase = pageAccess.ctx.supabase;
 
     // Using type assertion since roof_plan_data column may not be in generated types
     // eslint-disable-next-line @typescript-eslint/no-explicit-any

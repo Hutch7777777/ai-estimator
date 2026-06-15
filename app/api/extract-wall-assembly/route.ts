@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import Anthropic from '@anthropic-ai/sdk';
-import { createClient } from '@/lib/supabase/server';
 import type { WallAssembly, WallLayer, WallAssemblyExtractionResult } from '@/lib/types/extraction';
+import { requireExtractionPageAccess, trustedPageImageUrl } from '@/lib/api/access';
 
 // =============================================================================
 // Wall Assembly Extraction API Route
@@ -221,6 +221,19 @@ export async function POST(request: NextRequest): Promise<NextResponse<ExtractWa
       );
     }
 
+    const pageAccess = await requireExtractionPageAccess(pageId, { claimedJobId: jobId });
+    if (!pageAccess.ok) {
+      return pageAccess.response;
+    }
+
+    const trustedImage = trustedPageImageUrl(pageAccess.data);
+    if (!trustedImage) {
+      return NextResponse.json(
+        { success: false, pageId, error: 'Page image not found' },
+        { status: 404 }
+      );
+    }
+
     console.log(`[extract-wall-assembly] Processing page ${pageId} (page #${pageNumber || 'unknown'})`);
 
     // 2. Validate API key
@@ -249,7 +262,7 @@ export async function POST(request: NextRequest): Promise<NextResponse<ExtractWa
               type: 'image',
               source: {
                 type: 'url',
-                url: imageUrl,
+                url: trustedImage,
               },
             },
             {
@@ -353,7 +366,7 @@ export async function POST(request: NextRequest): Promise<NextResponse<ExtractWa
     }
 
     // 9. Store in Supabase (extraction_pages.wall_assembly)
-    const supabase = await createClient();
+    const supabase = pageAccess.ctx.supabase;
 
     // Using type assertion since wall_assembly column may not be in generated types yet
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -451,7 +464,12 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       );
     }
 
-    const supabase = await createClient();
+    const pageAccess = await requireExtractionPageAccess(pageId);
+    if (!pageAccess.ok) {
+      return pageAccess.response;
+    }
+
+    const supabase = pageAccess.ctx.supabase;
 
     // Using type assertion since wall_assembly column may not be in generated types
     // eslint-disable-next-line @typescript-eslint/no-explicit-any

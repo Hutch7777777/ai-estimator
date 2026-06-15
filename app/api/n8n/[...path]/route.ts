@@ -1,4 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
+import {
+  requireExtractionJobAccess,
+  requireExtractionPageAccess,
+  requireExtractionPagesForJobAccess,
+  requireProjectAccess,
+  requireTakeoffAccess,
+} from '@/lib/api/access';
 
 // Strip any trailing path from the URL (e.g. /webhook/multi-trade-coordinator)
 // We only want the base origin like https://n8n-production-293e.up.railway.app
@@ -19,6 +26,59 @@ const N8N_BASE_URL = getN8nBaseUrl();
 
 const TIMEOUT_MS = 120_000; // 2 min — Excel generation can be slow
 
+const ALLOWED_WEBHOOK_PATHS = new Set([
+  'multi-trade-coordinator',
+  'generate-proposal',
+  'detection-edit-sync',
+  'validate-detections',
+  'approve-detection-editor',
+]);
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+async function authorizeWebhookRequest(webhookPath: string, body: Record<string, unknown>) {
+  if (!ALLOWED_WEBHOOK_PATHS.has(webhookPath)) {
+    return NextResponse.json({ success: false, error: 'Not found' }, { status: 404 });
+  }
+
+  switch (webhookPath) {
+    case 'multi-trade-coordinator': {
+      const access = await requireProjectAccess(body.project_id);
+      return access.ok ? null : access.response;
+    }
+
+    case 'generate-proposal': {
+      const access = await requireTakeoffAccess(body.takeoff_id);
+      return access.ok ? null : access.response;
+    }
+
+    case 'approve-detection-editor': {
+      const access = await requireExtractionJobAccess(body.job_id, {
+        claimedProjectId: body.project_id,
+      });
+      return access.ok ? null : access.response;
+    }
+
+    case 'detection-edit-sync': {
+      const access = await requireExtractionPageAccess(body.page_id, {
+        claimedJobId: body.job_id,
+      });
+      return access.ok ? null : access.response;
+    }
+
+    case 'validate-detections': {
+      const detections = Array.isArray(body.detections) ? body.detections : [];
+      const pageIds = detections
+        .map((d) => (isRecord(d) ? d.page_id : null))
+        .filter((id): id is string => typeof id === 'string' && id.trim().length > 0);
+      const access = await requireExtractionPagesForJobAccess(body.job_id, pageIds);
+      return access.ok ? null : access.response;
+    }
+  }
+}
+
 export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ path: string[] }> }
@@ -29,14 +89,26 @@ export async function POST(
   console.log(`[n8n-proxy] POST /webhook/${webhookPath}`);
 
   try {
-    const body = await request.json();
+    const parsedBody = await request.json();
+    if (!isRecord(parsedBody)) {
+      return NextResponse.json(
+        { success: false, error: 'JSON object body is required' },
+        { status: 400 }
+      );
+    }
+
+    const authFailure = await authorizeWebhookRequest(webhookPath, parsedBody);
+    if (authFailure) {
+      return authFailure;
+    }
+
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), TIMEOUT_MS);
 
     const n8nResponse = await fetch(`${N8N_BASE_URL}/webhook/${webhookPath}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
+      body: JSON.stringify(parsedBody),
       signal: controller.signal,
     });
 
@@ -81,27 +153,19 @@ export async function POST(
     try {
       const data = JSON.parse(responseText);
 
-      // Debug logging for takeoff creation
-      console.log('[n8n-proxy] ========== RESPONSE DEBUG ==========');
       console.log('[n8n-proxy] Path:', webhookPath);
       console.log('[n8n-proxy] Response status:', n8nResponse.status);
-      console.log('[n8n-proxy] Response body:', JSON.stringify(data, null, 2));
 
       // Specific logging for approve-detection-editor endpoint
-      if (webhookPath.includes('approve')) {
-        console.log('[n8n-proxy] APPROVE RESPONSE DETAILS:');
-        console.log('[n8n-proxy] - success:', data.success);
-        console.log('[n8n-proxy] - takeoff_id:', data.takeoff_id);
-        console.log('[n8n-proxy] - line_items_created:', data.line_items_created);
-        console.log('[n8n-proxy] - totals:', JSON.stringify(data.totals, null, 2));
-        if (data.line_items) {
-          console.log('[n8n-proxy] - line_items array length:', data.line_items?.length);
-        }
-        if (data.material_items) {
-          console.log('[n8n-proxy] - material_items array length:', data.material_items?.length);
-        }
+      if (webhookPath.includes('approve') && isRecord(data)) {
+        console.log('[n8n-proxy] Approve response summary:', {
+          success: data.success,
+          takeoff_id: data.takeoff_id,
+          line_items_created: data.line_items_created,
+          line_items_count: Array.isArray(data.line_items) ? data.line_items.length : undefined,
+          material_items_count: Array.isArray(data.material_items) ? data.material_items.length : undefined,
+        });
       }
-      console.log('[n8n-proxy] ========== END DEBUG ==========');
 
       return NextResponse.json(data, { status: n8nResponse.status });
     } catch {
