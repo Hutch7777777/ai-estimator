@@ -12,6 +12,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { useUser } from '@/lib/hooks/useUser';
 import { useOrganization } from '@/lib/hooks/useOrganization';
 import { createClient } from '@/lib/supabase/client';
+import { useConfirm } from '@/components/ui/confirm-dialog';
 import { toast } from 'sonner';
 import { NoOrganization } from '@/components/no-organization';
 import { resolveSettings } from '@/lib/types/organization';
@@ -24,6 +25,7 @@ function AccountSettingsContent() {
 
   const { user, profile, refreshProfile, isLoading: isUserLoading } = useUser();
   const { organization, isOwner, isAdmin, refreshOrganization, isLoading: isOrgLoading, hasNoOrganizations } = useOrganization();
+  const { confirm, confirmDialog } = useConfirm();
 
   const [activeTab, setActiveTab] = useState(initialTab);
   const [isSaving, setIsSaving] = useState(false);
@@ -427,7 +429,13 @@ function AccountSettingsContent() {
   };
 
   const handleRemoveMember = async (memberId: string, memberEmail: string) => {
-    if (!confirm(`Remove ${memberEmail} from the team?`)) return;
+    const ok = await confirm({
+      title: 'Remove team member?',
+      description: `Remove ${memberEmail} from the team?`,
+      confirmLabel: 'Remove',
+      destructive: true,
+    });
+    if (!ok) return;
 
     try {
       const { error } = await supabase
@@ -505,6 +513,7 @@ function AccountSettingsContent() {
 
   return (
     <div className="min-h-screen bg-muted">
+      {confirmDialog}
       <div className="mx-auto max-w-4xl px-4 py-8">
         {/* Header */}
         <div className="mb-8">

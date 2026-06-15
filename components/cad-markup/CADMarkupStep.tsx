@@ -6,6 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
+import { useConfirm } from "@/components/ui/confirm-dialog";
 import {
   Upload,
   FileImage,
@@ -534,20 +535,27 @@ export function CADMarkupStep({ data, onUpdate, onValidationChange }: CADMarkupS
     historyRedo();
   }, [historyRedo]);
 
-  const handleClearAll = useCallback(() => {
+  const { confirm, confirmDialog } = useConfirm();
+
+  const handleClearAll = useCallback(async () => {
     if (polygons.length === 0 && markers.length === 0 && measurements.length === 0) {
       return;
     }
 
-    if (confirm("Are you sure you want to clear all markups? This cannot be undone.")) {
-      setMarkupState({ polygons: [], markers: [], measurements: [] });
-      clearHistory();
-      setSelectedPolygonId(null);
-      setSelectedMarkerId(null);
-      setSelectedMeasurementId(null);
-      toast.success("All markups cleared");
-    }
-  }, [polygons, markers, measurements, setMarkupState, clearHistory]);
+    const ok = await confirm({
+      title: "Clear all markups?",
+      description: "This removes every markup on this plan. This cannot be undone.",
+      confirmLabel: "Clear all",
+      destructive: true,
+    });
+    if (!ok) return;
+    setMarkupState({ polygons: [], markers: [], measurements: [] });
+    clearHistory();
+    setSelectedPolygonId(null);
+    setSelectedMarkerId(null);
+    setSelectedMeasurementId(null);
+    toast.success("All markups cleared");
+  }, [polygons, markers, measurements, setMarkupState, clearHistory, confirm]);
 
   // Export handlers
   const handleExportCSV = useCallback(() => {
@@ -884,22 +892,27 @@ export function CADMarkupStep({ data, onUpdate, onValidationChange }: CADMarkupS
     setCalibrationInches("");
   }, []);
 
-  const handleRemoveImage = useCallback(() => {
-    if (confirm("Remove the current image? All markups will be cleared.")) {
-      setImageUrl("");
-      setImageName("");
-      setMarkupState({ polygons: [], markers: [], measurements: [] });
-      clearHistory();
+  const handleRemoveImage = useCallback(async () => {
+    const ok = await confirm({
+      title: "Remove image?",
+      description: "Removing the image clears all markups on it.",
+      confirmLabel: "Remove",
+      destructive: true,
+    });
+    if (!ok) return;
+    setImageUrl("");
+    setImageName("");
+    setMarkupState({ polygons: [], markers: [], measurements: [] });
+    clearHistory();
 
-      // Clear PDF-related state
-      pdfDocRef.current = null;
-      pageImageCache.current = {};
-      setTotalPages(1);
-      setCurrentPage(1);
+    // Clear PDF-related state
+    pdfDocRef.current = null;
+    pageImageCache.current = {};
+    setTotalPages(1);
+    setCurrentPage(1);
 
-      toast.success("Image removed");
-    }
-  }, [setMarkupState, clearHistory]);
+    toast.success("Image removed");
+  }, [setMarkupState, clearHistory, confirm]);
 
   // Handle delete selected markup (called from CADViewer on Delete key)
   const handleDeleteSelected = useCallback(() => {
@@ -979,6 +992,7 @@ export function CADMarkupStep({ data, onUpdate, onValidationChange }: CADMarkupS
 
   return (
     <div className="space-y-2">
+      {confirmDialog}
       {/* BROWSE MODE: Show project grid */}
       {mode === "browse" ? (
         <ProjectGrid onProjectSelect={handleProjectSelect} />

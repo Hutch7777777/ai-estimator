@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { toast } from "sonner";
+import { useConfirm } from "@/components/ui/confirm-dialog";
 import { useRouter } from "next/navigation";
 import { useOrganization } from "@/lib/hooks/useOrganization";
 import {
@@ -179,6 +180,8 @@ export function ProjectsTable() {
       .join(" ");
   };
 
+  const { confirm, confirmDialog } = useConfirm();
+
   // Handle Excel download
   const handleDownload = (project: Project) => {
     if (project.excel_url) {
@@ -190,9 +193,13 @@ export function ProjectsTable() {
 
   // Handle project deletion
   const handleDelete = async (projectId: string) => {
-    if (!confirm("Are you sure you want to delete this project?")) {
-      return;
-    }
+    const ok = await confirm({
+      title: "Delete project?",
+      description: "This permanently deletes the project and its estimate. This can't be undone.",
+      confirmLabel: "Delete",
+      destructive: true,
+    });
+    if (!ok) return;
 
     try {
       // Use direct fetch for delete
@@ -294,6 +301,7 @@ export function ProjectsTable() {
 
   return (
     <Card className="border-2 shadow-soft rounded-xl">
+      {confirmDialog}
       <CardHeader>
         <div className="flex flex-col gap-4">
           <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">

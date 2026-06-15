@@ -7,6 +7,7 @@ import { toast } from 'sonner';
 import { StatusBadge } from '@/components/ui/status-badge';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
+import { useConfirm } from '@/components/ui/confirm-dialog';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -44,6 +45,7 @@ interface ProjectRow extends ProjectNameSource {
  */
 export function JobsByProject() {
   const { organization } = useOrganization();
+  const { confirm, confirmDialog } = useConfirm();
   const [projects, setProjects] = useState<ProjectRow[]>([]);
   const [jobs, setJobs] = useState<JobRow[]>([]);
   const [view, setView] = useState<'loading' | 'error' | 'ready'>('loading');
@@ -108,7 +110,13 @@ export function JobsByProject() {
   };
 
   const handleDelete = async (job: JobRow) => {
-    if (!window.confirm('Delete this import and all its pages/detections?')) return;
+    const ok = await confirm({
+      title: 'Delete import?',
+      description: "This deletes the import and all its pages and detections. This can't be undone.",
+      confirmLabel: 'Delete',
+      destructive: true,
+    });
+    if (!ok) return;
     const response = await fetch(`/api/extraction-jobs/${job.id}`, { method: 'DELETE' });
     if (response.ok) {
       setJobs((prev) => prev.filter((j) => j.id !== job.id));
@@ -194,6 +202,7 @@ export function JobsByProject() {
 
   return (
     <div className="space-y-4">
+      {confirmDialog}
       {[...groups.entries()].map(([projectId, projectJobs]) => {
         const project = projectById.get(projectId)!;
         const label = project.client_name
