@@ -39,6 +39,51 @@ function devGuardActive(): boolean {
   return process.env.NODE_ENV === 'development' && process.env.NEXT_PUBLIC_DEV_BYPASS_AUTH === 'true';
 }
 
+function invalidRestEndpoint(restEndpoint: string): boolean {
+  return restEndpoint.includes('://') || restEndpoint.startsWith('/');
+}
+
+async function forwardRestRequest(
+  request: NextRequest,
+  restEndpoint: string,
+  method: 'GET' | 'PATCH'
+) {
+  if (invalidRestEndpoint(restEndpoint)) {
+    return NextResponse.json({ error: 'Invalid REST endpoint' }, { status: 400 });
+  }
+
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!supabaseUrl || !serviceKey) {
+    return NextResponse.json({ error: 'Missing Supabase service config' }, { status: 500 });
+  }
+
+  const headers: HeadersInit = {
+    apikey: serviceKey,
+    Authorization: `Bearer ${serviceKey}`,
+    'Content-Type': request.headers.get('content-type') || 'application/json',
+  };
+  const prefer = request.headers.get('prefer');
+  if (prefer) headers.Prefer = prefer;
+
+  const response = await fetch(`${supabaseUrl}/rest/v1/${restEndpoint}`, {
+    method,
+    headers,
+    body: method === 'PATCH' ? await request.text() : undefined,
+  });
+
+  const text = await response.text();
+  if (response.status === 204 || response.status === 304) {
+    return new NextResponse(null, { status: response.status });
+  }
+
+  const contentType = response.headers.get('content-type') || 'application/json';
+  return new NextResponse(text, {
+    status: response.status,
+    headers: { 'Content-Type': contentType },
+  });
+}
+
 export async function GET(request: NextRequest) {
   if (!devGuardActive()) {
     return NextResponse.json({ error: 'Not found' }, { status: 404 });
@@ -144,9 +189,45 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ name });
     }
 
+    // ?rest=<postgrest endpoint> -> raw dev-only service-role PostgREST read.
+    // This keeps client loaders that normally use anon-key REST working in
+    // local dev-bypass mode, where there is no real Supabase session for RLS.
+    const restEndpoint = searchParams.get('rest');
+    if (restEndpoint) {
+      return forwardRestRequest(request, restEndpoint, 'GET');
+    }
+
     return NextResponse.json({ error: 'Missing query: hub | list | name' }, { status: 400 });
   } catch (error) {
     console.error('[dev/org-data] read failed:', error);
     return NextResponse.json({ error: 'Read failed' }, { status: 500 });
+  }
+}
+
+export async function PATCH(request: NextRequest) {
+  if (!devGuardActive()) {
+    return NextResponse.json({ error: 'Not found' }, { status: 404 });
+  }
+
+  const { searchParams } = new URL(request.url);
+  const restEndpoint = searchParams.get('rest');
+  if (!restEndpoint) {
+    return NextResponse.json({ error: 'Missing query: rest' }, { status: 400 });
+  }
+
+  // Keep dev writes intentionally narrow: classification review only needs to
+  // update extraction page types.
+  if (!restEndpoint.startsWith('extraction_pages?')) {
+    return NextResponse.json({ error: 'Unsupported dev write endpoint' }, { status: 400 });
+  }
+
+  try {
+    return await forwardRestRequest(request, restEndpoint, 'PATCH');
+  } catch (error) {
+    console.error('[dev/org-data] write failed:', error);
+    return NextResponse.json(
+      { error: 'Write failed', message: error instanceof Error ? error.message : String(error) },
+      { status: 500 }
+    );
   }
 }

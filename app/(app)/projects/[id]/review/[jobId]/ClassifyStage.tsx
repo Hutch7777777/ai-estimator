@@ -29,6 +29,7 @@ import {
   ZoomIn,
 } from 'lucide-react';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
+import { isDevBypassEnabled } from '@/lib/hooks/useOrganization';
 import type { ExtractionJob, ExtractionPage, PageType } from '@/lib/types/extraction';
 
 // =============================================================================
@@ -39,13 +40,6 @@ const EXTRACTION_API_URL = process.env.NEXT_PUBLIC_EXTRACTION_API_URL || 'https:
 
 // Polling interval for post-confirm status checking
 const POLLING_INTERVAL = 3000;
-
-// Status messages for processing states
-const STATUS_MESSAGES: Record<string, string> = {
-  processing: 'Detecting objects with AI...',
-  complete: 'Detection complete!',
-  failed: 'Detection failed',
-};
 
 // Processing steps configuration
 const PROCESSING_STEPS = [
@@ -157,6 +151,36 @@ const formatPageType = (type: PageType | null): string => {
   return type.replace(/_/g, ' ');
 };
 
+function restUrl(endpoint: string): string {
+  if (isDevBypassEnabled()) {
+    return `/api/dev/org-data?rest=${encodeURIComponent(endpoint)}`;
+  }
+  return `${process.env.NEXT_PUBLIC_SUPABASE_URL}/rest/v1/${endpoint}`;
+}
+
+function restHeaders(write = false): HeadersInit | undefined {
+  if (isDevBypassEnabled()) {
+    return write ? { 'Content-Type': 'application/json' } : undefined;
+  }
+
+  return {
+    apikey: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    Authorization: `Bearer ${process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY}`,
+    ...(write ? { 'Content-Type': 'application/json' } : {}),
+  };
+}
+
+async function fetchRest(endpoint: string, init: RequestInit = {}) {
+  const isWrite = init.method === 'PATCH';
+  return fetch(restUrl(endpoint), {
+    ...init,
+    headers: {
+      ...restHeaders(isWrite),
+      ...init.headers,
+    },
+  });
+}
+
 // =============================================================================
 // Component
 // =============================================================================
@@ -196,33 +220,22 @@ export function ClassifyStage({ jobId, projectId, onDetectionComplete }: Classif
       setError(null);
 
       // Fetch job info
-      const jobResponse = await fetch(
-        `${process.env.NEXT_PUBLIC_SUPABASE_URL}/rest/v1/extraction_jobs?id=eq.${jobId}&select=*`,
-        {
-          headers: {
-            'apikey': process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-            'Authorization': `Bearer ${process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY}`,
-            'Accept': 'application/vnd.pgrst.object+json',
-          },
-        }
-      );
+      const jobResponse = await fetchRest(`extraction_jobs?id=eq.${jobId}&select=*`);
 
       if (!jobResponse.ok) {
         throw new Error(`Failed to fetch job: ${jobResponse.statusText}`);
       }
 
-      const jobData = await jobResponse.json();
+      const jobRows = await jobResponse.json();
+      const jobData = Array.isArray(jobRows) ? jobRows[0] : jobRows;
+      if (!jobData) {
+        throw new Error('Extraction job not found');
+      }
       setJob(jobData);
 
       // Fetch pages
-      const pagesResponse = await fetch(
-        `${process.env.NEXT_PUBLIC_SUPABASE_URL}/rest/v1/extraction_pages?job_id=eq.${jobId}&select=*&order=page_number.asc`,
-        {
-          headers: {
-            'apikey': process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-            'Authorization': `Bearer ${process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY}`,
-          },
-        }
+      const pagesResponse = await fetchRest(
+        `extraction_pages?job_id=eq.${jobId}&select=*&order=page_number.asc`
       );
 
       if (!pagesResponse.ok) {
@@ -253,19 +266,12 @@ export function ClassifyStage({ jobId, projectId, onDetectionComplete }: Classif
 
     const interval = setInterval(async () => {
       try {
-        const response = await fetch(
-          `${process.env.NEXT_PUBLIC_SUPABASE_URL}/rest/v1/extraction_jobs?id=eq.${jobId}&select=status,project_id`,
-          {
-            headers: {
-              'apikey': process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-              'Authorization': `Bearer ${process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY}`,
-              'Accept': 'application/vnd.pgrst.object+json',
-            },
-          }
-        );
+        const response = await fetchRest(`extraction_jobs?id=eq.${jobId}&select=status,project_id`);
 
         if (response.ok) {
-          const data = await response.json();
+          const rows = await response.json();
+          const data = Array.isArray(rows) ? rows[0] : rows;
+          if (!data) return;
           setProcessingStatus(data.status);
 
           if (data.status === 'complete') {
@@ -289,7 +295,7 @@ export function ClassifyStage({ jobId, projectId, onDetectionComplete }: Classif
     return () => {
       clearInterval(interval);
     };
-  }, [isProcessing, jobId, router]);
+  }, [isProcessing, jobId, onDetectionComplete]);
 
   // =============================================================================
   // Handlers
@@ -302,18 +308,10 @@ export function ClassifyStage({ jobId, projectId, onDetectionComplete }: Classif
     );
 
     try {
-      const response = await fetch(
-        `${process.env.NEXT_PUBLIC_SUPABASE_URL}/rest/v1/extraction_pages?id=eq.${pageId}`,
-        {
-          method: 'PATCH',
-          headers: {
-            'apikey': process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-            'Authorization': `Bearer ${process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({ page_type: newType }),
-        }
-      );
+      const response = await fetchRest(`extraction_pages?id=eq.${pageId}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ page_type: newType }),
+      });
 
       if (!response.ok) {
         throw new Error(`Failed to update page type: ${response.statusText}`);

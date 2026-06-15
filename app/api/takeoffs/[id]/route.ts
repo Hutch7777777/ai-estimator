@@ -1,4 +1,5 @@
 import { createClient } from '@/lib/supabase/server';
+import { createServiceClient } from '@/lib/supabase/service';
 import { NextResponse } from 'next/server';
 
 // =============================================================================
@@ -66,13 +67,17 @@ interface OverheadItem {
 // GET Handler
 // =============================================================================
 
+function isDevBypassServerEnabled(): boolean {
+  return process.env.NODE_ENV === 'development' && process.env.NEXT_PUBLIC_DEV_BYPASS_AUTH === 'true';
+}
+
 export async function GET(
-  request: Request,
+  _request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     const { id } = await params;
-    const supabase = await createClient();
+    const supabase = isDevBypassServerEnabled() ? createServiceClient() : await createClient();
 
     // Get takeoff header
     const { data: takeoffData, error: takeoffError } = await supabase
