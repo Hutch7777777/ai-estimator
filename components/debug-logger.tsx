@@ -4,7 +4,6 @@ import { useEffect } from 'react';
 
 export function DebugLogger() {
   useEffect(() => {
-    console.log('App mounted at:', new Date().toISOString());
 
     // Log unhandled promise rejections
     const handleUnhandledRejection = (event: PromiseRejectionEvent) => {

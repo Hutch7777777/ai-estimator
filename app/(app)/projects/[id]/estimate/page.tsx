@@ -364,11 +364,9 @@ export default function ProjectEstimatePage() {
         }}
         onApprove={() => {
           // TODO: Implement approval workflow
-          console.log("Approve estimate");
         }}
         onSend={() => {
           // TODO: Implement send to client
-          console.log("Send to client");
         }}
       />
 

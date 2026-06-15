@@ -112,7 +112,6 @@ export function usePdfRenderer({
         // Configure worker
         pdfjsLib.GlobalWorkerOptions.workerSrc = '/pdf.worker.min.mjs';
 
-        console.log('[usePdfRenderer] Loading PDF from:', pdfUrl);
 
         const doc = await pdfjsLib.getDocument({
           url: pdfUrl,
@@ -123,7 +122,6 @@ export function usePdfRenderer({
 
         if (cancelled) return;
 
-        console.log('[usePdfRenderer] PDF loaded, pages:', doc.numPages);
         setPdfDoc(doc);
       } catch (err) {
         if (cancelled) return;
@@ -153,7 +151,6 @@ export function usePdfRenderer({
 
     (async () => {
       try {
-        console.log('[usePdfRenderer] Loading page:', pageNumber);
 
         // Validate page number
         if (pageNumber < 1 || pageNumber > pdfDoc.numPages) {
@@ -177,12 +174,9 @@ export function usePdfRenderer({
         if (imageWidth && imageHeight && imageWidth > 0 && imageHeight > 0) {
           // Use actual image dimensions for exact match
           calculatedScale = imageWidth / pdfWidth;
-          console.log('[usePdfRenderer] baseScale from image:', `${imageWidth} / ${pdfWidth} = ${calculatedScale.toFixed(4)}`);
-          console.log('[usePdfRenderer] Image dimensions:', imageWidth, 'x', imageHeight);
         } else {
           // Fall back to DPI-based calculation
           calculatedScale = (dpi || 200) / 72;
-          console.log('[usePdfRenderer] baseScale from DPI:', `${dpi} / 72 = ${calculatedScale.toFixed(4)}`);
         }
 
         setBaseScale(calculatedScale);
@@ -193,7 +187,6 @@ export function usePdfRenderer({
           height: Math.round(pdfHeight * calculatedScale)
         };
 
-        console.log('[usePdfRenderer] PDF dimensions at baseScale:', dimensions);
         setPdfDimensions(dimensions);
 
         setIsLoading(false);
@@ -216,7 +209,6 @@ export function usePdfRenderer({
 
   const renderAtZoom = useCallback(async (zoom: number) => {
     if (!pdfPage || !canvasARef.current || !canvasBRef.current) {
-      console.log('[usePdfRenderer] Cannot render - no page or canvases');
       return;
     }
 
@@ -246,7 +238,6 @@ export function usePdfRenderer({
     const totalScale = baseScale * renderZoom;
     const viewport = pdfPage.getViewport({ scale: totalScale });
 
-    console.log('[usePdfRenderer] Rendering to back buffer at zoom:', zoom.toFixed(2), 'multiplier:', renderZoom, 'totalScale:', totalScale.toFixed(4));
 
     // Update canvas dimensions
     renderCanvas.width = viewport.width;
@@ -275,7 +266,6 @@ export function usePdfRenderer({
       activeCanvasRef.current = activeCanvasRef.current === 'A' ? 'B' : 'A';
       setDisplayCanvas(renderCanvas);
 
-      console.log('[usePdfRenderer] Render complete, swapped to canvas', activeCanvasRef.current);
     } catch (err: any) {
       if (err?.name !== 'RenderingCancelledException') {
         console.error('[usePdfRenderer] Render error:', err);

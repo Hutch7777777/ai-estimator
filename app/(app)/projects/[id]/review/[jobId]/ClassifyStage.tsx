@@ -250,7 +250,6 @@ export function ClassifyStage({ jobId, projectId, onDetectionComplete }: Classif
   useEffect(() => {
     if (!isProcessing) return;
 
-    console.log('[ClassificationReview] Starting post-confirm polling');
 
     const interval = setInterval(async () => {
       try {
@@ -267,7 +266,6 @@ export function ClassifyStage({ jobId, projectId, onDetectionComplete }: Classif
 
         if (response.ok) {
           const data = await response.json();
-          console.log('[ClassificationReview] Poll status:', data.status);
           setProcessingStatus(data.status);
 
           if (data.status === 'complete') {
@@ -289,7 +287,6 @@ export function ClassifyStage({ jobId, projectId, onDetectionComplete }: Classif
     }, POLLING_INTERVAL);
 
     return () => {
-      console.log('[ClassificationReview] Stopping polling');
       clearInterval(interval);
     };
   }, [isProcessing, jobId, router]);

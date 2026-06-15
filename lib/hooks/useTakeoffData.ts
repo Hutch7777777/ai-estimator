@@ -76,7 +76,6 @@ export function useTakeoffData(projectId: string): UseTakeoffDataReturn {
           filter: `id=eq.${takeoff.id}`,
         },
         (payload) => {
-          console.log("Takeoff updated:", payload);
           if (payload.new) {
             setTakeoff(payload.new as Takeoff);
           }
@@ -91,7 +90,6 @@ export function useTakeoffData(projectId: string): UseTakeoffDataReturn {
           filter: `takeoff_id=eq.${takeoff.id}`,
         },
         (payload) => {
-          console.log("Section changed:", payload);
           fetchData(); // Refresh all data when sections change
         }
       )
@@ -104,7 +102,6 @@ export function useTakeoffData(projectId: string): UseTakeoffDataReturn {
           filter: `takeoff_id=eq.${takeoff.id}`,
         },
         (payload) => {
-          console.log("Line item changed:", payload);
 
           if (payload.eventType === "INSERT" && payload.new) {
             setLineItems((prev) => [...prev, payload.new as LineItemWithState]);

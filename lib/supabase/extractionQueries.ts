@@ -39,18 +39,30 @@ function mapDraftToDetection(draft: DraftDetection): ExtractionDetection {
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const SUPABASE_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
 
+function shouldUseDevRestProxy(): boolean {
+  if (typeof window === 'undefined') return false;
+  const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+  return isLocalhost && process.env.NEXT_PUBLIC_DEV_BYPASS_AUTH === 'true';
+}
+
 async function directFetch<T>(endpoint: string): Promise<T | null> {
-  const url = `${SUPABASE_URL}/rest/v1/${endpoint}`;
-  console.log('[directFetch] Fetching:', url);
+  const url = shouldUseDevRestProxy()
+    ? `/api/dev/org-data?rest=${encodeURIComponent(endpoint)}`
+    : `${SUPABASE_URL}/rest/v1/${endpoint}`;
 
   try {
-    const response = await fetch(url, {
-      headers: {
-        'apikey': SUPABASE_KEY,
-        'Authorization': `Bearer ${SUPABASE_KEY}`,
-        'Content-Type': 'application/json',
-      },
-    });
+    const response = await fetch(
+      url,
+      shouldUseDevRestProxy()
+        ? undefined
+        : {
+            headers: {
+              'apikey': SUPABASE_KEY,
+              'Authorization': `Bearer ${SUPABASE_KEY}`,
+              'Content-Type': 'application/json',
+            },
+          }
+    );
 
     if (!response.ok) {
       const errorText = await response.text();
@@ -59,7 +71,6 @@ async function directFetch<T>(endpoint: string): Promise<T | null> {
     }
 
     const data = await response.json();
-    console.log('[directFetch] Success, rows:', Array.isArray(data) ? data.length : 1);
     return data;
   } catch (error) {
     console.error('[directFetch] Exception:', error);
@@ -82,7 +93,6 @@ function getClient() {
 // =============================================================================
 
 export async function getExtractionJob(jobId: string): Promise<ExtractionJob | null> {
-  console.log('[getExtractionJob] Using direct fetch for:', jobId);
   const data = await directFetch<ExtractionJob[]>(
     `extraction_jobs?id=eq.${jobId}&select=*`
   );
@@ -111,7 +121,6 @@ export async function getProjectExtractionJobs(projectId: string): Promise<Extra
 // =============================================================================
 
 export async function getExtractionPages(jobId: string): Promise<ExtractionPage[]> {
-  console.log('[getExtractionPages] Using direct fetch for job:', jobId);
   const data = await directFetch<ExtractionPage[]>(
     `extraction_pages?job_id=eq.${jobId}&select=*&order=page_number.asc`
   );
@@ -182,12 +191,10 @@ export async function getPageDetections(
 
   // If drafts exist, use them
   if (drafts && drafts.length > 0) {
-    console.log(`[getPageDetections] Found ${drafts.length} drafts for page ${pageId}`);
     return (drafts as unknown as DraftDetection[]).map(mapDraftToDetection);
   }
 
   // No drafts - fall back to original detections
-  console.log(`[getPageDetections] No drafts found for page ${pageId}, loading originals`);
   let query = supabase
     .from('extraction_detection_details')
     .select('*')
@@ -212,7 +219,6 @@ export async function getJobDetections(
   jobId: string,
   includeDeleted = false
 ): Promise<ExtractionDetection[]> {
-  console.log('[getJobDetections] Checking for drafts first for job:', jobId);
 
   // First, check if drafts exist in extraction_detections_draft
   const deletedFilter = includeDeleted ? '' : '&is_deleted=eq.false';
@@ -222,13 +228,11 @@ export async function getJobDetections(
 
   // If drafts exist, use them (user has made edits)
   if (drafts && drafts.length > 0) {
-    console.log(`[getJobDetections] Found ${drafts.length} drafts, using draft data`);
     // Map draft fields to detection format (is_deleted -> status='deleted')
     return drafts.map(mapDraftToDetection);
   }
 
   // No drafts found - fall back to original AI detections
-  console.log('[getJobDetections] No drafts found, loading original detections');
   const statusFilter = includeDeleted ? '' : '&status=neq.deleted';
   const data = await directFetch<ExtractionDetection[]>(
     `extraction_detection_details?job_id=eq.${jobId}&select=*${statusFilter}`
@@ -306,7 +310,6 @@ export async function getElevationCalcs(
 export async function getJobElevationCalcs(
   jobId: string
 ): Promise<ExtractionElevationCalcs[]> {
-  console.log('[getJobElevationCalcs] Using direct fetch for job:', jobId);
   const data = await directFetch<ExtractionElevationCalcs[]>(
     `extraction_elevation_calcs?job_id=eq.${jobId}&select=*`
   );
@@ -314,17 +317,9 @@ export async function getJobElevationCalcs(
 }
 
 export async function getJobTotals(jobId: string): Promise<ExtractionJobTotals | null> {
-  console.log('🟡🟡🟡 [getJobTotals] CALLED with jobId:', jobId);
-  console.log('[getJobTotals] Using direct fetch for job:', jobId);
   const data = await directFetch<ExtractionJobTotals[]>(
     `extraction_job_totals?job_id=eq.${jobId}&select=*`
   );
-  console.log('[getJobTotals] Raw response:', {
-    isNull: data === null,
-    isArray: Array.isArray(data),
-    length: Array.isArray(data) ? data.length : 'N/A',
-    firstRow: Array.isArray(data) && data.length > 0 ? data[0] : null,
-  });
   return data?.[0] || null;
 }
 
@@ -440,18 +435,14 @@ function withTimeout<T>(
 export async function getFullExtractionContext(
   jobId: string
 ): Promise<FullExtractionContext> {
-  console.log('🔴🔴🔴 [getFullExtractionContext] CALLED with jobId:', jobId);
-  console.log('[getFullExtractionContext] Starting fetch for jobId:', jobId);
 
   // Individual query timeout (5 seconds per query)
   const QUERY_TIMEOUT_MS = 5000;
 
   // Fetch all data in parallel with individual logging and timeouts
-  console.log('[getFullExtractionContext] Starting parallel queries...');
 
   const jobPromise = withTimeout(
     getExtractionJob(jobId).then(result => {
-      console.log('[getFullExtractionContext] getExtractionJob completed:', !!result);
       return result;
     }),
     QUERY_TIMEOUT_MS,
@@ -463,7 +454,6 @@ export async function getFullExtractionContext(
 
   const pagesPromise = withTimeout(
     getExtractionPages(jobId).then(result => {
-      console.log('[getFullExtractionContext] getExtractionPages completed:', result.length, 'pages');
       return result;
     }),
     QUERY_TIMEOUT_MS,
@@ -475,7 +465,6 @@ export async function getFullExtractionContext(
 
   const detectionsPromise = withTimeout(
     getJobDetections(jobId, false).then(result => {
-      console.log('[getFullExtractionContext] getJobDetections completed:', result.length, 'detections');
       // Debug: Log breakdown by class and markup_type
       const byClass: Record<string, number> = {};
       const byMarkupType: Record<string, number> = {};
@@ -484,17 +473,7 @@ export async function getFullExtractionContext(
         byClass[d.class] = (byClass[d.class] || 0) + 1;
         byMarkupType[d.markup_type || 'undefined'] = (byMarkupType[d.markup_type || 'undefined'] || 0) + 1;
       });
-      console.log('[getFullExtractionContext] Detection breakdown by class:', byClass);
-      console.log('[getFullExtractionContext] Detection breakdown by markup_type:', byMarkupType);
       if (corners.length > 0) {
-        console.log('[getFullExtractionContext] Corner detections found:', corners.map(c => ({
-          id: c.id.slice(0, 8),
-          class: c.class,
-          markup_type: c.markup_type,
-          page_id: c.page_id.slice(0, 8),
-          pixel_x: c.pixel_x,
-          pixel_y: c.pixel_y
-        })));
       }
       return result;
     }),
@@ -507,7 +486,6 @@ export async function getFullExtractionContext(
 
   const elevationCalcsPromise = withTimeout(
     getJobElevationCalcs(jobId).then(result => {
-      console.log('[getFullExtractionContext] getJobElevationCalcs completed:', result.length, 'calcs');
       return result;
     }),
     QUERY_TIMEOUT_MS,
@@ -517,10 +495,8 @@ export async function getFullExtractionContext(
     return [] as ExtractionElevationCalcs[];
   });
 
-  console.log('🟠🟠🟠 [getFullExtractionContext] About to create jobTotalsPromise for jobId:', jobId);
   const jobTotalsPromise = withTimeout(
     getJobTotals(jobId).then(result => {
-      console.log('[getFullExtractionContext] getJobTotals completed:', !!result);
       return result;
     }),
     QUERY_TIMEOUT_MS,
@@ -529,9 +505,7 @@ export async function getFullExtractionContext(
     console.error('[getFullExtractionContext] getJobTotals failed:', err.message);
     return null;
   });
-  console.log('🟠🟠🟠 [getFullExtractionContext] jobTotalsPromise created');
 
-  console.log('🟣🟣🟣 [getFullExtractionContext] All promises created, about to Promise.all. jobTotalsPromise exists:', !!jobTotalsPromise);
 
   const [job, pages, allDetections, elevationCalcs, jobTotals] = await Promise.all([
     jobPromise,
@@ -541,7 +515,6 @@ export async function getFullExtractionContext(
     jobTotalsPromise,
   ]);
 
-  console.log('[getFullExtractionContext] All queries completed (some may have timed out)');
 
   // Batch lookup material names for detections that have assigned_material_id but no assigned_material_name
   const idsNeedingNames = [...new Set(
@@ -551,7 +524,6 @@ export async function getFullExtractionContext(
   )];
 
   if (idsNeedingNames.length > 0) {
-    console.log('[getFullExtractionContext] Looking up material names for', idsNeedingNames.length, 'items');
     try {
       const materials = await directFetch<{ id: string; product_name: string }[]>(
         `pricing_items?select=id,product_name&id=in.(${idsNeedingNames.join(',')})`
@@ -559,7 +531,6 @@ export async function getFullExtractionContext(
 
       if (materials && materials.length > 0) {
         const nameMap = new Map(materials.map(m => [m.id, m.product_name]));
-        console.log('[getFullExtractionContext] Found names for', nameMap.size, 'materials');
 
         // Apply names to detections
         for (const detection of allDetections) {
@@ -591,7 +562,6 @@ export async function getFullExtractionContext(
     elevationCalcsByPage.set(calc.page_id, calc);
   }
 
-  console.log('[getFullExtractionContext] Returning context');
   return {
     job,
     pages,
@@ -641,7 +611,6 @@ export function subscribeToPageDetections(
       (payload) => {
         // Skip realtime updates while in editing mode to preserve local changes
         if (editingModeRef?.current) {
-          console.log('[subscribeToPageDetections] Skipping INSERT - editing mode active');
           return;
         }
         if (callbacks.onInsert) {
@@ -660,7 +629,6 @@ export function subscribeToPageDetections(
       (payload) => {
         // Skip realtime updates while in editing mode to preserve local changes
         if (editingModeRef?.current) {
-          console.log('[subscribeToPageDetections] Skipping UPDATE - editing mode active');
           return;
         }
         if (callbacks.onUpdate) {
@@ -679,7 +647,6 @@ export function subscribeToPageDetections(
       (payload) => {
         // Skip realtime updates while in editing mode to preserve local changes
         if (editingModeRef?.current) {
-          console.log('[subscribeToPageDetections] Skipping DELETE - editing mode active');
           return;
         }
         if (callbacks.onDelete) {
@@ -689,7 +656,6 @@ export function subscribeToPageDetections(
     )
     .subscribe((status) => {
       if (status === 'SUBSCRIBED') {
-        console.log(`Subscribed to page detections (draft): ${pageId}`);
       }
     });
 
@@ -723,7 +689,6 @@ export function subscribeToJobTotals(
     )
     .subscribe((status) => {
       if (status === 'SUBSCRIBED') {
-        console.log(`Subscribed to job totals: ${jobId}`);
       }
     });
 
@@ -755,19 +720,16 @@ export function subscribeToJobStatus(
       },
       (payload) => {
         if (payload.new) {
-          console.log(`[subscribeToJobStatus] Job ${jobId} updated:`, payload.new.status);
           onStatusChange(payload.new as ExtractionJob);
         }
       }
     )
     .subscribe((status) => {
       if (status === 'SUBSCRIBED') {
-        console.log(`[subscribeToJobStatus] Subscribed to job: ${jobId}`);
       }
     });
 
   return () => {
-    console.log(`[subscribeToJobStatus] Unsubscribing from job: ${jobId}`);
     supabase.removeChannel(channel);
   };
 }
@@ -793,7 +755,6 @@ export function subscribeToAllJobs(
       },
       (payload) => {
         if (payload.new) {
-          console.log('[subscribeToAllJobs] New job inserted:', payload.new.id);
           // Call onJobInsert if provided, otherwise fall back to onJobUpdate
           if (onJobInsert) {
             onJobInsert(payload.new as ExtractionJob);
@@ -812,19 +773,16 @@ export function subscribeToAllJobs(
       },
       (payload) => {
         if (payload.new) {
-          console.log('[subscribeToAllJobs] Job updated:', payload.new.id, '->', payload.new.status);
           onJobUpdate(payload.new as ExtractionJob);
         }
       }
     )
     .subscribe((status) => {
       if (status === 'SUBSCRIBED') {
-        console.log('[subscribeToAllJobs] Subscribed to all extraction jobs');
       }
     });
 
   return () => {
-    console.log('[subscribeToAllJobs] Unsubscribing from all jobs');
     supabase.removeChannel(channel);
   };
 }

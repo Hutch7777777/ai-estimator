@@ -577,14 +577,7 @@ export async function validateDetections(
       pageBreakdown.set(d.page_id, current);
     });
 
-    console.log('[validateDetections] Sending validation request:', {
-      jobId,
-      detectionCount: detections.length,
-      deletedCount: validationRequest.detections.filter((d) => d.is_deleted).length,
-      endpoint: VALIDATE_ENDPOINT,
-    });
     pageBreakdown.forEach((counts, pageId) => {
-      console.log(`[validateDetections] Page ${pageId}: ${counts.total} total, ${counts.deleted} deleted`);
     });
 
     // Log any detections with material assignments or price overrides
@@ -592,12 +585,6 @@ export async function validateDetections(
       (d) => d.assigned_material_id || d.material_cost_override !== null
     );
     if (detectionsWithMaterials.length > 0) {
-      console.log('[validateDetections] Detections with materials/overrides:', detectionsWithMaterials.map((d) => ({
-        source_detection_id: d.source_detection_id,
-        assigned_material_id: d.assigned_material_id,
-        material_cost_override: d.material_cost_override,
-        labor_cost_override: d.labor_cost_override,
-      })));
     }
 
     const response = await fetch(VALIDATE_ENDPOINT, {
@@ -634,12 +621,6 @@ export async function validateDetections(
       };
     }
 
-    console.log('[validateDetections] Response:', {
-      success: result.success,
-      updatedCount: result.updated_count,
-      deletedCount: result.deleted_count,
-      createdCount: result.created_count,
-    });
 
     return {
       ...result,

@@ -132,51 +132,35 @@ export function useExtractionData(
   // ==========================================================================
 
   const fetchData = useCallback(async () => {
-    console.log('[useExtractionData] fetchData called with jobId:', jobId);
 
     // Prevent duplicate fetches
     if (isFetchingRef.current) {
-      console.log('[useExtractionData] Already fetching, skipping duplicate call');
       return;
     }
 
     if (!jobId) {
-      console.log('[useExtractionData] No jobId provided, setting error');
       setError(new Error('No job ID provided'));
       setLoading(false);
       return;
     }
 
-    console.log('[useExtractionData] Setting loading=true');
     isFetchingRef.current = true;
     setLoading(true);
     setError(null);
 
     try {
-      console.log('🔵🔵🔵 [useExtractionData] ABOUT TO CALL getFullExtractionContext for jobId:', jobId);
-      console.log('[useExtractionData] Calling getFullExtractionContext...');
       const context: FullExtractionContext = await getFullExtractionContext(jobId);
-      console.log('[useExtractionData] getFullExtractionContext returned:', {
-        hasJob: !!context.job,
-        pagesCount: context.pages.length,
-        detectionsCount: context.detectionsByPage.size,
-        hasJobTotals: !!context.jobTotals,
-      });
-      console.log('🟢🟢🟢 [useExtractionData] context.jobTotals =', context.jobTotals);
 
       if (!isMountedRef.current) {
-        console.log('[useExtractionData] Component unmounted during fetch, aborting');
         return;
       }
 
       if (!context.job) {
-        console.log('[useExtractionData] No job found in context, setting error');
         setError(new Error('Extraction job not found'));
         setLoading(false);
         return;
       }
 
-      console.log('[useExtractionData] Setting state with fetched data');
       setJob(context.job);
       setPages(context.pages);
       setDetections(context.detectionsByPage);
@@ -187,15 +171,12 @@ export function useExtractionData(
       if (!initialPageId && context.pages.length > 0) {
         const firstElevation = context.pages.find((p) => p.page_type === 'elevation');
         const firstPage = firstElevation || context.pages[0];
-        console.log('[useExtractionData] Auto-selecting page:', firstPage.id);
         setCurrentPageId(firstPage.id);
       }
 
-      console.log('[useExtractionData] Data fetch complete, setting loading=false');
       hasCompletedRef.current = true;
     } catch (err) {
       if (!isMountedRef.current) {
-        console.log('[useExtractionData] Component unmounted during error handling');
         return;
       }
       console.error('[useExtractionData] Error fetching extraction data:', err);
@@ -204,7 +185,6 @@ export function useExtractionData(
     } finally {
       isFetchingRef.current = false;
       if (isMountedRef.current) {
-        console.log('[useExtractionData] Finally block: setting loading=false');
         setLoading(false);
       }
     }
@@ -229,7 +209,6 @@ export function useExtractionData(
   // Initial fetch
   useEffect(() => {
     isMountedRef.current = true;
-    console.log('[useExtractionData] Initial fetch effect running');
     fetchData();
 
     return () => {
@@ -244,14 +223,12 @@ export function useExtractionData(
   const markAsRecentlyEdited = useCallback((detectionId: string) => {
     const expiresAt = Date.now() + RECENTLY_EDITED_TTL_MS;
     recentlyEditedRef.current.set(detectionId, expiresAt);
-    console.log('[useExtractionData] Marked detection as recently edited:', detectionId, 'expires:', new Date(expiresAt).toISOString());
 
     // Auto-cleanup after TTL
     setTimeout(() => {
       const currentExpiry = recentlyEditedRef.current.get(detectionId);
       if (currentExpiry && currentExpiry <= Date.now()) {
         recentlyEditedRef.current.delete(detectionId);
-        console.log('[useExtractionData] Cleared recently edited flag for:', detectionId);
       }
     }, RECENTLY_EDITED_TTL_MS + 100);
   }, []);
@@ -354,7 +331,6 @@ export function useExtractionData(
     if (typeof window !== 'undefined') {
       localStorage.removeItem(`${LOCALSTORAGE_KEY_PREFIX}${jobId}`);
     }
-    console.log('[useExtractionData] Cleared unsaved changes and localStorage backup');
   }, [jobId]);
 
   // Reset to saved state (discard all local changes)
@@ -370,7 +346,6 @@ export function useExtractionData(
     }
     // Re-fetch from database
     await fetchData();
-    console.log('[useExtractionData] Reset to saved state');
   }, [jobId, fetchData]);
 
   // Restore drafts from localStorage
@@ -378,22 +353,18 @@ export function useExtractionData(
     setDetections(drafts);
     setHasUnsavedChanges(true);
     editingModeRef.current = true;
-    console.log('[useExtractionData] Restored drafts from localStorage');
   }, []);
 
   // Get all detections from all pages (for validation submission)
   const getAllDetections = useCallback((): ExtractionDetection[] => {
     const allDetections: ExtractionDetection[] = [];
-    console.log('[getAllDetections] Starting collection from', detections.size, 'pages');
     detections.forEach((pageDetections, pageId) => {
       // Exclude roof detections (disabled feature)
       const filteredDetections = pageDetections.filter(d => d.class !== 'roof');
       const deletedCount = filteredDetections.filter(d => d.status === 'deleted').length;
-      console.log(`[getAllDetections] Page ${pageId}: ${filteredDetections.length} total, ${deletedCount} deleted`);
       allDetections.push(...filteredDetections);
     });
     const totalDeleted = allDetections.filter(d => d.status === 'deleted').length;
-    console.log('[getAllDetections] Total:', allDetections.length, 'detections,', totalDeleted, 'deleted');
     return allDetections;
   }, [detections]);
 
@@ -424,7 +395,6 @@ export function useExtractionData(
         };
 
         localStorage.setItem(`${LOCALSTORAGE_KEY_PREFIX}${jobId}`, JSON.stringify(draftData));
-        console.log('[useExtractionData] Auto-saved drafts to localStorage');
       } catch (err) {
         console.error('[useExtractionData] Failed to save drafts to localStorage:', err);
       }
@@ -473,11 +443,9 @@ export function useExtractionData(
 
           // Skip realtime updates for recently edited detections to preserve optimistic updates
           if (isRecentlyEdited(detection.id)) {
-            console.log('[useExtractionData] Skipping realtime update for recently edited detection:', detection.id);
             return;
           }
 
-          console.log('[useExtractionData] Applying realtime update for detection:', detection.id, 'status:', detection.status);
           setDetections((prev) => {
             const newMap = new Map(prev);
             const pageDetections = newMap.get(detection.page_id) || [];
@@ -640,7 +608,6 @@ export function useExtractionData(
     // Push current state to undo stack BEFORE making changes
     pushToUndoStack();
 
-    console.log('[updateDetectionLocally] Updating detection:', detection.id, 'page:', detection.page_id, 'status:', detection.status);
 
     setDetections((prev) => {
       const newMap = new Map(prev);
@@ -651,7 +618,6 @@ export function useExtractionData(
         const updated = [...pageDetections];
         updated[index] = detection;
         newMap.set(detection.page_id, updated);
-        console.log('[updateDetectionLocally] Updated detection at index', index, 'in page', detection.page_id);
       } else {
         console.warn('[updateDetectionLocally] Detection not found:', detection.id, 'in page', detection.page_id, '- available pages:', Array.from(prev.keys()));
       }

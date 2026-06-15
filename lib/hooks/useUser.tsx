@@ -74,7 +74,6 @@ export function UserProvider({ children }: { children: ReactNode }) {
   // Check for dev bypass after hydration (client-side only)
   useEffect(() => {
     if (isDevBypassEnabled()) {
-      console.log('🔓 DEV AUTH BYPASS ENABLED - Using mock user:', DEV_MOCK_USER.email);
       setIsDevBypass(true);
       setUser(DEV_MOCK_USER);
       setProfile(DEV_MOCK_PROFILE);
@@ -96,7 +95,6 @@ export function UserProvider({ children }: { children: ReactNode }) {
         console.error('Profile fetch error:', error.message);
         // Retry once on failure
         if (retryCount < 1) {
-          console.log('Retrying profile fetch...');
           await new Promise(resolve => setTimeout(resolve, 500));
           return fetchProfile(userId, retryCount + 1);
         }
@@ -107,7 +105,6 @@ export function UserProvider({ children }: { children: ReactNode }) {
       console.error('Profile fetch exception:', err);
       // Retry once on exception
       if (retryCount < 1) {
-        console.log('Retrying profile fetch after exception...');
         await new Promise(resolve => setTimeout(resolve, 500));
         return fetchProfile(userId, retryCount + 1);
       }
@@ -125,7 +122,6 @@ export function UserProvider({ children }: { children: ReactNode }) {
   const signOut = useCallback(async () => {
     // In dev bypass mode, just redirect to login (no actual signout needed)
     if (isDevBypass) {
-      console.log('🔓 DEV BYPASS: Simulating sign out');
       window.location.href = '/login';
       return;
     }
@@ -153,11 +149,9 @@ export function UserProvider({ children }: { children: ReactNode }) {
         supabase.auth.getSession()
           .then(({ data: { session } }) => {
             if (session?.user) {
-              console.log('useUser: Found valid session after timeout');
               setUser(session.user);
               setHasSession(true);
             } else {
-              console.log('useUser: No session found after timeout');
               setHasSession(false);
             }
           })
@@ -176,15 +170,10 @@ export function UserProvider({ children }: { children: ReactNode }) {
     let isMounted = true;
 
     const initialize = async () => {
-      console.log('useUser: Initializing...');
 
       try {
         const { data: { user: authUser }, error } = await supabase.auth.getUser();
 
-        console.log('useUser: getUser result', {
-          userId: authUser?.id,
-          error: error?.message
-        });
 
         if (!isMounted || hasCompletedRef.current) return;
 
@@ -207,7 +196,6 @@ export function UserProvider({ children }: { children: ReactNode }) {
           setProfile(null);
         }
       } finally {
-        console.log('useUser: Setting isLoading to false');
         if (isMounted && !hasCompletedRef.current) {
           hasCompletedRef.current = true;
           setIsLoading(false);
@@ -219,7 +207,6 @@ export function UserProvider({ children }: { children: ReactNode }) {
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (event, session) => {
-        console.log('useUser: Auth state changed:', event);
 
         if (!isMounted) return;
 

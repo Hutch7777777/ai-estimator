@@ -96,7 +96,6 @@ export function OrganizationProvider({ children }: { children: ReactNode }) {
   // Check for dev bypass after hydration (client-side only)
   useEffect(() => {
     if (isDevBypassEnabled()) {
-      console.log('🔓 DEV AUTH BYPASS ENABLED - Using mock organization:', DEV_MOCK_ORGANIZATION.name);
       setIsDevBypass(true);
       setOrganizations([DEV_MOCK_MEMBERSHIP]);
       setCurrentOrgId(DEV_MOCK_ORGANIZATION.id);
@@ -131,7 +130,6 @@ export function OrganizationProvider({ children }: { children: ReactNode }) {
         console.error('Error fetching organizations:', error.message);
         // Retry once on failure
         if (retryCount < 1) {
-          console.log('Retrying organization fetch...');
           await new Promise(resolve => setTimeout(resolve, 500));
           return fetchOrganizations(userId, retryCount + 1);
         }
@@ -139,7 +137,6 @@ export function OrganizationProvider({ children }: { children: ReactNode }) {
       }
 
       if (!data || data.length === 0) {
-        console.log('No organizations found for user:', userId);
         return [];
       }
 
@@ -156,7 +153,6 @@ export function OrganizationProvider({ children }: { children: ReactNode }) {
       console.error('Organization fetch exception:', err);
       // Retry once on exception
       if (retryCount < 1) {
-        console.log('Retrying organization fetch after exception...');
         await new Promise(resolve => setTimeout(resolve, 500));
         return fetchOrganizations(userId, retryCount + 1);
       }
@@ -194,29 +190,20 @@ export function OrganizationProvider({ children }: { children: ReactNode }) {
     const loadOrganizations = async () => {
       // If we've already completed (via timeout), don't restart loading
       if (hasCompletedRef.current) {
-        console.log('useOrganization: Already completed, skipping reload');
         return;
       }
 
-      console.log('useOrganization: Starting loadOrganizations', {
-        isUserLoading,
-        hasUser: !!user,
-        elapsed: Date.now() - mountTimeRef.current
-      });
 
       // If user is still loading but we're approaching timeout, proceed anyway
       const elapsedSinceMount = Date.now() - mountTimeRef.current;
       if (isUserLoading && elapsedSinceMount < LOADING_TIMEOUT_MS - 1000) {
-        console.log('useOrganization: Waiting for user to load...');
         return;
       }
 
       if (isUserLoading) {
-        console.log('useOrganization: User loading timeout, proceeding without user');
       }
 
       if (!user) {
-        console.log('useOrganization: No user, clearing orgs and setting isLoading false');
         if (isMounted && !hasCompletedRef.current) {
           setOrganizations([]);
           setCurrentOrgId(null);
@@ -226,12 +213,10 @@ export function OrganizationProvider({ children }: { children: ReactNode }) {
         return;
       }
 
-      console.log('useOrganization: Fetching organizations for user', user.id);
       const orgs = await fetchOrganizations(user.id);
 
       if (!isMounted || hasCompletedRef.current) return;
 
-      console.log('useOrganization: Fetched orgs', { count: orgs.length, elapsed: Date.now() - loadingStartTime });
       setOrganizations(orgs);
 
       // Try to restore saved org, or use first one
@@ -247,7 +232,6 @@ export function OrganizationProvider({ children }: { children: ReactNode }) {
         }
       }
 
-      console.log('useOrganization: Finished, setting isLoading false');
       hasCompletedRef.current = true;
       setIsLoading(false);
     };
