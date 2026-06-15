@@ -229,6 +229,7 @@ export default function ProjectHubPage() {
   // rows below it. Fallback to the column only when nothing has happened yet.
   const derivedStatus =
     takeoffs.length > 0 ? 'approved' : jobs[0]?.status ?? project?.status ?? 'pending';
+  const latestTakeoff = takeoffs[0] ?? null;
 
   // "City, ST 55104" line: prefer the structured columns; fall back to
   // whatever follows the street in the freeform address.
@@ -294,17 +295,29 @@ export default function ProjectHubPage() {
             )}
           </div>
           <div className="flex items-center gap-2">
-            <Button variant="outline" asChild>
-              <Link href={`/projects/${projectId}/estimate`}>
+            {latestTakeoff ? (
+              <Button variant="outline" asChild>
+                <Link href={`/projects/${projectId}/takeoff/${latestTakeoff.id}`}>
+                  <Calculator className="mr-2 h-4 w-4" />
+                  Open Estimate
+                </Link>
+              </Button>
+            ) : (
+              <Button variant="outline" disabled>
                 <Calculator className="mr-2 h-4 w-4" />
                 Open Estimate
-              </Link>
-            </Button>
+              </Button>
+            )}
             <Button onClick={() => setAddOpen(true)}>
               <Plus className="mr-2 h-4 w-4" />
               Add Measurements
             </Button>
           </div>
+          {!latestTakeoff && (
+            <p className="text-[11px] text-muted-foreground">
+              No takeoff yet — approve a reviewed extraction to generate one.
+            </p>
+          )}
         </div>
       </div>
 
