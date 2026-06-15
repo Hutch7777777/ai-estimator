@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { toast } from "sonner";
 import { useRouter } from "next/navigation";
 import { useOrganization } from "@/lib/hooks/useOrganization";
 import {
@@ -183,7 +184,7 @@ export function ProjectsTable() {
     if (project.excel_url) {
       window.open(project.excel_url, "_blank");
     } else {
-      alert("Excel file not available for this project");
+      toast.warning("Excel file not available for this project");
     }
   };
 
@@ -215,7 +216,7 @@ export function ProjectsTable() {
       setFilteredProjects((prev) => prev.filter((p) => p.id !== projectId));
     } catch (err) {
       console.error("Error deleting project:", err);
-      alert("Failed to delete project. Please try again.");
+      toast.error("Failed to delete project. Please try again.");
     }
   };
 
@@ -239,7 +240,7 @@ export function ProjectsTable() {
   // Export to CSV
   const exportToCSV = () => {
     if (filteredProjects.length === 0) {
-      alert("No projects to export");
+      toast.warning("No projects to export");
       return;
     }
 

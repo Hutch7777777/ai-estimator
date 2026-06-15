@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useMemo, useRef, useState } from "react";
+import { toast } from "sonner";
 import { AgGridReact } from "ag-grid-react";
 import {
   ColDef,
@@ -871,7 +872,7 @@ export function EstimateGrid({
       URL.revokeObjectURL(url);
     } catch (error) {
       console.error('Error exporting grid:', error);
-      alert('Failed to export grid. Please try again.');
+      toast.error('Failed to export grid. Please try again.');
     }
   }, [groupedRowData, pinnedBottomRowData]);
 

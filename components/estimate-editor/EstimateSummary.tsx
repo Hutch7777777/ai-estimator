@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { toast } from "sonner";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
@@ -195,7 +196,7 @@ export function EstimateSummary({
       );
     } catch (error) {
       console.error("Error exporting full estimate:", error);
-      alert("Failed to export estimate. Please try again.");
+      toast.error("Failed to export estimate. Please try again.");
     }
   };
 
@@ -223,7 +224,7 @@ export function EstimateSummary({
       );
     } catch (error) {
       console.error("Error exporting vendor takeoff:", error);
-      alert("Failed to export vendor takeoff. Please try again.");
+      toast.error("Failed to export vendor takeoff. Please try again.");
     }
   };
 
@@ -258,7 +259,7 @@ export function EstimateSummary({
       document.body.removeChild(a);
     } catch (error) {
       console.error('Error generating proposal:', error);
-      alert('Failed to generate proposal. Please try again.');
+      toast.error('Failed to generate proposal. Please try again.');
     } finally {
       setIsGeneratingProposal(false);
     }
