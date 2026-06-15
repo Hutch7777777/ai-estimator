@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { v4 as uuidv4 } from 'uuid';
+import { requireExtractionPageAccess, trustedPageImageUrl } from '@/lib/api/access';
 
 // =============================================================================
 // SAM Segment API Route
@@ -31,7 +32,10 @@ const SAM_FEATURE_ENABLED = false;
 const SAM_MODEL_VERSION = 'meta/sam-2';
 
 interface SAMSegmentRequest {
-  image_url: string;
+  /** Page to segment — the image URL is derived from this server-side. */
+  page_id: string;
+  /** Client claim only; ignored in favor of the DB-derived page image. */
+  image_url?: string;
   click_point: {
     x: number;
     y: number;
@@ -397,17 +401,35 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
   try {
     const body: SAMSegmentRequest = await request.json();
-    const { image_url, click_point, image_width, image_height } = body;
+    const { page_id, image_url, click_point, image_width, image_height } = body;
 
-    console.log('[sam-segment] Image URL:', image_url?.substring(0, 100) + '...');
+    console.log('[sam-segment] Page ID:', page_id);
+    if (image_url) {
+      console.log('[sam-segment] Ignoring client image URL claim:', image_url.substring(0, 80) + '...');
+    }
     console.log('[sam-segment] Click point:', click_point);
     console.log('[sam-segment] Image dimensions:', image_width, 'x', image_height);
 
     // Validate required fields
-    if (!image_url || !click_point || !image_width || !image_height) {
+    if (!page_id || !click_point || !image_width || !image_height) {
       return NextResponse.json(
-        { success: false, error: 'image_url, click_point, image_width, and image_height are required' },
+        { success: false, error: 'page_id, click_point, image_width, and image_height are required' },
         { status: 400 }
+      );
+    }
+
+    // Authenticate + verify the caller owns this page, then derive the image
+    // URL from the DB row (never trust the client-supplied image_url).
+    const pageAccess = await requireExtractionPageAccess(page_id);
+    if (!pageAccess.ok) {
+      return pageAccess.response;
+    }
+
+    const trustedImage = trustedPageImageUrl(pageAccess.data);
+    if (!trustedImage) {
+      return NextResponse.json(
+        { success: false, error: 'Page image not found' },
+        { status: 404 }
       );
     }
 
@@ -419,7 +441,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     if (ROBOFLOW_API_KEY) {
       try {
         result = await segmentWithRoboflow(
-          image_url,
+          trustedImage,
           click_point.x,
           click_point.y,
           image_width,
@@ -436,7 +458,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     if (!result && REPLICATE_API_TOKEN) {
       try {
         result = await segmentWithReplicate(
-          image_url,
+          trustedImage,
           click_point.x,
           click_point.y,
           image_width,

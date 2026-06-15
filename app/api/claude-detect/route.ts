@@ -3,6 +3,30 @@ import Anthropic from '@anthropic-ai/sdk';
 import { PDFDocument } from 'pdf-lib';
 import { requireApiAuth } from '@/lib/api/access';
 
+// Only allow image/PDF URLs that live in our own Supabase Storage origin. This
+// keeps the route from fetching arbitrary attacker-supplied URLs (SSRF) and
+// confines Claude's vision inputs to our storage bucket.
+const STORAGE_ALLOWED_ORIGIN = (() => {
+  try {
+    return process.env.NEXT_PUBLIC_SUPABASE_URL
+      ? new URL(process.env.NEXT_PUBLIC_SUPABASE_URL).origin
+      : null;
+  } catch {
+    return null;
+  }
+})();
+
+function isAllowedStorageUrl(url: unknown): url is string {
+  if (typeof url !== 'string' || url.trim().length === 0) return false;
+  if (!STORAGE_ALLOWED_ORIGIN) return false;
+  try {
+    const parsed = new URL(url);
+    return parsed.origin === STORAGE_ALLOWED_ORIGIN && parsed.pathname.startsWith('/storage/');
+  } catch {
+    return false;
+  }
+}
+
 // =============================================================================
 // Claude Analysis API Route
 // Uses Claude Vision to read specifications and materials from construction drawings
@@ -306,6 +330,21 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     const auth = await requireApiAuth();
     if (!auth.ok) {
       return auth.response;
+    }
+
+    // 2b. Confine every client-supplied URL to our Supabase Storage origin
+    // before any server-side fetch or Claude call — never fetch arbitrary URLs
+    // (SSRF). A present-but-disallowed URL fails the request closed.
+    const candidateUrls: unknown[] = [image_url, pdf_url, ...(pages?.map((p) => p.image_url) ?? [])];
+    const hasDisallowedUrl = candidateUrls.some(
+      (u) => u !== undefined && u !== null && !isAllowedStorageUrl(u)
+    );
+    if (hasDisallowedUrl) {
+      console.error('[claude-analysis] Rejected request with non-storage URL(s)');
+      return NextResponse.json(
+        { success: false, error: 'Image and PDF URLs must reference Supabase storage' },
+        { status: 400 }
+      );
     }
 
     // 3. Get API key
