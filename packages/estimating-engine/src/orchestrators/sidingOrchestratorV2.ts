@@ -198,6 +198,14 @@ interface OrgOverheadConfig {
   mobilization_note?: string;
 }
 
+function asMarkupRate(value: unknown): number | null {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) {
+    return null;
+  }
+  // Project settings store percentages as 10/15, while engine inputs use 0.10/0.15.
+  return value > 1 ? value / 100 : value;
+}
+
 export interface CombinedLineItem {
   description: string;
   sku: string;
@@ -265,6 +273,7 @@ export interface V2CalculationResult {
     rules_evaluated: number;
     rules_triggered: number;
     markup_rate: number;
+    markup_source: string;
     crew_size: number;
     estimated_weeks: number;
     warnings: Array<{ code: string; message: string }>;
@@ -921,7 +930,7 @@ export interface SidingOrchestratorV2Input {
   extractionId?: string;
   webhookMeasurements?: WebhookMeasurements;
   organizationId?: string;
-  /** Default 0.15 in source. Same default applied via destructuring. */
+  /** Decimal project markup override, e.g. 0.10 for 10%. */
   markupRate?: number;
   detectionCounts?: Record<string, {
     count: number;
@@ -957,7 +966,7 @@ export function calculateSidingTakeoff(
     extractionId,
     webhookMeasurements,
     organizationId,
-    markupRate = 0.15,
+    markupRate,
     detectionCounts,
     perMaterialMeasurements,
     spatialContainment,
@@ -1061,6 +1070,16 @@ export function calculateSidingTakeoff(
     config.door_trim_finish = dbEstimateSettings.door_trim_finish || config.door_trim_finish;
   }
 
+  const payloadMarkupRate = asMarkupRate(markupRate);
+  const settingsMarkupRate = asMarkupRate(config.estimate_settings?.markup_percent);
+  const EFFECTIVE_MARKUP_RATE = payloadMarkupRate ?? settingsMarkupRate ?? CALC_MARKUP_RATE;
+  const effectiveMarkupSource =
+    payloadMarkupRate !== null
+      ? 'payload/project markup'
+      : settingsMarkupRate !== null
+        ? 'estimate_settings.markup_percent'
+        : 'calculation_constants.markup_rate';
+
   // =========================================================================
   // DEBUG: Log ALL incoming parameters at function entry
   // =========================================================================
@@ -1069,6 +1088,7 @@ export function calculateSidingTakeoff(
   console.log('   extractionId:', extractionId);
   console.log('   organizationId:', organizationId);
   console.log('   markupRate:', markupRate);
+  console.log('   effectiveMarkupRate:', EFFECTIVE_MARKUP_RATE, `(${effectiveMarkupSource})`);
   console.log('   webhookMeasurements keys:', webhookMeasurements ? Object.keys(webhookMeasurements) : 'undefined');
   console.log('   webhookMeasurements.openings_area_sqft:', (webhookMeasurements as any)?.openings_area_sqft);
   console.log('   webhookMeasurements.windows?.total_area_sqft:', (webhookMeasurements as any)?.windows?.total_area_sqft);
@@ -2822,7 +2842,7 @@ export function calculateSidingTakeoff(
     materialTotal,
     laborSubtotal,
     overheadSubtotal,
-    CALC_MARKUP_RATE,
+    EFFECTIVE_MARKUP_RATE,
     EFFECTIVE_INSURANCE_RATE
   );
 
@@ -2933,7 +2953,8 @@ export function calculateSidingTakeoff(
       measurement_source: autoScopeResult.measurement_source,
       rules_evaluated: autoScopeResult.rules_evaluated,
       rules_triggered: autoScopeResult.rules_triggered,
-      markup_rate: CALC_MARKUP_RATE,
+      markup_rate: EFFECTIVE_MARKUP_RATE,
+      markup_source: effectiveMarkupSource,
       crew_size: CALC_CREW_SIZE,
       estimated_weeks: CALC_ESTIMATED_WEEKS,
       warnings,

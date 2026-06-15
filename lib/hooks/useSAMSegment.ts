@@ -45,6 +45,8 @@ export interface SAMPendingDetection {
 }
 
 export interface UseSAMSegmentOptions {
+  /** Extraction page ID to segment */
+  pageId?: string;
   /** Image URL to segment */
   imageUrl?: string;
   /** Image dimensions for coordinate reference */
@@ -95,6 +97,7 @@ export interface UseSAMSegmentReturn {
 // =============================================================================
 
 export function useSAMSegment({
+  pageId,
   imageUrl,
   imageWidth,
   imageHeight,
@@ -117,8 +120,8 @@ export function useSAMSegment({
    * Perform SAM segmentation with a single click point
    */
   const segment = useCallback(async (clickPoint: { x: number; y: number }) => {
-    if (!imageUrl || !imageWidth || !imageHeight) {
-      const errMsg = 'Image URL and dimensions required for SAM segmentation';
+    if (!pageId || !imageUrl || !imageWidth || !imageHeight) {
+      const errMsg = 'Page, image URL, and dimensions required for SAM segmentation';
       setError(errMsg);
       onError?.(errMsg);
       return;
@@ -140,6 +143,7 @@ export function useSAMSegment({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          page_id: pageId,
           image_url: imageUrl,
           click_point: clickPoint,
           image_width: imageWidth,
@@ -193,14 +197,14 @@ export function useSAMSegment({
     } finally {
       setIsSegmenting(false);
     }
-  }, [imageUrl, imageWidth, imageHeight, onSegmentComplete, onError]);
+  }, [pageId, imageUrl, imageWidth, imageHeight, onSegmentComplete, onError]);
 
   /**
    * Add a refinement point for multi-point segmentation
    * label: 1 = include this area, 0 = exclude this area
    */
   const addRefinementPoint = useCallback(async (point: SAMClickPoint) => {
-    if (!imageUrl || !imageWidth || !imageHeight) {
+    if (!pageId || !imageUrl || !imageWidth || !imageHeight) {
       return;
     }
 
@@ -214,7 +218,7 @@ export function useSAMSegment({
     if (point.label === 1) {
       await segment({ x: point.x, y: point.y });
     }
-  }, [clickPoints, imageUrl, imageWidth, imageHeight, segment]);
+  }, [clickPoints, pageId, imageUrl, imageWidth, imageHeight, segment]);
 
   /**
    * Confirm the current segmentation result with a detection class

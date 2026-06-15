@@ -426,6 +426,7 @@ export default function DetectionEditor({
 
   // SAM Magic Select hook - for click-to-segment precise boundary detection
   const samSegment = useSAMSegment({
+    pageId: currentPageId || undefined,
     imageUrl: currentPage?.original_image_url || currentPage?.image_url || undefined,
     imageWidth: currentPage?.original_width || DEFAULT_IMAGE_WIDTH,
     imageHeight: currentPage?.original_height || DEFAULT_IMAGE_HEIGHT,
