@@ -137,12 +137,17 @@ export default function TakeoffDetailsPage() {
   const [activeTab, setActiveTab] = useState<'summary' | 'plan-intelligence'>('summary');
   const [showRFIModal, setShowRFIModal] = useState(false);
 
-  // Fetch takeoff data
+  // Fetch takeoff data. A client-side timeout guards against a stalled
+  // request so the screen can never sit on the loading skeleton forever.
   const fetchTakeoff = async () => {
     setLoading(true);
     setError(null);
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 12_000);
     try {
-      const response = await fetch(`/api/takeoffs/${takeoffId}`);
+      const response = await fetch(`/api/takeoffs/${takeoffId}`, {
+        signal: controller.signal,
+      });
       const result = await response.json();
 
       if (!result.success) {
@@ -151,8 +156,13 @@ export default function TakeoffDetailsPage() {
 
       setData(result);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'An error occurred');
+      if (err instanceof DOMException && err.name === 'AbortError') {
+        setError('Loading the takeoff timed out. Please try again.');
+      } else {
+        setError(err instanceof Error ? err.message : 'An error occurred');
+      }
     } finally {
+      clearTimeout(timeoutId);
       setLoading(false);
     }
   };

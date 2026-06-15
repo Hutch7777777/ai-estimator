@@ -3,7 +3,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
-import { useOrganization } from "@/lib/hooks/useOrganization";
+import { useOrganization, isDevBypassEnabled } from "@/lib/hooks/useOrganization";
 import { useTakeoffData, useLineItemsSave } from "@/lib/hooks";
 import { LineItemWithState, Project } from "@/lib/types/database";
 import {
@@ -13,9 +13,9 @@ import {
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeletons";
+import { ErrorState } from "@/components/ui/error-state";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
-import { Separator } from "@/components/ui/separator";
 import {
   ArrowLeft,
   AlertCircle,
@@ -34,6 +34,7 @@ export default function ProjectEstimatePage() {
   const [project, setProject] = useState<Project | null>(null);
   const [projectLoading, setProjectLoading] = useState(true);
   const [projectError, setProjectError] = useState<string | null>(null);
+  const [timedOut, setTimedOut] = useState(false);
 
   // Local state for line items (synced with database)
   const [localLineItems, setLocalLineItems] = useState<LineItemWithState[]>([]);
@@ -58,6 +59,29 @@ export default function ProjectEstimatePage() {
     error: saveError,
     lastSaved,
   } = useLineItemsSave();
+
+  // Legacy route: the project hub now opens the concrete takeoff viewer. Keep
+  // this URL useful in local dev by resolving it to the latest generated takeoff.
+  useEffect(() => {
+    if (!isDevBypassEnabled()) return;
+
+    let cancelled = false;
+    fetch(`/api/dev/org-data?hub=${projectId}`)
+      .then((response) => (response.ok ? response.json() : null))
+      .then((data: { takeoffs?: Array<{ id?: string }> } | null) => {
+        const latestTakeoffId = data?.takeoffs?.[0]?.id;
+        if (!cancelled && latestTakeoffId) {
+          router.replace(`/projects/${projectId}/takeoff/${latestTakeoffId}`);
+        }
+      })
+      .catch((error) => {
+        console.error("Failed to resolve latest takeoff:", error);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId, router]);
 
   // Fetch project details with organization ownership verification
   useEffect(() => {
@@ -107,6 +131,19 @@ export default function ProjectEstimatePage() {
     fetchProject();
   }, [projectId, supabase, organization?.id, isOrgLoading]);
 
+  // No-infinite-spinner guard: useTakeoffData has no internal timeout, so a
+  // stalled load could otherwise sit on the skeleton forever. Mirror the
+  // useExtractionData 10s pattern with a slightly longer page-level window.
+  const stillLoading = isOrgLoading || projectLoading || takeoffLoading;
+  useEffect(() => {
+    if (!stillLoading) {
+      setTimedOut(false);
+      return;
+    }
+    const id = setTimeout(() => setTimedOut(true), 12_000);
+    return () => clearTimeout(id);
+  }, [stillLoading]);
+
   // Sync line items from hook to local state
   useEffect(() => {
     setLocalLineItems(lineItems);
@@ -143,8 +180,26 @@ export default function ProjectEstimatePage() {
     }
   }, [localLineItems, saveLineItems, refresh]);
 
+  // Timed-out load — never leave the screen on an endless skeleton.
+  if (stillLoading && timedOut) {
+    return (
+      <div className="container mx-auto py-8">
+        <ErrorState
+          title="Taking longer than expected"
+          message="The estimate is still loading. This can happen if the connection stalls."
+          onRetry={() => {
+            setTimedOut(false);
+            refresh();
+          }}
+          backHref={`/projects/${projectId}`}
+          backLabel="Back to project"
+        />
+      </div>
+    );
+  }
+
   // Loading state
-  if (isOrgLoading || projectLoading || takeoffLoading) {
+  if (stillLoading) {
     return (
       <div className="container mx-auto py-8 space-y-6">
         <Skeleton className="h-12 w-full" />
@@ -185,7 +240,7 @@ export default function ProjectEstimatePage() {
           <AlertCircle className="h-4 w-4" />
           <AlertTitle>No Estimate Available</AlertTitle>
           <AlertDescription>
-            This project doesn't have an estimate yet. Estimates are created automatically
+            This project does not have an estimate yet. Estimates are created automatically
             after HOVER PDF processing is complete.
           </AlertDescription>
         </Alert>
@@ -332,7 +387,7 @@ export default function ProjectEstimatePage() {
           <CardHeader>
             <CardTitle>No Sections</CardTitle>
             <CardDescription>
-              This estimate doesn't have any sections yet.
+              This estimate does not have any sections yet.
             </CardDescription>
           </CardHeader>
         </Card>

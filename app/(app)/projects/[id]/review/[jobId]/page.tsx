@@ -2,9 +2,10 @@
 
 import { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import { Loader2 } from 'lucide-react';
+import { LoadingState } from '@/components/ui/loading-state';
 import { DetectionEditor } from '@/components/detection-editor';
 import { createClient } from '@/lib/supabase/client';
+import { isDevBypassEnabled } from '@/lib/hooks/useOrganization';
 import { toast } from 'sonner';
 import { ClassifyStage } from './ClassifyStage';
 
@@ -25,18 +26,46 @@ export default function ReviewPage() {
 
   useEffect(() => {
     let cancelled = false;
-    const supabase = createClient();
-    supabase
-      .from('extraction_jobs')
-      .select('status')
-      .eq('id', jobId)
-      .single()
-      .then(({ data }) => {
+    const timeoutId = window.setTimeout(() => {
+      if (!cancelled) setStage('editor');
+    }, 5000);
+
+    async function resolveStage() {
+      try {
+        let status: string | null | undefined;
+
+        if (isDevBypassEnabled()) {
+          const endpoint = `extraction_jobs?id=eq.${jobId}&select=status`;
+          const response = await fetch(`/api/dev/org-data?rest=${encodeURIComponent(endpoint)}`);
+          const rows = response.ok ? await response.json() : [];
+          status = Array.isArray(rows) ? rows[0]?.status : undefined;
+        } else {
+          const supabase = createClient();
+          const { data } = await supabase
+            .from('extraction_jobs')
+            .select('status')
+            .eq('id', jobId)
+            .single();
+          status = data?.status;
+        }
+
         if (cancelled) return;
-        setStage(data?.status === 'classified' ? 'classify' : 'editor');
-      });
+        window.clearTimeout(timeoutId);
+        setStage(status === 'classified' ? 'classify' : 'editor');
+      } catch (error) {
+        console.error('Failed to resolve review stage:', error);
+        if (!cancelled) {
+          window.clearTimeout(timeoutId);
+          setStage('editor');
+        }
+      }
+    }
+
+    resolveStage();
+
     return () => {
       cancelled = true;
+      window.clearTimeout(timeoutId);
     };
   }, [jobId]);
 
@@ -51,11 +80,7 @@ export default function ReviewPage() {
   };
 
   if (stage === 'loading') {
-    return (
-      <div className="h-screen flex items-center justify-center">
-        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
-      </div>
-    );
+    return <LoadingState label="Loading review…" className="h-screen" />;
   }
 
   if (stage === 'classify') {
