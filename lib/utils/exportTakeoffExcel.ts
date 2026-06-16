@@ -761,7 +761,7 @@ export async function exportTakeoffToExcel(data: TakeoffData, filename?: string)
   // Grand Total
   summarySheet.getCell(`A${row}`).value = 'PROJECT GRAND TOTAL'; styleGrandTotal(summarySheet.getCell(`A${row}`)); summarySheet.getCell(`A${row}`).alignment = { horizontal: 'right' };
   summarySheet.mergeCells(`A${row}:C${row}`);
-  summarySheet.getCell(`D${row}`).value = { formula: `D${row-2}` }; summarySheet.getCell(`D${row}`).numFmt = '"$"#,##0.00'; styleGrandTotal(summarySheet.getCell(`D${row}`));
+  summarySheet.getCell(`D${row}`).value = safeNum(takeoff.final_price); summarySheet.getCell(`D${row}`).numFmt = '"$"#,##0.00'; styleGrandTotal(summarySheet.getCell(`D${row}`));
   const summaryGrandTotalRow = row;
   row += 2;
 
@@ -840,7 +840,7 @@ export async function exportTakeoffToExcel(data: TakeoffData, filename?: string)
   summarySheet.getCell(`B${row}`).value = markupPercent / 100; summarySheet.getCell(`B${row}`).numFmt = '0%';
   summarySheet.getCell(`B${row}`).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFFFCC' } };
   summarySheet.getCell(`B${row}`).border = { top: { style: 'medium' }, left: { style: 'medium' }, bottom: { style: 'medium' }, right: { style: 'medium' } };
-  summarySheet.getCell(`C${row}`).value = '← Edit this cell to change markup'; summarySheet.getCell(`C${row}`).font = { italic: true, size: 9, color: { argb: 'FF666666' } };
+  summarySheet.getCell(`C${row}`).value = 'Project snapshot from approved takeoff'; summarySheet.getCell(`C${row}`).font = { italic: true, size: 9, color: { argb: 'FF666666' } };
   row += 2;
 
   summarySheet.getCell(`A${row}`).value = 'Notes:'; summarySheet.getCell(`A${row}`).font = { bold: true }; row++;

@@ -424,7 +424,36 @@ async function fetchOrgOverheadConfig(
       });
       return null;
     }
-    const cfg = (data.settings as { overhead_config?: OrgOverheadConfig } | null)?.overhead_config;
+    const settings = data.settings as {
+      overhead_config?: OrgOverheadConfig;
+      estimate_defaults_v1?: {
+        overhead?: {
+          include_dumpster?: boolean;
+          dumpster_cost?: number;
+          include_toilet?: boolean;
+          toilet_cost?: number;
+          mobilization?: number;
+          mobilization_note?: string;
+          li_rate?: number;
+          insurance_rate?: number;
+          crew_size?: number;
+          estimated_weeks?: number;
+        };
+      };
+    } | null;
+    const estimateOverhead = settings?.estimate_defaults_v1?.overhead;
+    const cfg = settings?.overhead_config ?? (estimateOverhead ? {
+      include_dumpster: estimateOverhead.include_dumpster ?? true,
+      dumpster_rate: estimateOverhead.dumpster_cost ?? 1340,
+      include_toilet: estimateOverhead.include_toilet ?? true,
+      toilet_rate: estimateOverhead.toilet_cost ?? 400,
+      mobilization_total: estimateOverhead.mobilization ?? 500,
+      mobilization_note: estimateOverhead.mobilization_note ?? 'Field Walks/Fuel',
+      li_hourly_rate: estimateOverhead.li_rate ?? 4.68,
+      insurance_rate_per_thousand: estimateOverhead.insurance_rate ?? 16.5,
+      crew_size: estimateOverhead.crew_size,
+      estimated_weeks: estimateOverhead.estimated_weeks,
+    } : null);
     // TEMP DEBUG
     console.log('[refData orgOverheadConfig]', {
       found: !!cfg,

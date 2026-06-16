@@ -192,7 +192,7 @@ export function HoverUploadStep({ data, onUpdate }: HoverUploadStepProps) {
       client_name: data.customerName,
       address: data.address,
       selected_trades: data.selectedTrades,
-      markup_percent: data.configurations?.siding?.markup_percent ?? data.markupPercent ?? 15, // Use siding markup, fallback to global, default 15
+      markup_percent: data.markupPercent ?? cleanedSiding.markup_percent ?? 15,
       siding: cleanedSiding,
       roofing: cleanedRoofing,
       windows: cleanedWindows,
@@ -205,7 +205,7 @@ export function HoverUploadStep({ data, onUpdate }: HoverUploadStepProps) {
   };
 
   // Trigger n8n workflow (proxied through Next.js API to avoid CORS)
-  const triggerWorkflow = async (projectData: any) => {
+  const triggerWorkflow = async (projectData: Record<string, unknown>) => {
     const response = await fetch('/api/n8n/multi-trade-coordinator', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -278,11 +278,17 @@ export function HoverUploadStep({ data, onUpdate }: HoverUploadStepProps) {
       if (dbError) throw new Error(`Database error: ${dbError.message}`);
 
       // Save configurations for each trade
-      const configInserts = data.selectedTrades.map(trade => ({
-        project_id: tempProjectId,
-        trade,
-        configuration_data: data.configurations?.[trade] || {}
-      }));
+      const configInserts = data.selectedTrades.map(trade => {
+        const configurationData = data.configurations?.[trade] || {};
+
+        return {
+          project_id: tempProjectId,
+          trade,
+          configuration_data: trade === 'siding'
+            ? { ...configurationData, markup_percent: data.markupPercent }
+            : configurationData,
+        };
+      });
 
       const { error: configError } = await supabase
         .from('project_configurations')

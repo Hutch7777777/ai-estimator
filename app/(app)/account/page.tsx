@@ -3,7 +3,7 @@
 import { Suspense, useState, useEffect } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
-import { ArrowLeft, Loader2, User, Building2, Users, HelpCircle, CreditCard, Save, ChevronDown, ChevronUp, Trash2, Package, Calculator, Briefcase, Info } from 'lucide-react';
+import { ArrowLeft, Loader2, User, Building2, Users, HelpCircle, CreditCard, Save, ChevronDown, ChevronUp, Trash2, Package, Calculator, Briefcase, Info, CheckCircle2 } from 'lucide-react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -17,11 +17,25 @@ import { toast } from 'sonner';
 import { NoOrganization } from '@/components/no-organization';
 import { resolveSettings } from '@/lib/types/organization';
 import { ProductSelector } from '@/components/settings/ProductSelector';
+import {
+  DEFAULT_ESTIMATE_DEFAULTS_V1,
+  TRIM_SYSTEM_INFO,
+  WRB_PRODUCTS,
+} from '@/lib/estimate-settings/defaults';
+import { resolveOrganizationEstimateDefaults } from '@/lib/estimate-settings/resolve';
+import type {
+  EstimateConfig,
+  EstimateDefaultsV1,
+  OverheadSettings,
+  TrimSystem,
+  WRBProductId,
+} from '@/lib/estimate-settings/types';
 
 function AccountSettingsContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const initialTab = searchParams.get('tab') || 'profile';
+  const requestedTab = searchParams.get('tab') || 'profile';
+  const initialTab = requestedTab === 'usage' ? 'billing' : requestedTab;
 
   const { user, profile, refreshProfile, isLoading: isUserLoading } = useUser();
   const { organization, isOwner, isAdmin, refreshOrganization, isLoading: isOrgLoading, hasNoOrganizations } = useOrganization();
@@ -40,16 +54,7 @@ function AccountSettingsContent() {
 
   // Company form state - General
   const [companyName, setCompanyName] = useState('');
-  const [defaultMarkup, setDefaultMarkup] = useState('');
   const [timezone, setTimezone] = useState('');
-
-  // Company form state - Labor Rates
-  const [liInsuranceRate, setLiInsuranceRate] = useState('12.65');
-  const [unemploymentRate, setUnemploymentRate] = useState('6.60');
-  const [wasteFactorPercent, setWasteFactorPercent] = useState('12');
-  const [overheadMultiplier, setOverheadMultiplier] = useState('1.0');
-  const [baseLaborRateHourly, setBaseLaborRateHourly] = useState('');
-  const [defaultCrewSize, setDefaultCrewSize] = useState('');
 
   // Company form state - Business Info
   const [licenseNumber, setLicenseNumber] = useState('');
@@ -60,6 +65,9 @@ function AccountSettingsContent() {
   const [companyTagline, setCompanyTagline] = useState('');
   const [estimateContactPhone, setEstimateContactPhone] = useState('');
   const [estimateContactEmail, setEstimateContactEmail] = useState('');
+
+  // Organization estimate defaults
+  const [estimateDefaults, setEstimateDefaults] = useState<EstimateDefaultsV1>(DEFAULT_ESTIMATE_DEFAULTS_V1);
 
   // Material Defaults
   const [defaultTrimSku, setDefaultTrimSku] = useState<string | null>(null);
@@ -84,7 +92,9 @@ function AccountSettingsContent() {
 
   // Usage stats (org-scoped, current month) — null = not yet loaded / unavailable
   const [usageProjects, setUsageProjects] = useState<number | null>(null);
-  const [usagePdfs, setUsagePdfs] = useState<number | null>(null);
+  const [usageExtractionJobs, setUsageExtractionJobs] = useState<number | null>(null);
+  const [usagePdfPages, setUsagePdfPages] = useState<number | null>(null);
+  const [usageTakeoffs, setUsageTakeoffs] = useState<number | null>(null);
 
   const supabase = createClient();
 
@@ -102,7 +112,7 @@ function AccountSettingsContent() {
       monthStart.setHours(0, 0, 0, 0);
       const since = monthStart.toISOString();
 
-      const [projectsRes, pdfsRes] = await Promise.all([
+      const [projectsRes, extractionJobsRes, takeoffsRes] = await Promise.all([
         supabase
           .from('projects')
           .select('id', { count: 'exact', head: true })
@@ -110,13 +120,25 @@ function AccountSettingsContent() {
           .gte('created_at', since),
         supabase
           .from('extraction_jobs')
+          .select('total_pages, projects!inner(organization_id)', { count: 'exact' })
+          .eq('projects.organization_id', organization.id)
+          .gte('created_at', since),
+        supabase
+          .from('takeoffs')
           .select('id, projects!inner(organization_id)', { count: 'exact', head: true })
           .eq('projects.organization_id', organization.id)
           .gte('created_at', since),
       ]);
 
+      const extractionJobs = (extractionJobsRes.data || []) as Array<{ total_pages: number | string | null }>;
+
       setUsageProjects(projectsRes.error ? null : projectsRes.count ?? 0);
-      setUsagePdfs(pdfsRes.error ? null : pdfsRes.count ?? 0);
+      setUsageExtractionJobs(extractionJobsRes.error ? null : extractionJobsRes.count ?? 0);
+      setUsagePdfPages(extractionJobsRes.error
+        ? null
+        : extractionJobs.reduce((sum, job) => sum + (Number(job.total_pages) || 0), 0)
+      );
+      setUsageTakeoffs(takeoffsRes.error ? null : takeoffsRes.count ?? 0);
     };
 
     loadUsageStats();
@@ -154,16 +176,8 @@ function AccountSettingsContent() {
 
       // General settings
       setCompanyName(organization.name || '');
-      setDefaultMarkup(settings.default_markup_percent?.toString() || '35');
       setTimezone(settings.timezone || 'America/Los_Angeles');
-
-      // Labor rates
-      setLiInsuranceRate(settings.labor_rates?.li_insurance_rate_percent?.toString() || '12.65');
-      setUnemploymentRate(settings.labor_rates?.unemployment_rate_percent?.toString() || '6.60');
-      setWasteFactorPercent(settings.labor_rates?.default_waste_factor_percent?.toString() || '12');
-      setOverheadMultiplier(settings.labor_rates?.overhead_multiplier?.toString() || '1.0');
-      setBaseLaborRateHourly(settings.labor_rates?.base_labor_rate_hourly?.toString() || '');
-      setDefaultCrewSize(settings.labor_rates?.default_crew_size?.toString() || '');
+      setEstimateDefaults(resolveOrganizationEstimateDefaults(organization.settings));
 
       // Business info
       setLicenseNumber(settings.business_info?.license_number || '');
@@ -187,8 +201,32 @@ function AccountSettingsContent() {
     }
   }, [organization]);
 
-  // Calculate total burden rate for display
-  const totalBurdenRate = (parseFloat(liInsuranceRate) || 0) + (parseFloat(unemploymentRate) || 0);
+  const updateEstimateDefaults = (patch: Partial<EstimateDefaultsV1>) => {
+    setEstimateDefaults(prev => ({ ...prev, ...patch }));
+  };
+
+  const updateEstimateSection = <K extends keyof EstimateConfig>(
+    section: K,
+    patch: Partial<EstimateConfig[K]>
+  ) => {
+    setEstimateDefaults(prev => ({
+      ...prev,
+      [section]: {
+        ...(prev[section] as unknown as Record<string, unknown>),
+        ...(patch as unknown as Record<string, unknown>),
+      },
+    }));
+  };
+
+  const updateOverheadDefaults = (patch: Partial<OverheadSettings>) => {
+    updateEstimateSection('overhead', patch);
+  };
+
+  const resetEstimateDefaultsDraft = () => {
+    if (!organization) return;
+    setEstimateDefaults(resolveOrganizationEstimateDefaults(organization.settings));
+    toast.info('Estimate defaults reverted');
+  };
 
   // Load team members
   useEffect(() => {
@@ -257,7 +295,7 @@ function AccountSettingsContent() {
       if (metaError) throw metaError;
 
       // Update user_profiles table if it exists
-      const { error: profileError } = await supabase
+      const { error: profileError } = await (supabase as any)
         .from('user_profiles')
         .upsert({
           id: user.id,
@@ -309,27 +347,70 @@ function AccountSettingsContent() {
     }
   };
 
+  const handleSaveEstimateDefaults = async () => {
+    if (!organization) return;
+    setIsSaving(true);
+
+    const nextEstimateDefaults: EstimateDefaultsV1 = {
+      ...estimateDefaults,
+      wrb_product: (estimateDefaults.wrb_product || estimateDefaults.wrb.product || null) as WRBProductId,
+      wrb: {
+        ...estimateDefaults.wrb,
+        product: (estimateDefaults.wrb.product || estimateDefaults.wrb_product || null) as WRBProductId,
+      },
+    };
+    const settings = resolveSettings(organization.settings);
+
+    try {
+      const { error } = await (supabase as any)
+        .from('organizations')
+        .update({
+          settings: {
+            ...organization.settings,
+            default_markup_percent: nextEstimateDefaults.markup_percent,
+            estimate_defaults_v1: nextEstimateDefaults,
+            labor_rates: {
+              ...settings.labor_rates,
+              default_crew_size: nextEstimateDefaults.overhead.crew_size,
+            },
+            overhead_config: {
+              ...((organization.settings?.overhead_config as Record<string, unknown> | undefined) || {}),
+              include_dumpster: nextEstimateDefaults.overhead.include_dumpster,
+              dumpster_rate: nextEstimateDefaults.overhead.dumpster_cost,
+              include_toilet: nextEstimateDefaults.overhead.include_toilet,
+              toilet_rate: nextEstimateDefaults.overhead.toilet_cost,
+              mobilization_total: nextEstimateDefaults.overhead.mobilization,
+              mobilization_note: nextEstimateDefaults.overhead.mobilization_note,
+              li_hourly_rate: nextEstimateDefaults.overhead.li_rate,
+              insurance_rate_per_thousand: nextEstimateDefaults.overhead.insurance_rate,
+            },
+          }
+        })
+        .eq('id', organization.id);
+
+      if (error) throw error;
+
+      await refreshOrganization();
+      toast.success('Estimate defaults updated');
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to update estimate defaults');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
   const handleSaveCompany = async () => {
     if (!organization) return;
     setIsSaving(true);
 
     try {
-      const { error } = await supabase
+      const { error } = await (supabase as any)
         .from('organizations')
         .update({
           name: companyName,
           settings: {
             ...organization.settings,
-            default_markup_percent: defaultMarkup ? parseFloat(defaultMarkup) : 35,
             timezone: timezone,
-            labor_rates: {
-              li_insurance_rate_percent: parseFloat(liInsuranceRate) || 12.65,
-              unemployment_rate_percent: parseFloat(unemploymentRate) || 6.60,
-              default_waste_factor_percent: parseFloat(wasteFactorPercent) || 12,
-              overhead_multiplier: parseFloat(overheadMultiplier) || 1.0,
-              base_labor_rate_hourly: baseLaborRateHourly ? parseFloat(baseLaborRateHourly) : null,
-              default_crew_size: defaultCrewSize ? parseInt(defaultCrewSize, 10) : null,
-            },
             business_info: {
               license_number: licenseNumber || null,
               insurance_policy_number: insurancePolicyNumber || null,
@@ -360,7 +441,7 @@ function AccountSettingsContent() {
     setIsSaving(true);
 
     try {
-      const { error } = await supabase
+      const { error } = await (supabase as any)
         .from('organizations')
         .update({
           settings: {
@@ -412,7 +493,7 @@ function AccountSettingsContent() {
 
   const handleChangeMemberRole = async (memberId: string, newRole: string) => {
     try {
-      const { error } = await supabase
+      const { error } = await (supabase as any)
         .from('organization_memberships')
         .update({ role: newRole })
         .eq('id', memberId);
@@ -438,7 +519,7 @@ function AccountSettingsContent() {
     if (!ok) return;
 
     try {
-      const { error } = await supabase
+      const { error } = await (supabase as any)
         .from('organization_memberships')
         .delete()
         .eq('id', memberId);
@@ -539,6 +620,12 @@ function AccountSettingsContent() {
               <TabsTrigger value="company" className="data-[state=active]:bg-accent">
                 <Building2 className="mr-2 h-4 w-4" />
                 Company
+              </TabsTrigger>
+            )}
+            {isAdmin && (
+              <TabsTrigger value="defaults" className="data-[state=active]:bg-accent">
+                <Calculator className="mr-2 h-4 w-4" />
+                Estimate Defaults
               </TabsTrigger>
             )}
             {isAdmin && (
@@ -687,150 +774,6 @@ function AccountSettingsContent() {
                 </div>
               </div>
 
-              {/* Pricing & Labor Rates Section */}
-              <div className="bg-white border border-border rounded-lg p-6 shadow-sm space-y-6">
-                <div className="flex items-center gap-2">
-                  <div className="p-2 rounded-lg bg-green-100">
-                    <Calculator className="h-5 w-5 text-green-600" />
-                  </div>
-                  <div>
-                    <h2 className="text-lg font-semibold text-foreground">Pricing & Labor Rates</h2>
-                    <p className="text-sm text-muted-foreground">Configure markup and labor burden rates for estimates</p>
-                  </div>
-                </div>
-
-                <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                  <div className="space-y-2">
-                    <Label htmlFor="defaultMarkup">Default Markup (%)</Label>
-                    <div className="relative">
-                      <Input
-                        id="defaultMarkup"
-                        type="number"
-                        step="0.1"
-                        value={defaultMarkup}
-                        onChange={(e) => setDefaultMarkup(e.target.value)}
-                        placeholder="35"
-                        className="pr-8"
-                      />
-                      <span className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground">%</span>
-                    </div>
-                    <p className="text-xs text-muted-foreground">Applied to all estimates</p>
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="liInsuranceRate">L&I Insurance Rate (%)</Label>
-                    <div className="relative">
-                      <Input
-                        id="liInsuranceRate"
-                        type="number"
-                        step="0.01"
-                        value={liInsuranceRate}
-                        onChange={(e) => setLiInsuranceRate(e.target.value)}
-                        placeholder="12.65"
-                        className="pr-8"
-                      />
-                      <span className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground">%</span>
-                    </div>
-                    <p className="text-xs text-muted-foreground">Washington State L&I</p>
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="unemploymentRate">Unemployment Rate (%)</Label>
-                    <div className="relative">
-                      <Input
-                        id="unemploymentRate"
-                        type="number"
-                        step="0.01"
-                        value={unemploymentRate}
-                        onChange={(e) => setUnemploymentRate(e.target.value)}
-                        placeholder="6.60"
-                        className="pr-8"
-                      />
-                      <span className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground">%</span>
-                    </div>
-                    <p className="text-xs text-muted-foreground">State unemployment tax</p>
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="wasteFactorPercent">Default Waste Factor (%)</Label>
-                    <div className="relative">
-                      <Input
-                        id="wasteFactorPercent"
-                        type="number"
-                        step="1"
-                        value={wasteFactorPercent}
-                        onChange={(e) => setWasteFactorPercent(e.target.value)}
-                        placeholder="12"
-                        className="pr-8"
-                      />
-                      <span className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground">%</span>
-                    </div>
-                    <p className="text-xs text-muted-foreground">Added to material quantities</p>
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="overheadMultiplier">Overhead Multiplier</Label>
-                    <Input
-                      id="overheadMultiplier"
-                      type="number"
-                      step="0.1"
-                      value={overheadMultiplier}
-                      onChange={(e) => setOverheadMultiplier(e.target.value)}
-                      placeholder="1.0"
-                    />
-                    <p className="text-xs text-muted-foreground">1.0 = no additional overhead</p>
-                  </div>
-                </div>
-
-                {/* Labor Burden Summary */}
-                <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-                  <div className="flex items-start gap-3">
-                    <Info className="h-5 w-5 text-blue-600 mt-0.5" />
-                    <div>
-                      <p className="font-medium text-blue-900">Total Labor Burden Rate</p>
-                      <p className="text-sm text-blue-700 mt-1">
-                        L&I ({liInsuranceRate || '0'}%) + Unemployment ({unemploymentRate || '0'}%) = <span className="font-bold">{totalBurdenRate.toFixed(2)}%</span>
-                      </p>
-                      <p className="text-xs text-blue-600 mt-1">
-                        This rate is applied to base labor costs in all estimates.
-                      </p>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Optional Advanced Settings */}
-                <div className="border-t border-border pt-4">
-                  <p className="text-sm font-medium text-muted-foreground mb-3">Advanced Settings (Optional)</p>
-                  <div className="grid gap-4 sm:grid-cols-2">
-                    <div className="space-y-2">
-                      <Label htmlFor="baseLaborRateHourly">Base Labor Rate ($/hr)</Label>
-                      <div className="relative">
-                        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground">$</span>
-                        <Input
-                          id="baseLaborRateHourly"
-                          type="number"
-                          step="0.01"
-                          value={baseLaborRateHourly}
-                          onChange={(e) => setBaseLaborRateHourly(e.target.value)}
-                          placeholder="45.00"
-                          className="pl-7"
-                        />
-                      </div>
-                      <p className="text-xs text-muted-foreground">Hourly rate for labor calculations</p>
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="defaultCrewSize">Default Crew Size</Label>
-                      <Input
-                        id="defaultCrewSize"
-                        type="number"
-                        step="1"
-                        min="1"
-                        value={defaultCrewSize}
-                        onChange={(e) => setDefaultCrewSize(e.target.value)}
-                        placeholder="3"
-                      />
-                      <p className="text-xs text-muted-foreground">Number of workers per crew</p>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
               {/* Business Information Section */}
               <div className="bg-white border border-border rounded-lg p-6 shadow-sm space-y-6">
                 <div className="flex items-center gap-2">
@@ -935,6 +878,304 @@ function AccountSettingsContent() {
                   {isSaving ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Save className="h-4 w-4 mr-2" />}
                   Save All Company Settings
                 </Button>
+              </div>
+            </div>
+          </TabsContent>
+
+          {/* Estimate Defaults Tab */}
+          <TabsContent value="defaults">
+            <div className="space-y-6">
+              <div className="bg-white border border-border rounded-lg p-6 shadow-sm space-y-6">
+                <div className="flex items-start justify-between gap-4">
+                  <div className="flex items-start gap-3">
+                    <div className="p-2 rounded-lg bg-green-100">
+                      <Calculator className="h-5 w-5 text-green-600" />
+                    </div>
+                    <div>
+                      <h2 className="text-lg font-semibold text-foreground">Estimate Defaults</h2>
+                      <p className="text-sm text-muted-foreground">
+                        These defaults seed new projects. Existing projects keep their saved job settings.
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex gap-2">
+                    <Button variant="outline" onClick={resetEstimateDefaultsDraft} disabled={isSaving}>
+                      Cancel
+                    </Button>
+                    <Button onClick={handleSaveEstimateDefaults} disabled={isSaving}>
+                      {isSaving ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Save className="h-4 w-4 mr-2" />}
+                      Save Defaults
+                    </Button>
+                  </div>
+                </div>
+
+                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                  {[
+                    { label: 'Company info', complete: Boolean(companyName && (estimateContactEmail || estimateContactPhone)) },
+                    { label: 'Estimate defaults', complete: Boolean(estimateDefaults.markup_percent && estimateDefaults.trim_system) },
+                    { label: 'Material defaults', complete: Boolean(defaultSidingSku || defaultTrimSku || defaultWrbSku) },
+                    { label: 'Team access', complete: Boolean(organization && isAdmin) },
+                  ].map(item => (
+                    <div key={item.label} className="flex items-center gap-2 rounded-lg border border-border bg-muted/40 px-3 py-2">
+                      <CheckCircle2 className={`h-4 w-4 ${item.complete ? 'text-green-600' : 'text-muted-foreground'}`} />
+                      <span className="text-sm font-medium text-foreground">{item.label}</span>
+                    </div>
+                  ))}
+                </div>
+
+                <div className="grid gap-4 sm:grid-cols-3">
+                  <div className="space-y-2">
+                    <Label htmlFor="estimateDefaultMarkup">Markup (%)</Label>
+                    <div className="relative">
+                      <Input
+                        id="estimateDefaultMarkup"
+                        type="number"
+                        min="0"
+                        max="100"
+                        step="0.1"
+                        value={estimateDefaults.markup_percent}
+                        onChange={(e) => updateEstimateDefaults({ markup_percent: parseFloat(e.target.value) || 0 })}
+                        className="pr-8"
+                      />
+                      <span className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground">%</span>
+                    </div>
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="estimateDefaultTrim">Trim System</Label>
+                    <select
+                      id="estimateDefaultTrim"
+                      value={estimateDefaults.trim_system}
+                      onChange={(e) => updateEstimateDefaults({ trim_system: e.target.value as TrimSystem })}
+                      className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    >
+                      {Object.entries(TRIM_SYSTEM_INFO).map(([value, info]) => (
+                        <option key={value} value={value}>{info.label}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="estimateDefaultWrb">WRB / Weather Barrier</Label>
+                    <select
+                      id="estimateDefaultWrb"
+                      value={estimateDefaults.wrb.product || ''}
+                      onChange={(e) => {
+                        const product = (e.target.value || null) as WRBProductId;
+                        updateEstimateDefaults({ wrb_product: product });
+                        updateEstimateSection('wrb', { product });
+                      }}
+                      className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    >
+                      <option value="">None</option>
+                      {WRB_PRODUCTS.map(product => (
+                        <option key={product.value} value={product.value}>{product.label}</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+              </div>
+
+              <div className="grid gap-6 lg:grid-cols-2">
+                <div className="bg-white border border-border rounded-lg p-6 shadow-sm space-y-4">
+                  <h3 className="text-sm font-semibold text-foreground">Trim & WRB Rules</h3>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <label className="flex items-center gap-2 text-sm">
+                      <input
+                        type="checkbox"
+                        checked={estimateDefaults.window_trim.include}
+                        onChange={(e) => updateEstimateSection('window_trim', { include: e.target.checked })}
+                      />
+                      Window trim
+                    </label>
+                    <label className="flex items-center gap-2 text-sm">
+                      <input
+                        type="checkbox"
+                        checked={estimateDefaults.door_trim.include}
+                        onChange={(e) => updateEstimateSection('door_trim', { include: e.target.checked })}
+                      />
+                      Door trim
+                    </label>
+                    <label className="flex items-center gap-2 text-sm">
+                      <input
+                        type="checkbox"
+                        checked={estimateDefaults.top_out.include}
+                        onChange={(e) => updateEstimateSection('top_out', { include: e.target.checked })}
+                      />
+                      Top-out trim
+                    </label>
+                    <label className="flex items-center gap-2 text-sm">
+                      <input
+                        type="checkbox"
+                        checked={estimateDefaults.belly_band.include}
+                        onChange={(e) => updateEstimateSection('belly_band', { include: e.target.checked })}
+                      />
+                      Belly band
+                    </label>
+                    <label className="flex items-center gap-2 text-sm">
+                      <input
+                        type="checkbox"
+                        checked={estimateDefaults.corners.include_inside}
+                        onChange={(e) => updateEstimateSection('corners', { include_inside: e.target.checked })}
+                      />
+                      Inside corners
+                    </label>
+                    <label className="flex items-center gap-2 text-sm">
+                      <input
+                        type="checkbox"
+                        checked={estimateDefaults.wrb.include_seam_tape}
+                        onChange={(e) => updateEstimateSection('wrb', { include_seam_tape: e.target.checked })}
+                      />
+                      WRB seam tape
+                    </label>
+                  </div>
+                </div>
+
+                <div className="bg-white border border-border rounded-lg p-6 shadow-sm space-y-4">
+                  <h3 className="text-sm font-semibold text-foreground">Flashing & Consumables</h3>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <label className="flex items-center gap-2 text-sm">
+                      <input
+                        type="checkbox"
+                        checked={estimateDefaults.flashing.include_kickout}
+                        onChange={(e) => updateEstimateSection('flashing', { include_kickout: e.target.checked })}
+                      />
+                      Kickout flashing
+                    </label>
+                    <label className="flex items-center gap-2 text-sm">
+                      <input
+                        type="checkbox"
+                        checked={estimateDefaults.flashing.include_joint_flashing}
+                        onChange={(e) => updateEstimateSection('flashing', { include_joint_flashing: e.target.checked })}
+                      />
+                      Joint flashing
+                    </label>
+                    <label className="flex items-center gap-2 text-sm">
+                      <input
+                        type="checkbox"
+                        checked={estimateDefaults.consumables.include_color_matched_caulk}
+                        onChange={(e) => updateEstimateSection('consumables', { include_color_matched_caulk: e.target.checked })}
+                      />
+                      Color-matched caulk
+                    </label>
+                    <label className="flex items-center gap-2 text-sm">
+                      <input
+                        type="checkbox"
+                        checked={estimateDefaults.consumables.include_hardie_blades}
+                        onChange={(e) => updateEstimateSection('consumables', { include_hardie_blades: e.target.checked })}
+                      />
+                      Hardie blades
+                    </label>
+                    <label className="flex items-center gap-2 text-sm">
+                      <input
+                        type="checkbox"
+                        checked={estimateDefaults.consumables.include_siding_nails}
+                        onChange={(e) => updateEstimateSection('consumables', { include_siding_nails: e.target.checked })}
+                      />
+                      Siding nails
+                    </label>
+                    <label className="flex items-center gap-2 text-sm">
+                      <input
+                        type="checkbox"
+                        checked={estimateDefaults.consumables.include_trim_nails}
+                        onChange={(e) => updateEstimateSection('consumables', { include_trim_nails: e.target.checked })}
+                      />
+                      Trim nails
+                    </label>
+                  </div>
+                </div>
+              </div>
+
+              <div className="bg-white border border-border rounded-lg p-6 shadow-sm space-y-6">
+                <div>
+                  <h3 className="text-sm font-semibold text-foreground">Overhead, Insurance & Crew</h3>
+                  <p className="text-sm text-muted-foreground">
+                    These values seed new project snapshots and can be overridden per job in the editor.
+                  </p>
+                </div>
+                <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                  <label className="flex items-center gap-2 text-sm">
+                    <input
+                      type="checkbox"
+                      checked={estimateDefaults.overhead.include_dumpster}
+                      onChange={(e) => updateOverheadDefaults({ include_dumpster: e.target.checked })}
+                    />
+                    Include dumpster
+                  </label>
+                  <div className="space-y-2">
+                    <Label htmlFor="dumpsterCost">Dumpster Cost</Label>
+                    <Input
+                      id="dumpsterCost"
+                      type="number"
+                      value={estimateDefaults.overhead.dumpster_cost}
+                      onChange={(e) => updateOverheadDefaults({ dumpster_cost: parseFloat(e.target.value) || 0 })}
+                    />
+                  </div>
+                  <label className="flex items-center gap-2 text-sm">
+                    <input
+                      type="checkbox"
+                      checked={estimateDefaults.overhead.include_toilet}
+                      onChange={(e) => updateOverheadDefaults({ include_toilet: e.target.checked })}
+                    />
+                    Include toilet
+                  </label>
+                  <div className="space-y-2">
+                    <Label htmlFor="toiletCost">Toilet Cost</Label>
+                    <Input
+                      id="toiletCost"
+                      type="number"
+                      value={estimateDefaults.overhead.toilet_cost}
+                      onChange={(e) => updateOverheadDefaults({ toilet_cost: parseFloat(e.target.value) || 0 })}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="mobilizationCost">Mobilization</Label>
+                    <Input
+                      id="mobilizationCost"
+                      type="number"
+                      value={estimateDefaults.overhead.mobilization}
+                      onChange={(e) => updateOverheadDefaults({ mobilization: parseFloat(e.target.value) || 0 })}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="liHourlyRate">L&I Rate ($/hr)</Label>
+                    <Input
+                      id="liHourlyRate"
+                      type="number"
+                      step="0.01"
+                      value={estimateDefaults.overhead.li_rate}
+                      onChange={(e) => updateOverheadDefaults({ li_rate: parseFloat(e.target.value) || 0 })}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="insuranceRate">Insurance / $1K</Label>
+                    <Input
+                      id="insuranceRate"
+                      type="number"
+                      step="0.01"
+                      value={estimateDefaults.overhead.insurance_rate}
+                      onChange={(e) => updateOverheadDefaults({ insurance_rate: parseFloat(e.target.value) || 0 })}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="defaultWeeks">Crew / Weeks</Label>
+                    <div className="grid grid-cols-2 gap-2">
+                      <Input
+                        id="defaultCrew"
+                        type="number"
+                        min="1"
+                        value={estimateDefaults.overhead.crew_size}
+                        onChange={(e) => updateOverheadDefaults({ crew_size: parseInt(e.target.value, 10) || 1 })}
+                      />
+                      <Input
+                        id="defaultWeeks"
+                        type="number"
+                        min="0"
+                        step="0.5"
+                        value={estimateDefaults.overhead.estimated_weeks}
+                        onChange={(e) => updateOverheadDefaults({ estimated_weeks: parseFloat(e.target.value) || 0 })}
+                      />
+                    </div>
+                  </div>
+                </div>
               </div>
             </div>
           </TabsContent>
@@ -1195,14 +1436,22 @@ function AccountSettingsContent() {
             <div className="bg-white border border-border rounded-lg p-6 shadow-sm space-y-6">
               <h2 className="text-lg font-semibold text-foreground">Usage This Month</h2>
 
-              <div className="grid gap-4 sm:grid-cols-2">
+              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
                 <div className="p-4 rounded-lg bg-muted border border-border">
                   <p className="text-2xl font-bold text-foreground">{usageProjects ?? '—'}</p>
                   <p className="text-sm text-muted-foreground">Projects Created</p>
                 </div>
                 <div className="p-4 rounded-lg bg-muted border border-border">
-                  <p className="text-2xl font-bold text-foreground">{usagePdfs ?? '—'}</p>
-                  <p className="text-sm text-muted-foreground">PDFs Processed</p>
+                  <p className="text-2xl font-bold text-foreground">{usageExtractionJobs ?? '—'}</p>
+                  <p className="text-sm text-muted-foreground">Extraction Jobs</p>
+                </div>
+                <div className="p-4 rounded-lg bg-muted border border-border">
+                  <p className="text-2xl font-bold text-foreground">{usagePdfPages ?? '—'}</p>
+                  <p className="text-sm text-muted-foreground">PDF Pages</p>
+                </div>
+                <div className="p-4 rounded-lg bg-muted border border-border">
+                  <p className="text-2xl font-bold text-foreground">{usageTakeoffs ?? '—'}</p>
+                  <p className="text-sm text-muted-foreground">Takeoffs Approved</p>
                 </div>
               </div>
             </div>

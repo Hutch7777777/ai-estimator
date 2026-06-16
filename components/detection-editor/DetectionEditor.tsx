@@ -76,6 +76,11 @@ import { useOrganization } from '@/lib/hooks/useOrganization';
 import { createClient } from '@supabase/supabase-js';
 import EstimateSettingsPanel, { type TrimSystem, type EstimateConfig, type CalculatedMeasurements } from './EstimateSettingsPanel';
 import { DEFAULT_ESTIMATE_CONFIG } from './EstimateSettingsPanel/defaults';
+import { DEFAULT_ESTIMATE_DEFAULTS_V1 } from '@/lib/estimate-settings/defaults';
+import {
+  estimateDefaultsToConfig,
+  resolveEstimateDefaults,
+} from '@/lib/estimate-settings/resolve';
 
 // Create untyped Supabase client for extraction_detections_draft operations
 // (This table is not in the generated types)
@@ -460,9 +465,9 @@ export default function DetectionEditor({
   // ============================================================================
   // Estimate Settings State
   // ============================================================================
-  const [markupPercent, setMarkupPercent] = useState<number>(10);
-  const [trimSystem, setTrimSystem] = useState<TrimSystem>('hardie');
-  const [wrbProduct, setWrbProduct] = useState<string | null>(null);
+  const [markupPercent, setMarkupPercent] = useState<number>(DEFAULT_ESTIMATE_DEFAULTS_V1.markup_percent);
+  const [trimSystem, setTrimSystem] = useState<TrimSystem>(DEFAULT_ESTIMATE_DEFAULTS_V1.trim_system);
+  const [wrbProduct, setWrbProduct] = useState<string | null>(DEFAULT_ESTIMATE_DEFAULTS_V1.wrb_product);
   const [isEstimateSettingsLoading, setIsEstimateSettingsLoading] = useState(false);
   // Phase 2: Expanded estimate config
   const [estimateConfig, setEstimateConfig] = useState<Partial<EstimateConfig>>(DEFAULT_ESTIMATE_CONFIG);
@@ -602,8 +607,13 @@ export default function DetectionEditor({
   useEffect(() => {
     console.log('🔄 loadEstimateSettings effect running, projectId:', projectId);
     if (!projectId) {
-      // No project yet - still set configLoaded so panel can function with defaults
-      console.log('⚙️ No projectId, setting configLoaded=true with defaults');
+      const resolved = resolveEstimateDefaults({
+        organizationSettings: organization?.settings,
+      });
+      setMarkupPercent(resolved.defaults.markup_percent);
+      setTrimSystem(resolved.defaults.trim_system);
+      setWrbProduct(resolved.defaults.wrb_product);
+      setEstimateConfig(estimateDefaultsToConfig(resolved.defaults));
       setConfigLoaded(true);
       setIsEstimateSettingsLoading(false);
       return;
@@ -615,57 +625,40 @@ export default function DetectionEditor({
       const supabase = getSupabaseClient();
 
       try {
-        // Load markup_percent from projects table
-        const { data: project, error: projectError } = await supabase
-          .from('projects')
-          .select('markup_percent')
-          .eq('id', projectId)
-          .single();
+        const [projectRes, configRes] = await Promise.all([
+          supabase
+            .from('projects')
+            .select('markup_percent')
+            .eq('id', projectId)
+            .single(),
+          supabase
+            .from('project_configurations')
+            .select('configuration_data')
+            .eq('project_id', projectId)
+            .eq('trade', 'siding')
+            .single(),
+        ]);
 
-        if (projectError) {
-          console.warn('[EstimateSettings] Failed to load project markup:', projectError);
-        } else if (project?.markup_percent != null) {
-          setMarkupPercent(project.markup_percent);
+        if (projectRes.error) {
+          console.warn('[EstimateSettings] Failed to load project markup:', projectRes.error);
         }
 
-        // Load trim_system and wrb_product from project_configurations
-        const { data: config, error: configError } = await supabase
-          .from('project_configurations')
-          .select('configuration_data')
-          .eq('project_id', projectId)
-          .eq('trade', 'siding')
-          .single();
-
-        if (configError && configError.code !== 'PGRST116') {
+        if (configRes.error && configRes.error.code !== 'PGRST116') {
           // PGRST116 = no rows found (not an error, just no config yet)
-          console.warn('[EstimateSettings] Failed to load project config:', configError);
-        } else if (config?.configuration_data) {
-          const data = config.configuration_data as Record<string, unknown>;
-          if (data.trim_system === 'hardie' || data.trim_system === 'whitewood') {
-            setTrimSystem(data.trim_system);
-          }
-          if (typeof data.wrb_product === 'string') {
-            setWrbProduct(data.wrb_product);
-          }
-          // Phase 2: Load expanded config, merged with defaults so estimateConfig is NEVER empty
-          const savedConfig = data as Partial<EstimateConfig>;
-          const mergedConfig = {
-            ...DEFAULT_ESTIMATE_CONFIG,
-            ...savedConfig,
-            // Deep merge sections (spread only overrides saved values)
-            window_trim: { ...DEFAULT_ESTIMATE_CONFIG.window_trim, ...savedConfig?.window_trim },
-            door_trim: { ...DEFAULT_ESTIMATE_CONFIG.door_trim, ...savedConfig?.door_trim },
-            top_out: { ...DEFAULT_ESTIMATE_CONFIG.top_out, ...savedConfig?.top_out },
-            belly_band: { ...DEFAULT_ESTIMATE_CONFIG.belly_band, ...savedConfig?.belly_band },
-            corners: { ...DEFAULT_ESTIMATE_CONFIG.corners, ...savedConfig?.corners },
-            wrb: { ...DEFAULT_ESTIMATE_CONFIG.wrb, ...savedConfig?.wrb },
-            flashing: { ...DEFAULT_ESTIMATE_CONFIG.flashing, ...savedConfig?.flashing },
-            consumables: { ...DEFAULT_ESTIMATE_CONFIG.consumables, ...savedConfig?.consumables },
-            overhead: { ...DEFAULT_ESTIMATE_CONFIG.overhead, ...savedConfig?.overhead },
-          };
-          setEstimateConfig(mergedConfig);
-          console.log('⚙️ Loaded estimate config:', Object.keys(mergedConfig).join(', '));
+          console.warn('[EstimateSettings] Failed to load project config:', configRes.error);
         }
+
+        const resolved = resolveEstimateDefaults({
+          organizationSettings: organization?.settings,
+          projectConfig: (configRes.data?.configuration_data as Record<string, unknown> | null) ?? null,
+          projectMarkupPercent: projectRes.data?.markup_percent ?? null,
+        });
+
+        setMarkupPercent(resolved.defaults.markup_percent);
+        setTrimSystem(resolved.defaults.trim_system);
+        setWrbProduct(resolved.defaults.wrb_product);
+        setEstimateConfig(estimateDefaultsToConfig(resolved.defaults));
+        console.log('[EstimateSettings] Loaded job override defaults:', resolved.sources);
       } catch (err) {
         console.error('[EstimateSettings] Error loading settings:', err);
       } finally {
@@ -679,7 +672,7 @@ export default function DetectionEditor({
     };
 
     loadEstimateSettings();
-  }, [projectId]);
+  }, [projectId, organization?.settings]);
 
   // ============================================================================
   // Save Estimate Settings to Database
@@ -696,8 +689,39 @@ export default function DetectionEditor({
     if (error) {
       console.error('[EstimateSettings] Failed to save markup:', error);
       toast.error('Failed to save markup percentage');
+      return;
     }
-  }, [projectId]);
+
+    const { data: existing } = await supabase
+      .from('project_configurations')
+      .select('id, configuration_data')
+      .eq('project_id', projectId)
+      .eq('trade', 'siding')
+      .single();
+
+    const configData = {
+      ...(existing?.configuration_data as Record<string, unknown> || {}),
+      ...estimateConfig,
+      markup_percent: value,
+      trim_system: trimSystem,
+      wrb_product: wrbProduct,
+    };
+
+    if (existing) {
+      await supabase
+        .from('project_configurations')
+        .update({ configuration_data: configData, updated_at: new Date().toISOString() })
+        .eq('id', existing.id);
+    } else {
+      await supabase
+        .from('project_configurations')
+        .insert({
+          project_id: projectId,
+          trade: 'siding',
+          configuration_data: configData,
+        });
+    }
+  }, [estimateConfig, projectId, trimSystem, wrbProduct]);
 
   // Unified save: merges v1 fields (trimSystem, wrbProduct) and optional v2 expanded config
   // into a single upsert so concurrent calls can't fight over the same row.
@@ -728,6 +752,7 @@ export default function DetectionEditor({
 
       const configData = {
         ...(existing?.configuration_data as Record<string, unknown> || {}),
+        markup_percent: markupPercent,
         trim_system: newTrimSystem,
         wrb_product: newWrbProduct,
         ...(expandedConfig ?? {}),
@@ -758,7 +783,7 @@ export default function DetectionEditor({
     } catch (err) {
       console.error('Error saving estimate config:', err);
     }
-  }, [projectId]);
+  }, [projectId, markupPercent]);
 
   // Handlers for estimate settings changes
   const handleTrimSystemChange = useCallback((value: TrimSystem) => {
@@ -4619,8 +4644,7 @@ export default function DetectionEditor({
               isSettingsOpen={showEstimateSettings}
             />
 
-            {/* Estimate Settings Panel - slides out between toolbar and canvas */}
-            {console.log('🔧 Panel render check: showEstimateSettings=', showEstimateSettings, 'configLoaded=', configLoaded)}
+            {/* Job Overrides Panel - slides out between toolbar and canvas */}
             {showEstimateSettings && (
               <EstimateSettingsPanel
                 isOpen={showEstimateSettings}
@@ -5090,29 +5114,26 @@ export default function DetectionEditor({
               </div>
 
               {/* Cost Summary Card */}
-              {/* Priority: 1. takeoffDetails.takeoff (DB trigger values - BEST) */}
-              {/*           2. approvalResult.totals (Save to Tables - usually empty) */}
-              {/*           3. projectTotals (API values - fallback, has wrong material/labor split) */}
+              {/* Priority: approval project_totals > saved takeoff totals > legacy totals */}
               {(() => {
-                // DB source: takeoffDetails.takeoff has trigger-calculated totals
                 // eslint-disable-next-line @typescript-eslint/no-explicit-any
                 const dbTotals = takeoffDetails?.takeoff as Record<string, number> | undefined;
                 const t = approvalResult?.totals as Record<string, number> | undefined;
                 const pt = projectTotals as Record<string, number> | undefined;
-                // Priority: DB totals (correct) > approvalResult.totals > projectTotals (fallback)
-                const matCost = dbTotals?.total_material_cost ?? t?.material_cost ?? t?.total_material_cost ?? pt?.material_cost ?? 0;
+                const matCost = pt?.material_cost ?? t?.material_cost ?? t?.total_material_cost ?? dbTotals?.total_material_cost ?? 0;
                 // Calculate paint cost from line items if not in totals
-                const paintCostFromLineItems = takeoffDetails?.line_items
-                  ?.filter((item: Record<string, unknown>) => item.item_type === 'paint')
-                  .reduce((sum: number, item: Record<string, unknown>) => {
+                const modalLineItems = takeoffDetails?.line_items as Array<Record<string, unknown>> | undefined;
+                const paintCostFromLineItems = modalLineItems
+                  ?.filter((item) => item.item_type === 'paint')
+                  .reduce((sum, item) => {
                     const matExt = Number(item.material_extended) || 0;
                     const laborExt = Number(item.labor_extended) || 0;
                     return sum + matExt + laborExt;
                   }, 0) ?? 0;
                 const paintCost = t?.paint_cost ?? pt?.paint_cost ?? paintCostFromLineItems;
-                const laborCost = dbTotals?.total_labor_cost ?? t?.labor_cost ?? t?.total_labor_cost ?? pt?.installation_labor_subtotal ?? laborSection?.installation_subtotal ?? 0;
-                const overheadCost = dbTotals?.total_overhead_cost ?? t?.overhead_cost ?? t?.total_overhead_cost ?? pt?.overhead_total ?? pt?.overhead_subtotal ?? overheadSection?.subtotal ?? 0;
-                const grandTotal = dbTotals?.final_price ?? t?.final_price ?? t?.grand_total ?? pt?.grand_total ?? 0;
+                const laborCost = pt?.installation_labor_subtotal ?? t?.labor_cost ?? t?.total_labor_cost ?? dbTotals?.total_labor_cost ?? laborSection?.installation_subtotal ?? 0;
+                const overheadCost = pt?.overhead_total ?? pt?.overhead_subtotal ?? t?.overhead_cost ?? t?.total_overhead_cost ?? dbTotals?.total_overhead_cost ?? overheadSection?.subtotal ?? 0;
+                const grandTotal = pt?.grand_total ?? t?.final_price ?? t?.grand_total ?? dbTotals?.final_price ?? 0;
                 console.log('[Modal] Displaying totals:', { matCost, paintCost, laborCost, overheadCost, grandTotal, hasTakeoffDetails: !!dbTotals, dbTotals, totals: t, projectTotals: pt });
                 return (
                   <div className="bg-gray-50 dark:bg-gray-800/50 rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden">

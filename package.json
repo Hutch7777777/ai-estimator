@@ -7,6 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
+    "validate:estimate-defaults": "tsx scripts/validate-estimate-defaults.ts",
     "validate:mn568": "tsx scripts/validate-mn568-baseline.ts"
   },
   "dependencies": {

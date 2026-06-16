@@ -167,6 +167,10 @@ export function UserProvider({ children }: { children: ReactNode }) {
   }, [supabase]);
 
   useEffect(() => {
+    if (isDevBypassEnabled()) {
+      return;
+    }
+
     let isMounted = true;
 
     const initialize = async () => {

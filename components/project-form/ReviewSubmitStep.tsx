@@ -95,7 +95,7 @@ export function ReviewSubmitStep({ data, onUpdate }: ReviewSubmitStepProps) {
           <div className="space-y-2">
             <Label htmlFor="markupPercent" className="flex items-center gap-2">
               <Percent className="h-4 w-4" />
-              Markup Percentage
+              Project Markup
             </Label>
             <div className="flex items-center gap-2">
               <Input
@@ -116,7 +116,7 @@ export function ReviewSubmitStep({ data, onUpdate }: ReviewSubmitStepProps) {
               <span className="text-sm text-muted-foreground">%</span>
             </div>
             <p className="text-xs text-muted-foreground">
-              This markup will be applied to the total estimate cost (default: 15%)
+              Seeded from organization defaults. Changing it here applies only to this project.
             </p>
           </div>
 
@@ -144,7 +144,7 @@ export function ReviewSubmitStep({ data, onUpdate }: ReviewSubmitStepProps) {
               <li>Your project will be saved to the database</li>
               <li>The HOVER PDF will be uploaded to Supabase Storage</li>
               <li>An n8n webhook will be triggered to process the Excel generation</li>
-              <li>You'll receive real-time updates via Supabase Realtime</li>
+              <li>You&apos;ll receive real-time updates via Supabase Realtime</li>
               <li>Download your Excel takeoff when processing is complete (30-60 seconds)</li>
             </ul>
           </div>

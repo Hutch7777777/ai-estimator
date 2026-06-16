@@ -62,6 +62,11 @@ interface OverheadItem {
   notes?: string;
 }
 
+function finiteNumber(value: unknown): number | null {
+  const num = typeof value === 'string' ? Number(value) : value;
+  return typeof num === 'number' && Number.isFinite(num) ? num : null;
+}
+
 // =============================================================================
 // GET Handler
 // =============================================================================
@@ -98,6 +103,7 @@ export async function GET(
 
     // Get extraction job ID for this project (needed for "Back to Editor" link)
     let extractionJobId: string | null = null;
+    let estimateSettings: Record<string, unknown> | null = null;
     if (takeoff.project_id) {
       const { data: jobData } = await supabase
         .from('extraction_jobs')
@@ -110,6 +116,15 @@ export async function GET(
       if (jobData) {
         extractionJobId = jobData.id;
       }
+
+      const { data: configData } = await supabase
+        .from('project_configurations')
+        .select('configuration_data')
+        .eq('project_id', takeoff.project_id)
+        .eq('trade', 'siding')
+        .maybeSingle();
+
+      estimateSettings = (configData?.configuration_data as Record<string, unknown> | null) ?? null;
     }
 
     // Get all line items ordered by presentation group and item number
@@ -222,17 +237,23 @@ export async function GET(
       0
     );
 
-    // Always use calculated totals from filtered line items
-    // Database stored totals may include paint items in wrong categories
-    // Paint items are now separated, so we recalculate everything from line items
-    const materialCost = calculatedMaterialCost;
+    const approvedMaterialCost = finiteNumber(takeoff.total_material_cost);
+    const approvedLaborCost = finiteNumber(takeoff.total_labor_cost);
+    const approvedOverheadCost = finiteNumber(takeoff.total_overhead_cost);
+    const approvedSubtotal = finiteNumber(takeoff.subtotal);
+    const approvedMarkupPercent = finiteNumber(takeoff.markup_percent);
+    const approvedFinalPrice = finiteNumber(takeoff.final_price);
+
+    // Preferred path: approved takeoff totals written by the calculation flow.
+    // Legacy fallback: recompute only when old rows are missing stored totals.
+    const materialCost = approvedMaterialCost ?? calculatedMaterialCost;
     const paintCost = calculatedPaintCost;
-    const laborCost = calculatedLaborCost;
-    const overheadCost = calculatedOverheadCost;
-    const subtotal = materialCost + paintCost + laborCost + overheadCost;
-    const markupPercent = takeoff.markup_percent ?? 15;
-    // Recalculate final price from new subtotal
-    const finalPrice = subtotal * (1 + markupPercent / 100);
+    const laborCost = approvedLaborCost ?? calculatedLaborCost;
+    const overheadCost = approvedOverheadCost ?? calculatedOverheadCost;
+    const subtotal = approvedSubtotal ?? (materialCost + paintCost + laborCost + overheadCost);
+    const markupPercent = approvedMarkupPercent ?? 15;
+    const finalPrice = approvedFinalPrice ?? (subtotal * (1 + markupPercent / 100));
+    const totalsSource = approvedFinalPrice !== null ? 'approved_takeoff' : 'legacy_recomputed';
 
     // ==========================================================================
     // Return response
@@ -254,6 +275,8 @@ export async function GET(
         subtotal: subtotal,
         markup_percent: markupPercent,
         final_price: finalPrice,
+        totals_source: totalsSource,
+        estimate_settings: estimateSettings,
         squares: takeoff.squares || null,
         created_at: takeoff.created_at,
       },
@@ -268,7 +291,9 @@ export async function GET(
         subtotal: subtotal,
         markup_percent: markupPercent,
         final_price: finalPrice,
+        source: totalsSource,
       },
+      estimate_settings: estimateSettings,
     });
   } catch (error) {
     console.error('[API] Unexpected error:', error);

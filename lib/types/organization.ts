@@ -1,3 +1,8 @@
+import {
+  DEFAULT_ESTIMATE_DEFAULTS_V1,
+} from '@/lib/estimate-settings/defaults';
+import type { EstimateDefaultsV1 } from '@/lib/estimate-settings/types';
+
 /**
  * Organization Settings Types
  * Stored in organizations.settings JSONB column
@@ -103,8 +108,11 @@ export interface OrganizationSettings {
   /** Timezone identifier (default: 'America/Los_Angeles') */
   timezone: string;
 
-  /** Default markup percentage for estimates (default: 35) */
+  /** Legacy default markup percentage for estimates (default: 15) */
   default_markup_percent: number;
+
+  /** Client-ready estimate defaults used to seed new projects */
+  estimate_defaults_v1: EstimateDefaultsV1;
 
   /** Labor rates and insurance configuration */
   labor_rates?: LaborRates;
@@ -132,7 +140,8 @@ export const DEFAULT_LABOR_RATES: LaborRates = {
 export const DEFAULT_ORGANIZATION_SETTINGS: OrganizationSettings = {
   currency: 'USD',
   timezone: 'America/Los_Angeles',
-  default_markup_percent: 35,
+  default_markup_percent: 15,
+  estimate_defaults_v1: DEFAULT_ESTIMATE_DEFAULTS_V1,
   labor_rates: DEFAULT_LABOR_RATES,
   material_defaults: {},
   business_info: {},
@@ -153,11 +162,56 @@ export function resolveSettings(
   partial: Partial<OrganizationSettings> | Record<string, unknown> | null | undefined
 ): OrganizationSettings {
   const p = (partial || {}) as Partial<OrganizationSettings>;
+  const estimateDefaults = {
+    ...DEFAULT_ESTIMATE_DEFAULTS_V1,
+    ...(p.estimate_defaults_v1 || {}),
+    markup_percent:
+      p.estimate_defaults_v1?.markup_percent ??
+      p.default_markup_percent ??
+      DEFAULT_ESTIMATE_DEFAULTS_V1.markup_percent,
+    window_trim: {
+      ...DEFAULT_ESTIMATE_DEFAULTS_V1.window_trim,
+      ...p.estimate_defaults_v1?.window_trim,
+    },
+    door_trim: {
+      ...DEFAULT_ESTIMATE_DEFAULTS_V1.door_trim,
+      ...p.estimate_defaults_v1?.door_trim,
+    },
+    top_out: {
+      ...DEFAULT_ESTIMATE_DEFAULTS_V1.top_out,
+      ...p.estimate_defaults_v1?.top_out,
+    },
+    belly_band: {
+      ...DEFAULT_ESTIMATE_DEFAULTS_V1.belly_band,
+      ...p.estimate_defaults_v1?.belly_band,
+    },
+    corners: {
+      ...DEFAULT_ESTIMATE_DEFAULTS_V1.corners,
+      ...p.estimate_defaults_v1?.corners,
+    },
+    wrb: {
+      ...DEFAULT_ESTIMATE_DEFAULTS_V1.wrb,
+      ...p.estimate_defaults_v1?.wrb,
+    },
+    flashing: {
+      ...DEFAULT_ESTIMATE_DEFAULTS_V1.flashing,
+      ...p.estimate_defaults_v1?.flashing,
+    },
+    consumables: {
+      ...DEFAULT_ESTIMATE_DEFAULTS_V1.consumables,
+      ...p.estimate_defaults_v1?.consumables,
+    },
+    overhead: {
+      ...DEFAULT_ESTIMATE_DEFAULTS_V1.overhead,
+      ...p.estimate_defaults_v1?.overhead,
+    },
+  };
 
   return {
     currency: p.currency ?? 'USD',
     timezone: p.timezone ?? 'America/Los_Angeles',
-    default_markup_percent: p.default_markup_percent ?? 35,
+    default_markup_percent: p.default_markup_percent ?? estimateDefaults.markup_percent,
+    estimate_defaults_v1: estimateDefaults,
 
     labor_rates: {
       li_insurance_rate_percent: p.labor_rates?.li_insurance_rate_percent ?? 12.65,

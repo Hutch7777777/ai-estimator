@@ -234,7 +234,7 @@ const MarkupToolbar = memo(function MarkupToolbar({
           );
         })}
 
-        {/* Estimate Settings Toggle */}
+        {/* Job Overrides Toggle */}
         {onSettingsToggle && (
           <Tooltip>
             <TooltipTrigger asChild>
@@ -259,7 +259,7 @@ const MarkupToolbar = memo(function MarkupToolbar({
               </button>
             </TooltipTrigger>
             <TooltipContent side="right" sideOffset={8}>
-              Estimate Settings (E)
+              Job Overrides (E)
             </TooltipContent>
           </Tooltip>
         )}

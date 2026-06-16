@@ -58,7 +58,6 @@ export default function EstimateSettingsPanel({
 
   // 2-second mount guard: prevents saving defaults before DB data loads
   const [canSave, setCanSave] = useState(false);
-  const mountTimeRef = useRef<number>(Date.now());
 
   // Enable saves after 2 seconds (gives DB time to load)
   useEffect(() => {
@@ -212,7 +211,7 @@ export default function EstimateSettingsPanel({
       <div className="flex items-center justify-between px-3 py-2.5 border-b border-gray-700 bg-gray-900">
         <div className="flex items-center gap-2">
           <Settings className="w-4 h-4 text-gray-400" />
-          <span className="text-sm font-semibold text-gray-200">Estimate Settings</span>
+          <span className="text-sm font-semibold text-gray-200">Job Overrides</span>
         </div>
         <button onClick={onClose} className="p-1 hover:bg-gray-800 rounded transition-colors" title="Close settings (E)">
           <X className="w-4 h-4 text-gray-500" />
@@ -230,7 +229,7 @@ export default function EstimateSettingsPanel({
                 className="w-full bg-gray-800 border border-gray-700 rounded px-2 py-1.5 text-xs text-gray-200 focus:outline-none focus:border-blue-600 pr-8 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" />
               <span className="absolute right-2 top-1/2 -translate-y-1/2 text-[10px] text-gray-500">%</span>
             </div>
-            <p className="text-[10px] text-gray-600">Mike Skjei standard: 26%. Saves on blur.</p>
+            <p className="text-[10px] text-gray-500">Project snapshot. Saves this job only.</p>
           </div>
         </SectionWrapper>
 

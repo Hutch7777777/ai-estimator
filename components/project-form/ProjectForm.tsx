@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
@@ -12,6 +12,11 @@ import { ProductConfigStep } from "@/components/project-form/ProductConfigStep";
 import { HoverUploadStep } from "@/components/project-form/HoverUploadStep";
 import { ReviewSubmitStep } from "@/components/project-form/ReviewSubmitStep";
 import { ProjectFormData } from "@/lib/types/project-form";
+import { useOrganization } from "@/lib/hooks/useOrganization";
+import {
+  estimateDefaultsToProjectConfig,
+  resolveOrganizationEstimateDefaults,
+} from "@/lib/estimate-settings/resolve";
 
 const TOTAL_STEPS = 5;
 
@@ -24,7 +29,9 @@ const STEP_TITLES = [
 ];
 
 export function ProjectForm() {
+  const { organization } = useOrganization();
   const [currentStep, setCurrentStep] = useState(1);
+  const [seededOrgId, setSeededOrgId] = useState<string | null>(null);
   const [formData, setFormData] = useState<ProjectFormData>({
     projectName: "",
     customerName: "",
@@ -34,8 +41,31 @@ export function ProjectForm() {
     pdfFile: null,
     pdfUrl: "",
     notes: "",
-    markupPercent: 15, // Default 15% markup
+    markupPercent: 15,
   });
+
+  useEffect(() => {
+    if (!organization || seededOrgId === organization.id) return;
+
+    const orgDefaults = resolveOrganizationEstimateDefaults(organization.settings);
+    const sidingSnapshot = estimateDefaultsToProjectConfig(orgDefaults);
+
+    // Seed the draft once when the selected organization arrives; later org edits are forward-only.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setFormData(prev => ({
+      ...prev,
+      markupPercent: orgDefaults.markup_percent,
+      configurations: {
+        ...prev.configurations,
+        siding: {
+          ...sidingSnapshot,
+          ...(prev.configurations?.siding || {}),
+          markup_percent: prev.configurations?.siding?.markup_percent ?? orgDefaults.markup_percent,
+        },
+      },
+    }));
+    setSeededOrgId(organization.id);
+  }, [organization, seededOrgId]);
 
   const progressPercentage = (currentStep / TOTAL_STEPS) * 100;
 
