@@ -141,11 +141,11 @@ export function ReviewSubmitStep({ data, onUpdate }: ReviewSubmitStepProps) {
           <div className="space-y-2">
             <p className="text-sm font-medium">What happens next?</p>
             <ul className="ml-4 list-disc space-y-1 text-sm text-muted-foreground">
-              <li>Your project will be saved to the database</li>
-              <li>The HOVER PDF will be uploaded to Supabase Storage</li>
-              <li>An n8n webhook will be triggered to process the Excel generation</li>
-              <li>You'll receive real-time updates via Supabase Realtime</li>
-              <li>Download your Excel takeoff when processing is complete (30-60 seconds)</li>
+              <li>Your project details and product selections will be saved</li>
+              <li>Your HOVER PDF will be uploaded securely</li>
+              <li>The estimate engine will extract measurements and calculate quantities</li>
+              <li>You will see progress updates as processing completes</li>
+              <li>Your Excel takeoff will be ready to download when processing finishes</li>
             </ul>
           </div>
         </CardContent>

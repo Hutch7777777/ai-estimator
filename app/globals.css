@@ -1,6 +1,13 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 
+/* Hide app chrome when printing a proposal document. */
+@media print {
+  .no-print {
+    display: none !important;
+  }
+}
+
 /* Light theme only - dark mode removed */
 
 @theme inline {

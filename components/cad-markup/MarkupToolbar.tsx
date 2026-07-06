@@ -32,6 +32,7 @@ import { useState } from "react";
 interface MarkupToolbarProps {
   currentTool: ToolMode;
   selectedMaterial: MarkupMaterial;
+  showAdvanced?: boolean;
   onToolChange: (tool: ToolMode) => void;
   onMaterialChange: (material: MarkupMaterial) => void;
   onUndo: () => void;
@@ -47,6 +48,7 @@ interface MarkupToolbarProps {
 export function MarkupToolbar({
   currentTool,
   selectedMaterial,
+  showAdvanced = false,
   onToolChange,
   onMaterialChange,
   onUndo,
@@ -139,6 +141,7 @@ export function MarkupToolbar({
             <CategoryPicker
               value={selectedMaterial}
               onChange={onMaterialChange}
+              showAdvanced={showAdvanced}
             />
           </div>
         )}
@@ -199,10 +202,12 @@ export function MarkupToolbar({
                   <FileSpreadsheet className="h-4 w-4 mr-2" />
                   Export as Excel
                 </DropdownMenuItem>
-                <DropdownMenuItem onClick={onExportJSON}>
-                  <FileJson className="h-4 w-4 mr-2" />
-                  Export as JSON
-                </DropdownMenuItem>
+                {showAdvanced && (
+                  <DropdownMenuItem onClick={onExportJSON}>
+                    <FileJson className="h-4 w-4 mr-2" />
+                    Export as JSON
+                  </DropdownMenuItem>
+                )}
               </DropdownMenuContent>
             </DropdownMenu>
           </div>

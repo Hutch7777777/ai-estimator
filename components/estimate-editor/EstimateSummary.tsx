@@ -22,6 +22,7 @@ import {
   calculateLaborTotal,
   calculateOverheadTotal,
 } from "@/lib/utils/itemHelpers";
+import { toast } from "sonner";
 
 interface EstimateSummaryProps {
   takeoff: Takeoff;
@@ -121,7 +122,9 @@ export function EstimateSummary({
       );
     } catch (error) {
       console.error("Error exporting full estimate:", error);
-      alert("Failed to export estimate. Please try again.");
+      toast.error("Failed to export estimate", {
+        description: "Please try again.",
+      });
     }
   };
 
@@ -149,7 +152,9 @@ export function EstimateSummary({
       );
     } catch (error) {
       console.error("Error exporting vendor takeoff:", error);
-      alert("Failed to export vendor takeoff. Please try again.");
+      toast.error("Failed to export vendor takeoff", {
+        description: "Please try again.",
+      });
     }
   };
 
@@ -184,7 +189,9 @@ export function EstimateSummary({
       document.body.removeChild(a);
     } catch (error) {
       console.error('Error generating proposal:', error);
-      alert('Failed to generate proposal. Please try again.');
+      toast.error("Failed to generate proposal", {
+        description: "Please try again.",
+      });
     } finally {
       setIsGeneratingProposal(false);
     }

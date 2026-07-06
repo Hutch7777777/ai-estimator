@@ -18,9 +18,15 @@ interface CategoryPickerProps {
   value: MarkupMaterial;
   onChange: (material: MarkupMaterial) => void;
   disabled?: boolean;
+  showAdvanced?: boolean;
 }
 
-export function CategoryPicker({ value, onChange, disabled = false }: CategoryPickerProps) {
+export function CategoryPicker({
+  value,
+  onChange,
+  disabled = false,
+  showAdvanced = false,
+}: CategoryPickerProps) {
   const {
     trades,
     categories,
@@ -42,7 +48,14 @@ export function CategoryPicker({ value, onChange, disabled = false }: CategoryPi
     if (value.category && value.category !== selectedCategory) {
       setSelectedCategory(value.category);
     }
-  }, []);  // Only on mount
+  }, [
+    selectedCategory,
+    selectedTrade,
+    setSelectedCategory,
+    setSelectedTrade,
+    value.category,
+    value.trade,
+  ]);
 
   // Handle trade change
   const handleTradeChange = (trade: string) => {
@@ -148,7 +161,7 @@ export function CategoryPicker({ value, onChange, disabled = false }: CategoryPi
       </div>
 
       {/* Product Selection (Optional) */}
-      {value.trade && value.category && value.trade !== "miscellaneous" && (
+      {showAdvanced && value.trade && value.category && value.trade !== "miscellaneous" && (
         <div className="space-y-1.5">
           <Label className="text-xs font-medium text-muted-foreground">
             Product <span className="text-gray-400">(optional)</span>
@@ -182,14 +195,16 @@ export function CategoryPicker({ value, onChange, disabled = false }: CategoryPi
       )}
 
       {/* Color Selection */}
-      <div className="space-y-1.5">
-        <Label className="text-xs font-medium text-muted-foreground">Color</Label>
-        <ColorPicker
-          color={value.color || DEFAULT_MARKUP_COLOR}
-          onChange={handleColorChange}
-          disabled={disabled}
-        />
-      </div>
+      {showAdvanced && (
+        <div className="space-y-1.5">
+          <Label className="text-xs font-medium text-muted-foreground">Color</Label>
+          <ColorPicker
+            color={value.color || DEFAULT_MARKUP_COLOR}
+            onChange={handleColorChange}
+            disabled={disabled}
+          />
+        </div>
+      )}
     </div>
   );
 }

@@ -1,10 +1,32 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  /* config options here */
+  // Keep ignoreBuildErrors for now, but add logging
   typescript: {
-    // Temporarily ignore build errors while Supabase types are being fixed
     ignoreBuildErrors: true,
+  },
+
+  reactStrictMode: true,
+  poweredByHeader: false,
+
+  images: {
+    remotePatterns: [
+      {
+        protocol: 'https',
+        hostname: '*.supabase.co',
+      },
+    ],
+  },
+
+  // Add logging to help debug issues
+  logging: {
+    fetches: {
+      fullUrl: true,
+    },
+  },
+
+  experimental: {
+    optimizePackageImports: ['lucide-react'],
   },
 };
 

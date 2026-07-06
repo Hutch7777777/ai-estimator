@@ -177,13 +177,6 @@ export function HoverUploadStep({ data, onUpdate }: HoverUploadStepProps) {
     const cleanedWindows = cleanConfig(data.configurations?.windows || {});
     const cleanedGutters = cleanConfig(data.configurations?.gutters || {});
 
-    // Validation: Warn if siding_product_type is missing when siding is selected
-    if (data.selectedTrades?.includes('siding') && !cleanedSiding.siding_product_type) {
-      console.warn('⚠️ Warning: siding_product_type is missing but siding trade is selected');
-      console.warn('  Original siding config:', data.configurations?.siding);
-      console.warn('  Cleaned siding config:', cleanedSiding);
-    }
-
     const payload = {
       project_id: newProjectId,
       project_name: data.projectName,
@@ -199,7 +192,6 @@ export function HoverUploadStep({ data, onUpdate }: HoverUploadStepProps) {
       created_at: new Date().toISOString()
     };
 
-    console.log('🔍 Webhook payload (cleaned):', JSON.stringify(payload, null, 2));
     return payload;
   };
 
@@ -236,9 +228,6 @@ export function HoverUploadStep({ data, onUpdate }: HoverUploadStepProps) {
 
   // Main handler
   const handleGenerateEstimate = async () => {
-    console.log('🔍 Full form data:', JSON.stringify(data, null, 2));
-    console.log('🔍 Available keys:', Object.keys(data));
-
     if (!selectedFile) return;
 
     try {

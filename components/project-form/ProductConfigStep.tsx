@@ -148,14 +148,6 @@ export function ProductConfigStep({ data, onUpdate, onValidationChange }: Produc
 
         if (configError) throw configError;
 
-        // Debug logging to diagnose missing trade sections
-        console.log('🔍 Debug: Selected trades:', data.selectedTrades);
-        console.log('🔍 Debug: Configurations fetched:', configs?.length || 0);
-        console.log('🔍 Debug: Trades with data:', configs?.reduce((acc, c: any) => {
-          acc[c.trade] = (acc[c.trade] || 0) + 1;
-          return acc;
-        }, {} as Record<string, number>));
-
         // Fetch product catalog for trades that need it
         // catalog_filter on each field determines which products are shown
         const { data: products, error: productError } = await supabase
@@ -168,8 +160,6 @@ export function ProductConfigStep({ data, onUpdate, onValidationChange }: Produc
           .order('product_name', { ascending: true });
 
         if (productError) throw productError;
-
-        console.log('🔍 Configurations loaded:', configs?.length || 0, 'fields for trades:', data.selectedTrades);
 
         setConfigurations(configs || []);
         setProductCatalog(products || []);
@@ -196,7 +186,6 @@ export function ProductConfigStep({ data, onUpdate, onValidationChange }: Produc
 
     // If trades are selected but NO configurations loaded → INVALID
     if (data.selectedTrades && data.selectedTrades.length > 0 && configurations.length === 0) {
-      console.log('⚠️ Validation: No configurations loaded for selected trades');
       onValidationChange?.(false);
       return;
     }
@@ -210,7 +199,6 @@ export function ProductConfigStep({ data, onUpdate, onValidationChange }: Produc
 
       // If trade is selected but NO fields exist in database → INVALID
       if (tradeFields.length === 0) {
-        console.warn(`⚠️ Validation: Trade "${trade}" selected but no configuration fields exist in database`);
         isValid = false;
         return;
       }
@@ -230,7 +218,6 @@ export function ProductConfigStep({ data, onUpdate, onValidationChange }: Produc
       // These checks ensure validation works even if database configuration is missing
       if (trade === 'siding') {
         if (!tradeValues['siding_product_type'] || tradeValues['siding_product_type'] === '') {
-          console.log('❌ Validation failed: siding_product_type is required but empty');
           isValid = false;
         }
       }
@@ -238,30 +225,21 @@ export function ProductConfigStep({ data, onUpdate, onValidationChange }: Produc
       if (trade === 'roofing') {
         const roofingProduct = tradeValues['shingle_product_id'] || tradeValues['shingle_product'];
         if (!roofingProduct || roofingProduct === '') {
-          console.log('❌ Validation failed: roofing product is required but empty');
           isValid = false;
         }
       }
 
       if (trade === 'windows') {
         if (!tradeValues['window_manufacturer'] || tradeValues['window_manufacturer'] === '') {
-          console.log('❌ Validation failed: window_manufacturer is required but empty');
           isValid = false;
         }
       }
 
       if (trade === 'gutters') {
         if (!tradeValues['gutter_material'] || tradeValues['gutter_material'] === '') {
-          console.log('❌ Validation failed: gutter_material is required but empty');
           isValid = false;
         }
       }
-    });
-
-    console.log('✅ Validation result:', {
-      isValid,
-      configurationsCount: configurations.length,
-      selectedTrades: data.selectedTrades
     });
 
     // Notify parent of validation state
@@ -279,17 +257,6 @@ export function ProductConfigStep({ data, onUpdate, onValidationChange }: Produc
   // Check if field should be visible based on show_if_conditions
   const isFieldVisible = (field: TradeConfiguration, trade: string): boolean => {
     const tradeValues = formValues[trade] || {};
-
-    // DEBUG LOG - Remove after debugging
-    if (field.show_if_conditions) {
-      console.log('🔍 Visibility check:', JSON.stringify({
-        fieldName: field.config_name,
-        fieldLabel: field.field_label,
-        showIfConditions: field.show_if_conditions,
-        allTradeValues: tradeValues,
-        isRequired: field.is_required
-      }, null, 2));
-    }
 
     // Special case: ColorPlus color field should only show for ColorPlus products
     if (field.config_name === 'colorplus_color') {
@@ -361,15 +328,6 @@ export function ProductConfigStep({ data, onUpdate, onValidationChange }: Produc
               result = true;
           }
 
-          console.log('  ↳ Condition result:', JSON.stringify({
-            conditionField: conditionFieldName,
-            operator: operator,
-            expectedValue: expectedValue,
-            actualValue: fieldValue,
-            isEmpty: isEmpty(fieldValue),
-            result: result
-          }, null, 2));
-
           if (!result) return false;
           continue;
         }
@@ -379,20 +337,11 @@ export function ProductConfigStep({ data, onUpdate, onValidationChange }: Produc
           const containsValue = conditionValue.contains;
           const result = Array.isArray(fieldValue) && fieldValue.includes(containsValue);
 
-          console.log('  ↳ Condition result:', JSON.stringify({
-            conditionField: conditionFieldName,
-            operator: 'contains',
-            expectedValue: containsValue,
-            actualValue: fieldValue,
-            result: result
-          }, null, 2));
-
           if (!result) return false;
           continue;
         }
 
         // Unknown object format - skip
-        console.warn('Unknown condition format:', conditionFieldName, conditionValue);
         continue;
       }
 
@@ -410,16 +359,6 @@ export function ProductConfigStep({ data, onUpdate, onValidationChange }: Produc
         // For other types (strings, numbers), use strict equality
         result = fieldValue === conditionValue;
       }
-
-      console.log('  ↳ Condition result:', JSON.stringify({
-        conditionField: conditionFieldName,
-        operator: 'equals',
-        expectedValue: conditionValue,
-        expectedType: typeof conditionValue,
-        actualValue: fieldValue,
-        actualType: typeof fieldValue,
-        result: result
-      }, null, 2));
 
       if (!result) return false;
     }
@@ -596,12 +535,6 @@ export function ProductConfigStep({ data, onUpdate, onValidationChange }: Produc
               ...field.catalog_filter,
               manufacturer: selectedManufacturer
             };
-
-            console.log('🏭 Window series manufacturer filter:', {
-              selectedManufacturer,
-              originalFilter: field.catalog_filter,
-              effectiveFilter: effectiveCatalogFilter
-            });
           }
         }
 

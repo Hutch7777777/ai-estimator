@@ -22,6 +22,7 @@ interface CadDataPanelProps {
 
 export function CadDataPanel({ projectId }: CadDataPanelProps) {
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState(true);
   const [hover, setHover] = useState<CadHoverMeasurements | null>(null);
   const [extraction, setExtraction] = useState<CadExtraction | null>(null);
@@ -35,18 +36,31 @@ export function CadDataPanel({ projectId }: CadDataPanelProps) {
 
   const loadCadData = async () => {
     setLoading(true);
-    const { data } = await getCadExtractionSummary(projectId);
+    setError(null);
 
-    if (data?.extraction) {
-      setHasData(true);
-      setExtraction(data.extraction);
-      setHover(data.hover);
-      setCalloutCount(data.calloutCount);
-      setUnknownCount(data.unknownCallouts);
-    } else {
+    try {
+      const { data, error: fetchError } = await getCadExtractionSummary(projectId);
+
+      if (fetchError) {
+        console.error('CadDataPanel: Error loading CAD data:', fetchError);
+        setError(fetchError);
+        setHasData(false);
+      } else if (data?.extraction) {
+        setHasData(true);
+        setExtraction(data.extraction);
+        setHover(data.hover);
+        setCalloutCount(data.calloutCount);
+        setUnknownCount(data.unknownCallouts);
+      } else {
+        setHasData(false);
+      }
+    } catch (err) {
+      console.error('CadDataPanel: Exception loading CAD data:', err);
+      setError(err instanceof Error ? err.message : 'Failed to load CAD data');
       setHasData(false);
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   };
 
   const handleClassificationChange = () => {
@@ -60,6 +74,16 @@ export function CadDataPanel({ projectId }: CadDataPanelProps) {
         <CardContent className="p-4 flex items-center justify-center">
           <Loader2 className="h-4 w-4 animate-spin mr-2" />
           Loading CAD data...
+        </CardContent>
+      </Card>
+    );
+  }
+
+  if (error) {
+    return (
+      <Card>
+        <CardContent className="p-4 text-center text-sm text-red-600">
+          Failed to load CAD data. <button onClick={loadCadData} className="underline hover:no-underline">Retry</button>
         </CardContent>
       </Card>
     );

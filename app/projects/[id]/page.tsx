@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useMemo } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { useTakeoffData, useLineItemsSave } from "@/lib/hooks";
@@ -9,21 +9,32 @@ import {
   SectionTabs,
   EstimateSummary,
 } from "@/components/estimate-editor";
+import { toast } from "sonner";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeletons";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
-import { Separator } from "@/components/ui/separator";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { ProposalsPanel } from "@/components/proposals/ProposalsPanel";
 import {
   ArrowLeft,
   AlertCircle,
+  Calculator,
   CheckCircle,
   Clock,
+  FileSpreadsheet,
   MapPin,
   User,
   Briefcase,
 } from "lucide-react";
+
+function initialDetailTab() {
+  if (typeof window === "undefined") return "takeoff";
+  return new URLSearchParams(window.location.search).get("tab") === "proposals"
+    ? "proposals"
+    : "takeoff";
+}
 
 export default function ProjectEstimatePage() {
   const params = useParams();
@@ -36,8 +47,9 @@ export default function ProjectEstimatePage() {
 
   // Local state for line items (synced with database)
   const [localLineItems, setLocalLineItems] = useState<LineItemWithState[]>([]);
+  const [detailTab, setDetailTab] = useState(initialDetailTab);
 
-  const supabase = createClient();
+  const supabase = useMemo(() => createClient(), []);
 
   // Fetch takeoff data
   const {
@@ -159,26 +171,29 @@ export default function ProjectEstimatePage() {
     );
   }
 
-  // No takeoff found
+  // No takeoff found — the takeoff editor needs HOVER processing, but
+  // proposals can be built for any project, so still offer them here.
   if (!takeoff) {
     return (
-      <div className="container mx-auto py-8">
+      <div className="container mx-auto space-y-6 py-8">
+        <div className="flex items-center gap-3">
+          <Button variant="ghost" size="icon" onClick={() => router.push("/project")}>
+            <ArrowLeft className="h-5 w-5" />
+          </Button>
+          <div>
+            <h1 className="text-3xl font-heading font-bold">{project?.name}</h1>
+            <p className="text-muted-foreground">{project?.client_name}</p>
+          </div>
+        </div>
         <Alert>
           <AlertCircle className="h-4 w-4" />
-          <AlertTitle>No Estimate Available</AlertTitle>
+          <AlertTitle>No Takeoff Available</AlertTitle>
           <AlertDescription>
-            This project doesn't have an estimate yet. Estimates are created automatically
-            after HOVER PDF processing is complete.
+            This project does not have a takeoff yet. Takeoffs are created automatically
+            after HOVER PDF processing. You can still build proposals below.
           </AlertDescription>
         </Alert>
-        <Button
-          variant="outline"
-          className="mt-4"
-          onClick={() => router.push("/project")}
-        >
-          <ArrowLeft className="mr-2 h-4 w-4" />
-          Back to Projects
-        </Button>
+        <ProposalsPanel projectId={projectId} projectName={project?.name} />
       </div>
     );
   }
@@ -259,66 +274,86 @@ export default function ProjectEstimatePage() {
         </Card>
       )}
 
-      {/* Save Error Alert */}
-      {saveError && (
-        <Alert variant="destructive">
-          <AlertCircle className="h-4 w-4" />
-          <AlertTitle>Save Error</AlertTitle>
-          <AlertDescription>{saveError}</AlertDescription>
-        </Alert>
-      )}
+      {/* Takeoff (existing HOVER-driven editor) and Proposals (new) */}
+      <Tabs value={detailTab} onValueChange={setDetailTab} className="space-y-6">
+        <TabsList className="grid h-11 w-full max-w-md grid-cols-2">
+          <TabsTrigger value="takeoff">
+            <Calculator className="mr-2 h-4 w-4" />
+            Takeoff
+          </TabsTrigger>
+          <TabsTrigger value="proposals">
+            <FileSpreadsheet className="mr-2 h-4 w-4" />
+            Proposals
+          </TabsTrigger>
+        </TabsList>
 
-      {/* Cannot Edit Warning */}
-      {!canEdit && (
-        <Alert>
-          <AlertCircle className="h-4 w-4" />
-          <AlertTitle>Read-Only Mode</AlertTitle>
-          <AlertDescription>
-            This estimate is in read-only mode. Project status: {project?.status}
-          </AlertDescription>
-        </Alert>
-      )}
+        <TabsContent value="takeoff" className="space-y-6">
+          {/* Save Error Alert */}
+          {saveError && (
+            <Alert variant="destructive">
+              <AlertCircle className="h-4 w-4" />
+              <AlertTitle>Save Error</AlertTitle>
+              <AlertDescription>{saveError}</AlertDescription>
+            </Alert>
+          )}
 
-      {/* Estimate Summary */}
-      <EstimateSummary
-        takeoff={takeoff}
-        sections={sections}
-        lineItems={localLineItems}
-        projectInfo={{
-          clientName: project?.client_name || "Unknown Client",
-          address: project?.address || "Unknown Address",
-          projectName: project?.name || "Untitled Project",
-        }}
-        onApprove={() => {
-          // TODO: Implement approval workflow
-          console.log("Approve estimate");
-        }}
-        onSend={() => {
-          // TODO: Implement send to client
-          console.log("Send to client");
-        }}
-      />
+          {/* Cannot Edit Warning */}
+          {!canEdit && (
+            <Alert>
+              <AlertCircle className="h-4 w-4" />
+              <AlertTitle>Read-Only Mode</AlertTitle>
+              <AlertDescription>
+                This estimate is in read-only mode. Project status: {project?.status}
+              </AlertDescription>
+            </Alert>
+          )}
 
-      {/* Section Tabs with Grids */}
-      {sections.length > 0 ? (
-        <SectionTabs
-          sections={sections}
-          lineItems={localLineItems}
-          takeoffId={takeoff.id}
-          onLineItemsChange={handleLineItemsChange}
-          onSave={canEdit ? handleSave : undefined}
-          isSaving={isSaving}
-        />
-      ) : (
-        <Card>
-          <CardHeader>
-            <CardTitle>No Sections</CardTitle>
-            <CardDescription>
-              This estimate doesn't have any sections yet.
-            </CardDescription>
-          </CardHeader>
-        </Card>
-      )}
+          {/* Estimate Summary */}
+          <EstimateSummary
+            takeoff={takeoff}
+            sections={sections}
+            lineItems={localLineItems}
+            projectInfo={{
+              clientName: project?.client_name || "Unknown Client",
+              address: project?.address || "Unknown Address",
+              projectName: project?.name || "Untitled Project",
+            }}
+            onApprove={() => {
+              // TODO: Implement approval workflow
+              toast.info("Approval workflow is not configured yet");
+            }}
+            onSend={() => {
+              // TODO: Implement send to client
+              toast.info("Client delivery workflow is not configured yet");
+            }}
+          />
+
+          {/* Section Tabs with Grids */}
+          {sections.length > 0 ? (
+            <SectionTabs
+              sections={sections}
+              lineItems={localLineItems}
+              takeoffId={takeoff.id}
+              onLineItemsChange={handleLineItemsChange}
+              onSave={canEdit ? handleSave : undefined}
+              isSaving={isSaving}
+            />
+          ) : (
+            <Card>
+              <CardHeader>
+                <CardTitle>No Sections</CardTitle>
+                <CardDescription>
+                  This estimate does not have any sections yet.
+                </CardDescription>
+              </CardHeader>
+            </Card>
+          )}
+        </TabsContent>
+
+        <TabsContent value="proposals" className="space-y-6">
+          <ProposalsPanel projectId={projectId} projectName={project?.name} />
+        </TabsContent>
+      </Tabs>
     </div>
   );
 }

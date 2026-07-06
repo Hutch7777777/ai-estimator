@@ -28,8 +28,17 @@ import {
   Edit,
 } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { ProjectDetailDialog } from "@/components/projects/ProjectDetailDialog";
 import { ProjectCard } from "@/components/projects/ProjectCard";
+import { toast } from "sonner";
 
 interface Project {
   id: string;
@@ -62,6 +71,8 @@ export function ProjectsTable() {
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [projectToDelete, setProjectToDelete] = useState<Project | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   const supabase = createClient();
   const router = useRouter();
@@ -103,8 +114,6 @@ export function ProjectsTable() {
           table: "projects",
         },
         (payload) => {
-          console.log("Project change detected:", payload);
-
           if (payload.eventType === "INSERT") {
             // Add new project to the list
             setProjects((prev) => [payload.new as Project, ...prev]);
@@ -197,30 +206,49 @@ export function ProjectsTable() {
     if (project.excel_url) {
       window.open(project.excel_url, "_blank");
     } else {
-      alert("Excel file not available for this project");
+      toast.info("Excel file is not available yet", {
+        description: "This project needs a generated takeoff before it can be downloaded.",
+      });
     }
   };
 
   // Handle project deletion
-  const handleDelete = async (projectId: string) => {
-    if (!confirm("Are you sure you want to delete this project?")) {
+  const handleDelete = (projectId: string) => {
+    const project = projects.find((p) => p.id === projectId);
+    if (!project) {
+      toast.error("Project not found");
       return;
     }
 
+    setProjectToDelete(project);
+  };
+
+  const confirmDelete = async () => {
+    if (!projectToDelete) return;
+
     try {
+      setIsDeleting(true);
       const { error: deleteError } = await supabase
         .from("projects")
         .delete()
-        .eq("id", projectId);
+        .eq("id", projectToDelete.id);
 
       if (deleteError) throw deleteError;
 
       // Remove from local state
-      setProjects((prev) => prev.filter((p) => p.id !== projectId));
-      setFilteredProjects((prev) => prev.filter((p) => p.id !== projectId));
+      setProjects((prev) => prev.filter((p) => p.id !== projectToDelete.id));
+      setFilteredProjects((prev) => prev.filter((p) => p.id !== projectToDelete.id));
+      toast.success("Project deleted", {
+        description: `${projectToDelete.name} was removed.`,
+      });
+      setProjectToDelete(null);
     } catch (err) {
       console.error("Error deleting project:", err);
-      alert("Failed to delete project. Please try again.");
+      toast.error("Failed to delete project", {
+        description: "Please try again.",
+      });
+    } finally {
+      setIsDeleting(false);
     }
   };
 
@@ -244,7 +272,7 @@ export function ProjectsTable() {
   // Export to CSV
   const exportToCSV = () => {
     if (filteredProjects.length === 0) {
-      alert("No projects to export");
+      toast.info("No projects to export");
       return;
     }
 
@@ -481,6 +509,47 @@ export function ProjectsTable() {
         open={dialogOpen}
         onOpenChange={setDialogOpen}
       />
+
+      <Dialog
+        open={!!projectToDelete}
+        onOpenChange={(open) => {
+          if (!open && !isDeleting) {
+            setProjectToDelete(null);
+          }
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Delete Project</DialogTitle>
+            <DialogDescription>
+              This will permanently remove {projectToDelete?.name || "this project"} and its project record.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setProjectToDelete(null)}
+              disabled={isDeleting}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={confirmDelete}
+              disabled={isDeleting}
+            >
+              {isDeleting ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Deleting...
+                </>
+              ) : (
+                "Delete Project"
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </Card>
   );
 }

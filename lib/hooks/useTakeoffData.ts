@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { getTakeoffByProjectId } from "@/lib/supabase/takeoffs";
 import {
@@ -31,7 +31,7 @@ export function useTakeoffData(projectId: string): UseTakeoffDataReturn {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const supabase = createClient();
+  const supabase = useMemo(() => createClient(), []);
 
   const fetchData = useCallback(async () => {
     try {
@@ -76,7 +76,6 @@ export function useTakeoffData(projectId: string): UseTakeoffDataReturn {
           filter: `id=eq.${takeoff.id}`,
         },
         (payload) => {
-          console.log("Takeoff updated:", payload);
           if (payload.new) {
             setTakeoff(payload.new as Takeoff);
           }
@@ -90,8 +89,7 @@ export function useTakeoffData(projectId: string): UseTakeoffDataReturn {
           table: "takeoff_sections",
           filter: `takeoff_id=eq.${takeoff.id}`,
         },
-        (payload) => {
-          console.log("Section changed:", payload);
+        () => {
           fetchData(); // Refresh all data when sections change
         }
       )
@@ -104,8 +102,6 @@ export function useTakeoffData(projectId: string): UseTakeoffDataReturn {
           filter: `takeoff_id=eq.${takeoff.id}`,
         },
         (payload) => {
-          console.log("Line item changed:", payload);
-
           if (payload.eventType === "INSERT" && payload.new) {
             setLineItems((prev) => [...prev, payload.new as LineItemWithState]);
           } else if (payload.eventType === "UPDATE" && payload.new) {

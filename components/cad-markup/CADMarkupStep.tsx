@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
+import type { PDFDocumentProxy } from "pdfjs-dist";
 import { useDropzone } from "react-dropzone";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -21,6 +22,7 @@ import {
   Ruler,
   List,
   ClipboardList,
+  Settings2,
 } from "lucide-react";
 import { CADViewer } from "./CADViewer";
 import { MarkupToolbar } from "./MarkupToolbar";
@@ -60,7 +62,7 @@ import {
 
 // Render a specific PDF page to a data URL
 async function renderPdfPageToDataUrl(
-  pdfDoc: any,
+  pdfDoc: PDFDocumentProxy,
   pageNumber: number
 ): Promise<string> {
   const page = await pdfDoc.getPage(pageNumber);
@@ -89,7 +91,7 @@ async function renderPdfPageToDataUrl(
 }
 
 // Load PDF document and return it with page count
-async function loadPdfDocument(file: File): Promise<{ pdfDoc: any; numPages: number }> {
+async function loadPdfDocument(file: File): Promise<{ pdfDoc: PDFDocumentProxy; numPages: number }> {
   console.log("[CADMarkup] Loading PDF document...");
 
   // Dynamic import to avoid SSR issues with DOMMatrix
@@ -169,7 +171,7 @@ export function CADMarkupStep({ data, onUpdate, onValidationChange }: CADMarkupS
   const [currentPage, setCurrentPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [isLoadingPage, setIsLoadingPage] = useState(false);
-  const pdfDocRef = useRef<any>(null);
+  const pdfDocRef = useRef<PDFDocumentProxy | null>(null);
   const pageImageCache = useRef<Record<number, string>>({});
 
   // Calibration state
@@ -195,6 +197,7 @@ export function CADMarkupStep({ data, onUpdate, onValidationChange }: CADMarkupS
 
   // Browse/Edit mode state
   const [mode, setMode] = useState<"browse" | "edit">("browse");
+  const [showAdvanced, setShowAdvanced] = useState(false);
 
   // Panel collapse state
   const [isToolsCollapsed, setIsToolsCollapsed] = useState(false);
@@ -227,6 +230,16 @@ export function CADMarkupStep({ data, onUpdate, onValidationChange }: CADMarkupS
       }
     }
   }, []);
+
+  // Load simple/advanced preference from localStorage on mount
+  useEffect(() => {
+    setShowAdvanced(localStorage.getItem("pdfMarkup.advancedMode") === "true");
+  }, []);
+
+  // Save simple/advanced preference when changed
+  useEffect(() => {
+    localStorage.setItem("pdfMarkup.advancedMode", showAdvanced ? "true" : "false");
+  }, [showAdvanced]);
 
   // Save panel collapse state to localStorage when changed
   useEffect(() => {
@@ -999,6 +1012,15 @@ export function CADMarkupStep({ data, onUpdate, onValidationChange }: CADMarkupS
             </div>
             <SaveStatus status={syncStatus} lastSaved={lastSaved} error={saveError} />
             <Button
+              variant={showAdvanced ? "secondary" : "outline"}
+              size="sm"
+              onClick={() => setShowAdvanced((current) => !current)}
+              aria-pressed={showAdvanced}
+            >
+              <Settings2 className="h-4 w-4 mr-2" />
+              {showAdvanced ? "Advanced On" : "Advanced"}
+            </Button>
+            <Button
               onClick={handleSave}
               disabled={!selectedProject || syncStatus === "saving" || !hasUnsavedChanges}
               size="sm"
@@ -1163,6 +1185,7 @@ export function CADMarkupStep({ data, onUpdate, onValidationChange }: CADMarkupS
                       <MarkupToolbar
                         currentTool={currentTool}
                         selectedMaterial={selectedMaterial}
+                        showAdvanced={showAdvanced}
                         onToolChange={setCurrentTool}
                         onMaterialChange={setSelectedMaterial}
                         onUndo={handleUndo}
@@ -1241,10 +1264,12 @@ export function CADMarkupStep({ data, onUpdate, onValidationChange }: CADMarkupS
                       </Button>
                       {/* Mini icons when collapsed */}
                       <div className="flex flex-col gap-2 items-center">
-                        <div className="flex flex-col items-center gap-1" title="Markups">
-                          <List className="h-4 w-4 text-muted-foreground" />
-                          <span className="text-[10px] text-muted-foreground">List</span>
-                        </div>
+                        {showAdvanced && (
+                          <div className="flex flex-col items-center gap-1" title="Markups">
+                            <List className="h-4 w-4 text-muted-foreground" />
+                            <span className="text-[10px] text-muted-foreground">List</span>
+                          </div>
+                        )}
                         <div className="flex flex-col items-center gap-1 mt-2" title="Takeoff Summary">
                           <ClipboardList className="h-4 w-4 text-muted-foreground" />
                           <span className="text-[10px] text-muted-foreground">Summary</span>
@@ -1264,30 +1289,36 @@ export function CADMarkupStep({ data, onUpdate, onValidationChange }: CADMarkupS
                       </Button>
 
                       {/* Markups Panel */}
-                      <Card className="flex-1 min-h-0 shadow-soft rounded-xl flex flex-col">
-                        <CardHeader className="pb-2 pt-3 pl-8">
-                          <CardTitle className="text-base">Markups</CardTitle>
-                        </CardHeader>
-                        <div className="flex-1 min-h-0 overflow-hidden">
-                          <MarkupsList
-                            polygons={currentPagePolygons}
-                            markers={currentPageMarkers}
-                            measurements={currentPageMeasurements}
-                            selection={currentSelection}
-                            onSelect={handleMarkupsListSelect}
-                            onUpdatePolygon={handleUpdatePolygon}
-                            onUpdateMarker={handleUpdateMarker}
-                            onUpdateMeasurement={handleUpdateMeasurement}
-                            onDeletePolygon={handleDeletePolygon}
-                            onDeleteMarker={handleDeleteMarker}
-                            onDeleteMeasurement={handleDeleteMeasurement}
-                            hideCard
-                          />
-                        </div>
-                      </Card>
+                      {showAdvanced && (
+                        <Card className="flex-1 min-h-0 shadow-soft rounded-xl flex flex-col">
+                          <CardHeader className="pb-2 pt-3 pl-8">
+                            <CardTitle className="text-base">Markups</CardTitle>
+                          </CardHeader>
+                          <div className="flex-1 min-h-0 overflow-hidden">
+                            <MarkupsList
+                              polygons={currentPagePolygons}
+                              markers={currentPageMarkers}
+                              measurements={currentPageMeasurements}
+                              selection={currentSelection}
+                              onSelect={handleMarkupsListSelect}
+                              onUpdatePolygon={handleUpdatePolygon}
+                              onUpdateMarker={handleUpdateMarker}
+                              onUpdateMeasurement={handleUpdateMeasurement}
+                              onDeletePolygon={handleDeletePolygon}
+                              onDeleteMarker={handleDeleteMarker}
+                              onDeleteMeasurement={handleDeleteMeasurement}
+                              hideCard
+                            />
+                          </div>
+                        </Card>
+                      )}
 
                       {/* Takeoff Summary Panel */}
-                      <Card className="h-[220px] flex-shrink-0 shadow-soft rounded-xl flex flex-col">
+                      <Card
+                        className={`shadow-soft rounded-xl flex flex-col ${
+                          showAdvanced ? "h-[220px] flex-shrink-0" : "flex-1 min-h-0"
+                        }`}
+                      >
                         <CardHeader className="pb-2 pt-3">
                           <CardTitle className="text-base">Takeoff Summary</CardTitle>
                         </CardHeader>
@@ -1310,32 +1341,36 @@ export function CADMarkupStep({ data, onUpdate, onValidationChange }: CADMarkupS
                 </div>
               </div>
 
-              {/* Scale Input */}
-              <Card className="shadow-soft rounded-xl">
-                <CardHeader>
-                  <CardTitle className="font-heading">Scale Settings</CardTitle>
-                  <CardDescription>
-                    Set the scale for accurate area calculations
-                  </CardDescription>
-                </CardHeader>
-                <CardContent className="space-y-4">
+              {/* Drawing and advanced scale controls */}
+              <Card className={`shadow-soft rounded-xl ${showAdvanced ? "" : "py-3"}`}>
+                {showAdvanced && (
+                  <CardHeader>
+                    <CardTitle className="font-heading">Scale Settings</CardTitle>
+                    <CardDescription>
+                      Set the scale for accurate area calculations
+                    </CardDescription>
+                  </CardHeader>
+                )}
+                <CardContent className={showAdvanced ? "space-y-4" : "px-4"}>
                   <div className="flex items-center gap-4">
-                    <div className="flex-1">
-                      <Label htmlFor="pixels-per-foot">Pixels per Foot</Label>
-                      <Input
-                        id="pixels-per-foot"
-                        type="number"
-                        min="1"
-                        step="1"
-                        value={pixelsPerFoot}
-                        onChange={(e) => setPixelsPerFoot(Number(e.target.value))}
-                        className="mt-1"
-                      />
-                      <p className="text-xs text-muted-foreground mt-1">
-                        Measure a known dimension on the drawing to calibrate
-                      </p>
-                    </div>
-                    <div className="flex items-center gap-2 pt-6">
+                    {showAdvanced && (
+                      <div className="flex-1">
+                        <Label htmlFor="pixels-per-foot">Pixels per Foot</Label>
+                        <Input
+                          id="pixels-per-foot"
+                          type="number"
+                          min="1"
+                          step="1"
+                          value={pixelsPerFoot}
+                          onChange={(e) => setPixelsPerFoot(Number(e.target.value))}
+                          className="mt-1"
+                        />
+                        <p className="text-xs text-muted-foreground mt-1">
+                          Measure a known dimension on the drawing to calibrate
+                        </p>
+                      </div>
+                    )}
+                    <div className={`flex items-center gap-2 ${showAdvanced ? "pt-6" : "flex-1"}`}>
                       <FileImage className="h-5 w-5 text-muted-foreground" />
                       <span className="text-sm font-medium">{imageName}</span>
                       <Button
@@ -1352,7 +1387,7 @@ export function CADMarkupStep({ data, onUpdate, onValidationChange }: CADMarkupS
               </Card>
 
               {/* CAD Extraction Data Panel */}
-              {selectedProject && (
+              {showAdvanced && selectedProject && (
                 <CadDataPanel projectId={selectedProject.id} />
               )}
             </>

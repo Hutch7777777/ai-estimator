@@ -41,6 +41,7 @@ import { LineItemWithState } from "@/lib/types/database";
 import { ProductSearchModal } from "./ProductSearchModal";
 import { getProductAlternatives } from "@/lib/supabase/products";
 import { Database } from "@/lib/types/database";
+import { toast } from "sonner";
 
 type ProductCatalog = Database["public"]["Tables"]["product_catalog"]["Row"];
 
@@ -89,8 +90,6 @@ const getGroupDisplayName = (presentationGroup: string | null | undefined): stri
 
 // Transform flat items array into grouped structure with header rows
 const createGroupedRows = (items: LineItemWithState[], expandedGroups: Record<string, boolean>): any[] => {
-  console.log('📊 [createGroupedRows] Called with expandedGroups:', expandedGroups);
-
   // Group items by presentation_group
   const groups = new Map<string, LineItemWithState[]>();
 
@@ -123,12 +122,6 @@ const createGroupedRows = (items: LineItemWithState[], expandedGroups: Record<st
     const groupDisplayName = getGroupDisplayName(groupKey);
     const isExpanded = expandedGroups[groupKey] !== false; // Default to expanded if not set
 
-    console.log(`📊 [createGroupedRows] Group ${groupKey}:`, {
-      groupDisplayName,
-      isExpanded,
-      itemCount,
-    });
-
     // Add group header row
     rows.push({
       isGroupHeader: true,
@@ -146,8 +139,6 @@ const createGroupedRows = (items: LineItemWithState[], expandedGroups: Record<st
       rows.push(...groupItems);
     }
   });
-
-  console.log('📊 [createGroupedRows] Total rows returned:', rows.length);
 
   return rows;
 };
@@ -279,13 +270,7 @@ function ActionsCellRenderer(props: {
         )}
 
         {/* Replace Material */}
-        <DropdownMenuItem onClick={() => {
-          console.log('🎯 [Dropdown] Replace Material clicked for row:', {
-            id: props.data.id,
-            description: props.data.description,
-          });
-          props.onOpenSearchModal(props.data);
-        }}>
+        <DropdownMenuItem onClick={() => props.onOpenSearchModal(props.data)}>
           Replace Material...
         </DropdownMenuItem>
 
@@ -418,18 +403,13 @@ export function EstimateGrid({
   });
 
   const toggleGroupExpansion = useCallback((groupKey: string) => {
-    console.log('🔄 [toggleGroupExpansion] Called with groupKey:', groupKey);
     setExpandedGroups((prev) => {
       const currentState = prev[groupKey];
       const newState = !currentState;
-      console.log('🔄 [toggleGroupExpansion] Current state:', currentState, '→ New state:', newState);
-      console.log('🔄 [toggleGroupExpansion] Full state before:', prev);
-      const updated = {
+      return {
         ...prev,
         [groupKey]: newState,
       };
-      console.log('🔄 [toggleGroupExpansion] Full state after:', updated);
-      return updated;
     });
   }, []);
 
@@ -595,16 +575,9 @@ export function EstimateGrid({
             onDuplicateRow: handleDuplicateRow,
             onDeleteRow: handleDeleteSingleRow,
             onOpenSearchModal: (row: LineItemWithState) => {
-              console.log('🔓 [EstimateGrid] Opening search modal for row (passed directly):', {
-                id: row.id,
-                description: row.description,
-              });
-
               // Store the row passed directly from the dropdown
               setRowToReplace(row);
               rowToReplaceRef.current = row;
-
-              console.log('🔓 [EstimateGrid] Row stored in state and ref');
 
               setIsProductSearchOpen(true);
             },
@@ -878,7 +851,9 @@ export function EstimateGrid({
       URL.revokeObjectURL(url);
     } catch (error) {
       console.error('Error exporting grid:', error);
-      alert('Failed to export grid. Please try again.');
+      toast.error("Failed to export grid", {
+        description: "Please try again.",
+      });
     }
   }, [groupedRowData, pinnedBottomRowData]);
 
@@ -902,20 +877,8 @@ export function EstimateGrid({
 
   const handleReplaceProduct = useCallback(
     (product: ProductCatalog) => {
-      console.log('📦 [EstimateGrid] handleReplaceProduct called');
-      console.log('📦 [EstimateGrid] rowToReplace state:', rowToReplace);
-      console.log('📦 [EstimateGrid] rowToReplaceRef.current:', rowToReplaceRef.current);
-
       // Use ref as fallback if state is null
       const row = rowToReplace || rowToReplaceRef.current;
-
-      console.log('📦 [EstimateGrid] Final row to use:', row);
-      console.log('📦 [EstimateGrid] Product received:', {
-        id: product.id,
-        name: product.product_name,
-        sku: product.sku,
-        physical_properties: product.physical_properties,
-      });
 
       if (!row) {
         console.error('❌ [EstimateGrid] Both rowToReplace state AND ref are null! Cannot replace product.');
@@ -925,12 +888,6 @@ export function EstimateGrid({
       const materialCost = (product.physical_properties as any)?.material_cost || 0;
       const laborCost = (product.physical_properties as any)?.labor_cost || 0;
       const equipmentCost = (product.physical_properties as any)?.equipment_cost || 0;
-
-      console.log('📦 [EstimateGrid] Extracted costs:', {
-        materialCost,
-        laborCost,
-        equipmentCost,
-      });
 
       const updatedRow: LineItemWithState = {
         ...row,
@@ -943,29 +900,13 @@ export function EstimateGrid({
         isModified: true,
       };
 
-      console.log('📦 [EstimateGrid] Updated row (before recalc):', updatedRow);
-
       const recalculated = recalculateRow(updatedRow);
-
-      console.log('📦 [EstimateGrid] Recalculated row:', {
-        id: recalculated.id,
-        description: recalculated.description,
-        quantity: recalculated.quantity,
-        material_extended: recalculated.material_extended,
-        labor_extended: recalculated.labor_extended,
-        line_total: recalculated.line_total,
-      });
 
       const updatedItems = items.map((item) =>
         item.id === recalculated.id ? recalculated : item
       );
 
-      console.log('📦 [EstimateGrid] Updated items count:', updatedItems.length);
-      console.log('📦 [EstimateGrid] Calling onItemsChange');
-
       onItemsChange(updatedItems);
-
-      console.log('✅ [EstimateGrid] Product replacement complete');
 
       // Clear both state and ref
       setRowToReplace(null);
@@ -1037,24 +978,14 @@ export function EstimateGrid({
   );
 
   const handleContextMenuOpen = useCallback(async (row: LineItemWithState) => {
-    console.log('🎯 [EstimateGrid] handleContextMenuOpen called for row:', {
-      id: row.id,
-      description: row.description,
-      product_id: row.product_id,
-    });
-
     setContextMenuRow(row);
 
     // Fetch alternatives if product has an ID
     if (row.product_id) {
-      console.log('🔍 [EstimateGrid] Fetching alternatives for product:', row.product_id);
       const { data } = await getProductAlternatives(row.product_id);
       if (data) {
-        console.log('✅ [EstimateGrid] Alternatives fetched:', Object.keys(data));
         setAlternatives(data as any);
       }
-    } else {
-      console.log('⚠️ [EstimateGrid] No product_id, skipping alternatives fetch');
     }
   }, []);
 
@@ -1071,13 +1002,6 @@ export function EstimateGrid({
   );
 
   const fullWidthCellRenderer = useCallback((params: { data: any }) => {
-    console.log('🎨 [fullWidthCellRenderer] Called with data:', {
-      hasData: !!params.data,
-      isGroupHeader: params.data?.isGroupHeader,
-      groupKey: params.data?.groupKey,
-      isExpanded: params.data?.isExpanded,
-    });
-
     // Render group header
     if (params.data?.isGroupHeader) {
       const formattedSubtotal = new Intl.NumberFormat("en-US", {
@@ -1088,22 +1012,10 @@ export function EstimateGrid({
       const groupKey = params.data.groupKey;
       const isExpanded = params.data.isExpanded;
 
-      console.log('🎨 [fullWidthCellRenderer] Rendering group header:', {
-        groupName: params.data.groupName,
-        groupKey,
-        isExpanded,
-      });
-
       // Handler function to toggle group
       const handleToggle = (e: React.MouseEvent | React.PointerEvent) => {
         e.preventDefault();
         e.stopPropagation();
-        console.log('🖱️ [Group Header Click] Event triggered:', {
-          eventType: e.type,
-          groupKey,
-          groupName: params.data.groupName,
-          currentlyExpanded: isExpanded,
-        });
         toggleGroupExpansion(groupKey);
       };
 
@@ -1327,11 +1239,6 @@ export function EstimateGrid({
 
                 {/* Replace Material */}
                 <ContextMenuItem onClick={() => {
-                  console.log('🔓 [ContextMenu] Opening search modal for row:', {
-                    id: contextMenuRow?.id,
-                    description: contextMenuRow?.description,
-                  });
-
                   if (!contextMenuRow) {
                     console.error('❌ [ContextMenu] contextMenuRow is null!');
                     return;
@@ -1339,8 +1246,6 @@ export function EstimateGrid({
 
                   setRowToReplace(contextMenuRow);
                   rowToReplaceRef.current = contextMenuRow;
-
-                  console.log('🔓 [ContextMenu] Row stored in state and ref');
 
                   setIsProductSearchOpen(true);
                 }}>
@@ -1386,7 +1291,6 @@ export function EstimateGrid({
       <ProductSearchModal
         isOpen={isProductSearchOpen}
         onClose={() => {
-          console.log('🔒 [EstimateGrid] Closing modal - clearing row references');
           setIsProductSearchOpen(false);
           setRowToReplace(null);
           rowToReplaceRef.current = null;

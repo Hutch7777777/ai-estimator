@@ -20,7 +20,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Plus, Loader2 } from "lucide-react";
+import { Plus, Loader2, AlertCircle } from "lucide-react";
 import {
   fetchProjects,
   createProject,
@@ -50,20 +50,34 @@ export function ProjectSelector({
 
   // Load projects on mount
   useEffect(() => {
-    loadProjects();
-  }, []);
+    let isMounted = true;
 
-  const loadProjects = async () => {
-    setLoading(true);
-    const { data, error } = await fetchProjects();
-    if (error) {
-      console.error("Error loading projects:", error);
-      setError(error);
-    } else {
-      setProjects(data || []);
-    }
-    setLoading(false);
-  };
+    fetchProjects()
+      .then(({ data, error }) => {
+        if (!isMounted) return;
+
+        if (error) {
+          console.error("Error loading projects:", error);
+          setError(error);
+        } else {
+          setProjects(data || []);
+        }
+      })
+      .catch((err) => {
+        if (!isMounted) return;
+        console.error("Error loading projects:", err);
+        setError(err instanceof Error ? err.message : "Failed to load projects");
+      })
+      .finally(() => {
+        if (isMounted) {
+          setLoading(false);
+        }
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
 
   const handleCreateProject = async () => {
     if (!newProjectName.trim()) return;
@@ -102,6 +116,21 @@ export function ProjectSelector({
       onProjectSelect(project || null);
     }
   };
+
+  // Show error state inline
+  if (error && !loading && projects.length === 0) {
+    return (
+      <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 px-3 py-2 border rounded-md bg-red-50 border-red-200 text-red-700 text-sm">
+          <AlertCircle className="h-4 w-4" />
+          <span>Failed to load projects</span>
+          <Button variant="ghost" size="sm" onClick={() => window.location.reload()} className="h-6 px-2 text-red-700 hover:text-red-800">
+            Retry
+          </Button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="flex items-center gap-2">

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useMemo } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { upsertLineItems } from "@/lib/supabase/takeoffs";
 import { LineItemWithState } from "@/lib/types/database";
@@ -23,7 +23,7 @@ export function useLineItemsSave(): UseLineItemsSaveReturn {
   const [error, setError] = useState<string | null>(null);
   const [lastSaved, setLastSaved] = useState<Date | null>(null);
 
-  const supabase = createClient();
+  const supabase = useMemo(() => createClient(), []);
 
   const saveLineItems = useCallback(
     async (items: LineItemWithState[]) => {
@@ -31,7 +31,6 @@ export function useLineItemsSave(): UseLineItemsSaveReturn {
       const itemsToSave = items.filter((item) => item.isNew || item.isModified);
 
       if (itemsToSave.length === 0) {
-        console.log("No changes to save");
         return;
       }
 
@@ -39,19 +38,13 @@ export function useLineItemsSave(): UseLineItemsSaveReturn {
         setIsSaving(true);
         setError(null);
 
-        console.log(`Saving ${itemsToSave.length} line items...`);
-
         const result = await upsertLineItems(supabase, itemsToSave);
 
         if (result.error) {
           throw new Error(result.error);
         }
 
-        const { inserted, updated, errors } = result.data!;
-
-        console.log(
-          `Successfully saved: ${inserted.length} inserted, ${updated.length} updated`
-        );
+        const { errors } = result.data!;
 
         if (errors.length > 0) {
           console.warn("Some items failed to save:", errors);

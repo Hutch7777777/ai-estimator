@@ -1,21 +1,61 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
-import { ArrowLeft, BarChart3, Pencil } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { ArrowLeft, BarChart3, Bot, FileSpreadsheet, Pencil } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { ProjectForm } from "@/components/project-form/ProjectForm";
 import { ProjectsTable } from "@/components/projects/ProjectsTable";
 import { DashboardOverview } from "@/components/dashboard/DashboardOverview";
 import { CADMarkupStep } from "@/components/cad-markup";
 import { UserMenu } from "@/components/layout/UserMenu";
 
-export default function ProjectDashboard() {
-  const [activeTab, setActiveTab] = useState("overview");
+// Note: Auth and organization checks are handled by the parent layout.tsx
+// This page only renders when user is authenticated and has an organization
 
-  // Simple tab change handler - no forced remount needed
+function getInitialTab() {
+  if (typeof window === "undefined") return "overview";
+
+  const requestedTab = new URLSearchParams(window.location.search).get("tab");
+  return requestedTab === "cad" || requestedTab === "past" ? requestedTab : "overview";
+}
+
+// Tabs that navigate to another route rather than swap in-page content.
+const NAV_TABS: Record<string, string> = {
+  new: "/project/new",
+  assistant: "/assistant",
+  proposals: "/proposals",
+};
+
+export default function ProjectDashboard() {
+  const router = useRouter();
+  const [activeTab, setActiveTab] = useState(getInitialTab);
+
+  useEffect(() => {
+    const requestedTab = new URLSearchParams(window.location.search).get("tab");
+
+    if (requestedTab === "new") {
+      router.replace("/project/new");
+    }
+  }, [router]);
+
   const handleTabChange = (value: string) => {
+    if (NAV_TABS[value]) {
+      router.push(NAV_TABS[value]);
+      return;
+    }
+
     setActiveTab(value);
+
+    const params = new URLSearchParams(window.location.search);
+    if (value === "overview") {
+      params.delete("tab");
+    } else {
+      params.set("tab", value);
+    }
+
+    const query = params.toString();
+    router.replace(query ? `/project?${query}` : "/project", { scroll: false });
   };
 
   return (
@@ -45,7 +85,7 @@ export default function ProjectDashboard() {
 
         {/* Tabs */}
         <Tabs value={activeTab} onValueChange={handleTabChange} className="space-y-6">
-          <TabsList className="grid w-full max-w-3xl grid-cols-4 h-12">
+          <TabsList className="grid h-12 w-full max-w-6xl grid-cols-6">
             <TabsTrigger value="overview" className="text-base">
               <BarChart3 className="mr-2 h-4 w-4" />
               Overview
@@ -57,6 +97,14 @@ export default function ProjectDashboard() {
               <Pencil className="mr-2 h-4 w-4" />
               PDF Markups
             </TabsTrigger>
+            <TabsTrigger value="assistant" className="text-base">
+              <Bot className="mr-2 h-4 w-4" />
+              AI Assistant
+            </TabsTrigger>
+            <TabsTrigger value="proposals" className="text-base">
+              <FileSpreadsheet className="mr-2 h-4 w-4" />
+              Proposals
+            </TabsTrigger>
             <TabsTrigger value="past" className="text-base">
               Past Projects
             </TabsTrigger>
@@ -66,12 +114,7 @@ export default function ProjectDashboard() {
             <DashboardOverview />
           </TabsContent>
 
-          <TabsContent value="new" className="space-y-6">
-            <ProjectForm />
-          </TabsContent>
-
           <TabsContent value="cad" className="space-y-6">
-            {(() => { console.log('[ProjectDashboard] Rendering CAD tab content'); return null; })()}
             <CADMarkupStep />
           </TabsContent>
 
