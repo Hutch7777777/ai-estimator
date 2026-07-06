@@ -2,7 +2,7 @@
 // Using direct fetch instead of Supabase client to bypass client issues
 
 import type React from 'react';
-import { createClient } from '@supabase/supabase-js';
+import { createClient } from '@/lib/supabase/client';
 import type {
   ExtractionJob,
   ExtractionPage,
@@ -56,11 +56,7 @@ async function directFetch<T>(endpoint: string): Promise<T | null> {
       shouldUseDevRestProxy()
         ? undefined
         : {
-            headers: {
-              'apikey': SUPABASE_KEY,
-              'Authorization': `Bearer ${SUPABASE_KEY}`,
-              'Content-Type': 'application/json',
-            },
+            headers: await getRestHeaders(),
           }
     );
 
@@ -83,9 +79,26 @@ let _extractionClient: ReturnType<typeof createClient> | null = null;
 
 function getClient() {
   if (!_extractionClient) {
-    _extractionClient = createClient(SUPABASE_URL, SUPABASE_KEY);
+    _extractionClient = createClient();
   }
   return _extractionClient;
+}
+
+async function getRestHeaders(): Promise<HeadersInit> {
+  const headers: HeadersInit = {
+    apikey: SUPABASE_KEY,
+    'Content-Type': 'application/json',
+    Authorization: `Bearer ${SUPABASE_KEY}`,
+  };
+
+  if (typeof window !== 'undefined') {
+    const { data } = await getClient().auth.getSession();
+    if (data.session?.access_token) {
+      headers.Authorization = `Bearer ${data.session.access_token}`;
+    }
+  }
+
+  return headers;
 }
 
 // =============================================================================

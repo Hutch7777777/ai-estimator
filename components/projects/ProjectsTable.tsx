@@ -4,7 +4,9 @@ import { useState, useEffect } from "react";
 import { toast } from "sonner";
 import { useConfirm } from "@/components/ui/confirm-dialog";
 import { useRouter } from "next/navigation";
-import { useOrganization } from "@/lib/hooks/useOrganization";
+import { useOrganization, isDevBypassEnabled } from "@/lib/hooks/useOrganization";
+import { createClient } from "@/lib/supabase/client";
+import { withTimeout } from "@/lib/utils/withTimeout";
 import {
   Table,
   TableBody,
@@ -86,22 +88,23 @@ export function ProjectsTable() {
         setLoading(true);
         setError(null);
 
-        // Use direct fetch since Supabase JS client has issues
-        const response = await fetch(
-          `${process.env.NEXT_PUBLIC_SUPABASE_URL}/rest/v1/projects?select=*&organization_id=eq.${organization.id}&order=created_at.desc`,
-          {
-            headers: {
-              'apikey': process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-              'Authorization': `Bearer ${process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY}`
-            }
-          }
-        );
-
-        if (!response.ok) {
-          throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        let data: Project[];
+        if (isDevBypassEnabled()) {
+          const response = await withTimeout(fetch(`/api/dev/org-data?list=${organization.id}`));
+          if (!response.ok) throw new Error(`Dev data route failed (HTTP ${response.status})`);
+          data = ((await response.json()).projects ?? []) as Project[];
+        } else {
+          const supabase = createClient();
+          const result = await withTimeout(
+            supabase
+              .from("projects")
+              .select("*")
+              .eq("organization_id", organization.id)
+              .order("created_at", { ascending: false })
+          );
+          if (result.error) throw new Error(result.error.message);
+          data = (result.data ?? []) as Project[];
         }
-
-        const data = await response.json();
         setProjects(data || []);
         setFilteredProjects(data || []);
       } catch (err) {
@@ -202,21 +205,9 @@ export function ProjectsTable() {
     if (!ok) return;
 
     try {
-      // Use direct fetch for delete
-      const response = await fetch(
-        `${process.env.NEXT_PUBLIC_SUPABASE_URL}/rest/v1/projects?id=eq.${projectId}`,
-        {
-          method: 'DELETE',
-          headers: {
-            'apikey': process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-            'Authorization': `Bearer ${process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY}`
-          }
-        }
-      );
-
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-      }
+      const supabase = createClient();
+      const result = await withTimeout(supabase.from("projects").delete().eq("id", projectId));
+      if (result.error) throw new Error(result.error.message);
 
       // Remove from local state
       setProjects((prev) => prev.filter((p) => p.id !== projectId));
@@ -236,12 +227,6 @@ export function ProjectsTable() {
   // Handle edit estimate
   const handleEditEstimate = (projectId: string) => {
     router.push(`/projects/${projectId}`);
-  };
-
-  // Check if project has an estimate (status >= extracted)
-  const hasEstimate = (status: string): boolean => {
-    const statusesWithEstimate = ["extracted", "calculated", "priced", "approved", "sent_to_client", "won", "lost"];
-    return statusesWithEstimate.includes(status);
   };
 
   // Export to CSV

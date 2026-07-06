@@ -31,6 +31,7 @@ import {
 } from 'lucide-react';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { isDevBypassEnabled } from '@/lib/hooks/useOrganization';
+import { createClient } from '@/lib/supabase/client';
 import type { ExtractionJob, ExtractionPage, PageType } from '@/lib/types/extraction';
 
 // =============================================================================
@@ -190,24 +191,29 @@ function restUrl(endpoint: string): string {
   return `${process.env.NEXT_PUBLIC_SUPABASE_URL}/rest/v1/${endpoint}`;
 }
 
-function restHeaders(write = false): HeadersInit | undefined {
+async function restHeaders(write = false): Promise<HeadersInit | undefined> {
   if (isDevBypassEnabled()) {
     return write ? { 'Content-Type': 'application/json' } : undefined;
   }
 
+  const supabase = createClient();
+  const { data } = await supabase.auth.getSession();
+  const token = data.session?.access_token ?? process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
+
   return {
     apikey: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    Authorization: `Bearer ${process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY}`,
+    Authorization: `Bearer ${token}`,
     ...(write ? { 'Content-Type': 'application/json' } : {}),
   };
 }
 
 async function fetchRest(endpoint: string, init: RequestInit = {}) {
   const isWrite = init.method === 'PATCH';
+  const headers = await restHeaders(isWrite);
   return fetch(restUrl(endpoint), {
     ...init,
     headers: {
-      ...restHeaders(isWrite),
+      ...headers,
       ...init.headers,
     },
   });

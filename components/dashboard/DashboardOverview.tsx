@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { StatCard } from "@/components/ui/stat-card";
 import { StatusBadge } from "@/components/ui/status-badge";
@@ -19,6 +19,7 @@ import {
 } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useOrganization, isDevBypassEnabled } from "@/lib/hooks/useOrganization";
+import { createClient } from "@/lib/supabase/client";
 import { withTimeout } from "@/lib/utils/withTimeout";
 import Link from "next/link";
 
@@ -40,6 +41,15 @@ interface RecentProject {
   selected_trades: string[];
 }
 
+interface ProjectRecord {
+  id: string;
+  name: string | null;
+  client_name: string | null;
+  status: string | null;
+  created_at: string;
+  selected_trades: string[] | null;
+}
+
 export function DashboardOverview() {
   const { organization } = useOrganization();
   const [stats, setStats] = useState<ProjectStats>({
@@ -54,6 +64,70 @@ export function DashboardOverview() {
   const [view, setView] = useState<'loading' | 'error' | 'ready'>('loading');
   const [errorMessage, setErrorMessage] = useState('');
 
+  const loadDashboardData = useCallback(async () => {
+    if (!organization) return;
+    setView('loading');
+
+    try {
+      let projects: ProjectRecord[];
+
+      if (isDevBypassEnabled()) {
+        // Dev bypass has no Supabase session — anon-key reads come back empty
+        // under RLS. Route through the dev-only service-role API instead.
+        const devResponse = await withTimeout(fetch(`/api/dev/org-data?list=${organization.id}`));
+        if (!devResponse.ok) throw new Error(`Dev data route failed (HTTP ${devResponse.status})`);
+        projects = ((await devResponse.json()).projects ?? []) as ProjectRecord[];
+      } else {
+        const supabase = createClient();
+        const result = await withTimeout(
+          supabase
+            .from("projects")
+            .select("*")
+            .eq("organization_id", organization.id)
+            .order("created_at", { ascending: false })
+        );
+
+        if (result.error) throw new Error(result.error.message);
+        projects = (result.data ?? []) as ProjectRecord[];
+      }
+
+      if (projects) {
+        // Calculate statistics
+        const statsData: ProjectStats = {
+          total: projects.length,
+          pending: projects.filter((p) => p.status === "pending").length,
+          processing: projects.filter((p) =>
+            ["extracted", "calculated", "priced"].includes(p.status || "")
+          ).length,
+          approved: projects.filter((p) =>
+            ["approved", "sent_to_client"].includes(p.status || "")
+          ).length,
+          won: projects.filter((p) => p.status === "won").length,
+          lost: projects.filter((p) => p.status === "lost").length,
+        };
+
+        setStats(statsData);
+
+        // Get recent 5 projects
+        setRecentProjects(
+          projects.slice(0, 5).map((project) => ({
+            id: project.id,
+            name: project.name || "Untitled project",
+            client_name: project.client_name || "",
+            status: project.status || "pending",
+            created_at: project.created_at,
+            selected_trades: project.selected_trades || [],
+          }))
+        );
+      }
+      setView('ready');
+    } catch (error) {
+      console.error("Error loading dashboard data:", error);
+      setErrorMessage(error instanceof Error ? error.message : 'Failed to load dashboard');
+      setView('error');
+    }
+  }, [organization]);
+
   useEffect(() => {
     // Only load data if we have an organization
     if (!organization) {
@@ -62,70 +136,7 @@ export function DashboardOverview() {
     }
 
     loadDashboardData();
-  }, [organization]);
-
-  const loadDashboardData = async () => {
-    if (!organization) return;
-    setView('loading');
-
-    try {
-      let projects: any[];
-
-      if (isDevBypassEnabled()) {
-        // Dev bypass has no Supabase session — anon-key reads come back empty
-        // under RLS. Route through the dev-only service-role API instead.
-        const devResponse = await withTimeout(fetch(`/api/dev/org-data?list=${organization.id}`));
-        if (!devResponse.ok) throw new Error(`Dev data route failed (HTTP ${devResponse.status})`);
-        projects = (await devResponse.json()).projects ?? [];
-      } else {
-        const url = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/rest/v1/projects?select=*&organization_id=eq.${organization.id}&order=created_at.desc`;
-
-        // Use direct fetch since Supabase JS client has issues
-        const response = await withTimeout(
-          fetch(url, {
-            headers: {
-              'apikey': process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-              'Authorization': `Bearer ${process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY}`
-            }
-          })
-        );
-
-        if (!response.ok) {
-          const errorBody = await response.text();
-          console.error('Supabase error:', response.status, errorBody);
-          throw new Error(`HTTP ${response.status}: ${errorBody}`);
-        }
-
-        projects = await response.json();
-      }
-
-      if (projects) {
-        // Calculate statistics
-        const statsData: ProjectStats = {
-          total: projects.length,
-          pending: projects.filter((p: any) => p.status === "pending").length,
-          processing: projects.filter((p: any) =>
-            ["extracted", "calculated", "priced"].includes(p.status || "")
-          ).length,
-          approved: projects.filter((p: any) =>
-            ["approved", "sent_to_client"].includes(p.status || "")
-          ).length,
-          won: projects.filter((p: any) => p.status === "won").length,
-          lost: projects.filter((p: any) => p.status === "lost").length,
-        };
-
-        setStats(statsData);
-
-        // Get recent 5 projects
-        setRecentProjects(projects.slice(0, 5) as RecentProject[]);
-      }
-      setView('ready');
-    } catch (error) {
-      console.error("Error loading dashboard data:", error);
-      setErrorMessage(error instanceof Error ? error.message : 'Failed to load dashboard');
-      setView('error');
-    }
-  };
+  }, [organization, loadDashboardData]);
 
   const getStatusColor = (status: string) => {
     const colors: Record<string, string> = {
