@@ -2,25 +2,26 @@
 
 import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import { Separator } from "@/components/ui/separator";
 import { ArrowLeft, ArrowRight, CheckCircle2 } from "lucide-react";
+import { ProjectTypeStep } from "@/components/project-form/ProjectTypeStep";
 import { ProjectInfoStep } from "@/components/project-form/ProjectInfoStep";
 import { TradeSelectionStep } from "@/components/project-form/TradeSelectionStep";
 import { ProductConfigStep } from "@/components/project-form/ProductConfigStep";
 import { HoverUploadStep } from "@/components/project-form/HoverUploadStep";
+import { PlansUploadStep } from "@/components/project-form/PlansUploadStep";
 import { ReviewSubmitStep } from "@/components/project-form/ReviewSubmitStep";
-import { ProjectFormData } from "@/lib/types/project-form";
+import { ProjectFormData, ProjectIntakeType } from "@/lib/types/project-form";
 import { useOrganization } from "@/lib/hooks/useOrganization";
 import {
   estimateDefaultsToProjectConfig,
   resolveOrganizationEstimateDefaults,
 } from "@/lib/estimate-settings/resolve";
 
-const TOTAL_STEPS = 5;
-
-const STEP_TITLES = [
+const HOVER_STEP_TITLES = [
   "Project Information",
   "Select Trades",
   "Configure Products",
@@ -28,15 +29,27 @@ const STEP_TITLES = [
   "Review & Submit",
 ];
 
-export function ProjectForm() {
+const INTAKE_LABELS: Record<ProjectIntakeType, string> = {
+  hover: "HOVER Report",
+  plans: "Construction Plans",
+};
+
+interface ProjectFormProps {
+  initialType?: ProjectIntakeType;
+}
+
+export function ProjectForm({ initialType }: ProjectFormProps) {
   const { organization } = useOrganization();
+  const [intakeType, setIntakeType] = useState<ProjectIntakeType | null>(initialType ?? null);
   const [currentStep, setCurrentStep] = useState(1);
   const [seededOrgId, setSeededOrgId] = useState<string | null>(null);
+  const [stepValidity, setStepValidity] = useState<Record<number, boolean>>({});
   const [formData, setFormData] = useState<ProjectFormData>({
+    intakeType: initialType ?? null,
     projectName: "",
     customerName: "",
     address: "",
-    selectedTrades: [],
+    selectedTrades: initialType === "plans" ? ["siding"] : [],
     configurations: {},
     pdfFile: null,
     pdfUrl: "",
@@ -67,14 +80,41 @@ export function ProjectForm() {
     setSeededOrgId(organization.id);
   }, [organization, seededOrgId]);
 
-  const progressPercentage = (currentStep / TOTAL_STEPS) * 100;
+  const stepTitles = HOVER_STEP_TITLES;
+  const totalSteps = stepTitles.length;
+  const progressPercentage = (currentStep / totalSteps) * 100;
+  const canAdvance = currentStep >= 4 || stepValidity[currentStep] === true;
+
+  const handleSelectIntakeType = (type: ProjectIntakeType) => {
+    setIntakeType(type);
+    setCurrentStep(1);
+    setStepValidity({});
+    setFormData((prev) => ({
+      ...prev,
+      intakeType: type,
+      selectedTrades: type === "plans" ? ["siding"] : [],
+      pdfFile: null,
+      pdfUrl: "",
+    }));
+  };
+
+  const handleChangeIntakeType = () => {
+    setIntakeType(null);
+    setCurrentStep(1);
+    setStepValidity({});
+    setFormData((prev) => ({ ...prev, intakeType: null, pdfFile: null, pdfUrl: "" }));
+  };
 
   const updateFormData = (data: Partial<ProjectFormData>) => {
     setFormData((prev) => ({ ...prev, ...data }));
   };
 
+  const updateStepValidity = (step: number, isValid: boolean) => {
+    setStepValidity((prev) => (prev[step] === isValid ? prev : { ...prev, [step]: isValid }));
+  };
+
   const handleNext = () => {
-    if (currentStep < TOTAL_STEPS) {
+    if (currentStep < totalSteps && canAdvance) {
       setCurrentStep((prev) => prev + 1);
     }
   };
@@ -88,11 +128,32 @@ export function ProjectForm() {
   const renderStep = () => {
     switch (currentStep) {
       case 1:
-        return <ProjectInfoStep data={formData} onUpdate={updateFormData} />;
+        return (
+          <ProjectInfoStep
+            data={formData}
+            onUpdate={updateFormData}
+            intakeType={intakeType}
+            onValidationChange={(isValid) => updateStepValidity(1, isValid)}
+          />
+        );
       case 2:
-        return <TradeSelectionStep data={formData} onUpdate={updateFormData} />;
+        return (
+          <TradeSelectionStep
+            data={formData}
+            onUpdate={updateFormData}
+            intakeType={intakeType}
+            onValidationChange={(isValid) => updateStepValidity(2, isValid)}
+          />
+        );
       case 3:
-        return <ProductConfigStep data={formData} onUpdate={updateFormData} />;
+        return (
+          <ProductConfigStep
+            data={formData}
+            onUpdate={updateFormData}
+            onValidationChange={(isValid) => updateStepValidity(3, isValid)}
+            intakeType={intakeType}
+          />
+        );
       case 4:
         return <HoverUploadStep data={formData} onUpdate={updateFormData} />;
       case 5:
@@ -102,6 +163,20 @@ export function ProjectForm() {
     }
   };
 
+  if (!intakeType) {
+    return <ProjectTypeStep onSelect={handleSelectIntakeType} />;
+  }
+
+  if (intakeType === "plans") {
+    return (
+      <PlansUploadStep
+        data={formData}
+        onUpdate={updateFormData}
+        onChangeType={handleChangeIntakeType}
+      />
+    );
+  }
+
   return (
     <div className="space-y-8">
       {/* Enhanced Progress Section */}
@@ -110,16 +185,22 @@ export function ProjectForm() {
           <div className="flex items-center justify-between">
             <div>
               <CardTitle className="text-xl flex items-center gap-2">
-                Step {currentStep} of {TOTAL_STEPS}
+                Step {currentStep} of {totalSteps}
                 {currentStep > 1 && (
                   <CheckCircle2 className="h-5 w-5 text-green-500" />
                 )}
+                <Badge variant="secondary" className="ml-1">
+                  {INTAKE_LABELS[intakeType]}
+                </Badge>
               </CardTitle>
               <CardDescription className="mt-1 text-base">
-                {STEP_TITLES[currentStep - 1]}
+                {stepTitles[currentStep - 1]}
               </CardDescription>
             </div>
             <div className="text-right">
+              <Button variant="ghost" size="sm" onClick={handleChangeIntakeType} className="mb-2">
+                Change Type
+              </Button>
               <p className="text-3xl font-bold bg-gradient-to-r from-primary to-primary/60 bg-clip-text text-transparent">
                 {Math.round(progressPercentage)}%
               </p>
@@ -130,7 +211,7 @@ export function ProjectForm() {
 
           {/* Step indicators */}
           <div className="mt-6 flex justify-between">
-            {STEP_TITLES.map((title, index) => (
+            {stepTitles.map((title, index) => (
               <div key={index} className="flex flex-col items-center gap-2">
                 <div
                   className={`
@@ -176,12 +257,13 @@ export function ProjectForm() {
               Back
             </Button>
             <div className="flex flex-col gap-2 text-center text-xs text-muted-foreground sm:flex-1">
-              <p>Step {currentStep} of {TOTAL_STEPS}</p>
+              <p>Step {currentStep} of {totalSteps}</p>
             </div>
-            {currentStep < TOTAL_STEPS ? (
+            {currentStep < totalSteps ? (
               <Button
                 onClick={handleNext}
                 variant="default"
+                disabled={!canAdvance}
                 className="w-full sm:w-auto"
               >
                 Next

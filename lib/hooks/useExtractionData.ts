@@ -527,14 +527,13 @@ export function useExtractionData(
 
     const pageDetections = detections.get(currentPageId) || [];
 
-    // Filter out deleted unless includeDeleted is true
-    // Also filter out 'exterior_wall' and 'building' - these are used for calculations
-    // behind the scenes but don't need to be shown in the editor UI
+    // Filter out deleted unless includeDeleted is true.
+    // Keep exterior_wall visible/editable because it is the siding/facade takeoff layer.
     // TODO: Re-enable roof when ready to support roofing jobs
     const filtered = pageDetections.filter((d) => {
       const cls = d.class as AllDetectionClasses;
       // Roof disabled due to page_id bug and rare usage
-      if (cls === 'exterior_wall' || cls === 'building' || cls === 'roof') return false;
+      if (cls === 'building' || cls === 'roof') return false;
       if (!includeDeleted && d.status === 'deleted') return false;
       return true;
     });
@@ -574,9 +573,9 @@ export function useExtractionData(
 
     detections.forEach((pageDetections) => {
       for (const detection of pageDetections) {
-        // Skip exterior_wall, building, and roof detections (hidden from UI, used for backend calculations)
+        // Skip internal/disabled classes. Exterior walls are material-assignable siding/facade markups.
         const cls = detection.class as AllDetectionClasses;
-        if (cls === 'exterior_wall' || cls === 'building' || cls === 'roof') continue;
+        if (cls === 'building' || cls === 'roof') continue;
         if (detection.status !== 'deleted') {
           total++;
           if (detection.assigned_material_id) {

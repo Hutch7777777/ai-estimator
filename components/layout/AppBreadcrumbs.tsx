@@ -101,8 +101,9 @@ function buildCrumbs(pathname: string, names: Record<string, string>): Crumb[] {
     names[id] || nameCache.get(id) || placeholder;
 
   if (pathname.startsWith('/dashboard')) return [{ label: 'Dashboard' }];
+  if (pathname.startsWith('/assistant')) return [{ label: 'AI Assistant' }];
   if (pathname.startsWith('/account')) return [{ label: 'Settings' }];
-  if (pathname.startsWith('/tools/cad-markup')) return [{ label: 'Tools' }, { label: 'PDF Markup' }];
+  if (pathname.startsWith('/tools/cad-markup')) return [{ label: 'Projects', href: '/projects' }];
 
   // /projects/[id](/...) — the id segment may be '_' for legacy orphan jobs.
   const projectMatch = pathname.match(new RegExp(`^/projects/(${UUID_SEGMENT}|_)(/.*)?$`));

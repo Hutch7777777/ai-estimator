@@ -27,9 +27,12 @@ interface DetectionRecord {
   pixel_y: number;
   pixel_width: number;
   pixel_height: number;
+  confidence?: number | null;
+  detection_index?: number | null;
   polygon_points?: Array<{x: number, y: number}> | null;
   area_sf: number | null;
   perimeter_lf: number | null;
+  needs_review?: boolean;
   status?: string;
   is_deleted?: boolean;
 }
@@ -173,8 +176,9 @@ export async function GET(request: Request) {
 
     // Fetch detections with priority:
     // 1. extraction_detections_draft (user's actual edits from Detection Editor)
-    // 2. extraction_detections_validated (fallback)
-    // 3. extraction_detection_details (original AI detections as last resort)
+    // 2. extraction_detections_refined (AI-refined pre-editor layer)
+    // 3. extraction_detections_validated (legacy fallback)
+    // 4. extraction_detection_details (original AI detections as last resort)
 
     console.log('[API] Page IDs to fetch detections for:', pageIds);
 
@@ -221,9 +225,12 @@ export async function GET(request: Request) {
             pixel_y: d.pixel_y,
             pixel_width: d.pixel_width,
             pixel_height: d.pixel_height,
+            confidence: d.confidence,
+            detection_index: d.detection_index,
             polygon_points: d.polygon_points,
             area_sf: d.area_sf,
             perimeter_lf: d.perimeter_lf,
+            needs_review: d.needs_review,
           })),
         })),
       });
@@ -241,7 +248,7 @@ export async function GET(request: Request) {
       // Query draft detections including area_sf and perimeter_lf columns
       const { data: draftData, error: draftError } = await supabase
         .from('extraction_detections_draft')
-        .select('id, page_id, class, pixel_x, pixel_y, pixel_width, pixel_height, polygon_points, area_sf, perimeter_lf, is_deleted')
+        .select('id, page_id, class, pixel_x, pixel_y, pixel_width, pixel_height, confidence, detection_index, polygon_points, area_sf, perimeter_lf, is_deleted')
         .in('page_id', pageIds)
         .eq('is_deleted', false);
 
@@ -273,14 +280,38 @@ export async function GET(request: Request) {
       }
 
       // =====================================================================
-      // PRIORITY 2: VALIDATED detections (only reached if NO drafts)
+      // PRIORITY 2: REFINED detections (only reached if NO drafts)
       // =====================================================================
-      console.log('[API] ============ STEP 2: VALIDATED QUERY ============');
+      console.log('[API] ============ STEP 2: REFINED QUERY ============');
       console.log('[API] (Only reached because draft returned 0 records)');
+
+      const { data: refinedData, error: refinedError } = await supabase
+        .from('extraction_detections_refined')
+        .select('id, page_id, class, pixel_x, pixel_y, pixel_width, pixel_height, confidence, detection_index, polygon_points, area_sf, perimeter_lf, needs_review, is_deleted')
+        .in('page_id', pageIds)
+        .eq('is_deleted', false)
+        .order('detection_index', { ascending: true });
+
+      console.log('[API] Refined query complete:');
+      console.log('[API]   - Data:', refinedData === null ? 'NULL' : `Array with ${refinedData?.length || 0} items`);
+      console.log('[API]   - Error:', refinedError ? JSON.stringify(refinedError) : 'none');
+
+      if (refinedError) {
+        console.log('[API] ⚠️ REFINED QUERY FAILED:', refinedError.message);
+      } else if (refinedData && refinedData.length > 0) {
+        console.log(`[API] ✅ Using REFINED detections: ${refinedData.length}`);
+        return buildResponse(refinedData as DetectionRecord[], 'refined (AI pre-editor)');
+      }
+
+      // =====================================================================
+      // PRIORITY 3: VALIDATED detections (legacy fallback)
+      // =====================================================================
+      console.log('[API] ============ STEP 3: VALIDATED QUERY ============');
+      console.log('[API] (Only reached because draft and refined returned 0 records)');
 
       const { data: validatedData, error: validatedError } = await supabase
         .from('extraction_detections_validated')
-        .select('id, page_id, class, pixel_x, pixel_y, pixel_width, pixel_height, area_sf, perimeter_lf')
+        .select('id, page_id, class, pixel_x, pixel_y, pixel_width, pixel_height, confidence, detection_index, area_sf, perimeter_lf')
         .in('page_id', pageIds);
 
       console.log('[API] Validated query complete:');
@@ -295,14 +326,14 @@ export async function GET(request: Request) {
       }
 
       // =====================================================================
-      // PRIORITY 3: Original AI detections (last resort)
+      // PRIORITY 4: Original AI detections (last resort)
       // =====================================================================
-      console.log('[API] ============ STEP 3: AI ORIGINAL QUERY ============');
-      console.log('[API] (Only reached because both draft AND validated returned 0)');
+      console.log('[API] ============ STEP 4: AI ORIGINAL QUERY ============');
+      console.log('[API] (Only reached because draft, refined, and validated returned 0)');
 
       const { data: aiData, error: aiError } = await supabase
         .from('extraction_detection_details')
-        .select('id, page_id, class, pixel_x, pixel_y, pixel_width, pixel_height, area_sf, perimeter_lf, status')
+        .select('id, page_id, class, pixel_x, pixel_y, pixel_width, pixel_height, confidence, detection_index, area_sf, perimeter_lf, status')
         .in('page_id', pageIds)
         .neq('status', 'deleted');
 

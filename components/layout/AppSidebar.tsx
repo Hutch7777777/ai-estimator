@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { LayoutDashboard, FolderOpen, Settings, PencilRuler } from 'lucide-react';
+import { Bot, LayoutDashboard, FolderOpen, Settings } from 'lucide-react';
 import {
   Sidebar,
   SidebarContent,
@@ -23,12 +23,8 @@ import { useOrganization } from '@/lib/hooks/useOrganization';
 const NAV_ITEMS = [
   { title: 'Dashboard', href: '/dashboard', icon: LayoutDashboard, match: /^\/dashboard/ },
   { title: 'Projects', href: '/projects', icon: FolderOpen, match: /^\/projects/ },
+  { title: 'AI Assistant', href: '/ai', icon: Bot, match: /^\/ai/ },
   { title: 'Settings', href: '/account', icon: Settings, match: /^\/account/ },
-];
-
-const TOOL_ITEMS = [
-  // Legacy/standalone tool — pending the Phase-5 wire-or-delete decision.
-  { title: 'PDF Markup', href: '/tools/cad-markup', icon: PencilRuler, match: /^\/tools\/cad-markup/ },
 ];
 
 // Plan Room sidebar (identity P6): ink chrome, square items with a 2px brand
@@ -65,28 +61,6 @@ export function AppSidebar() {
           <SidebarGroupContent>
             <SidebarMenu>
               {NAV_ITEMS.map((item) => (
-                <SidebarMenuItem key={item.title}>
-                  <SidebarMenuButton
-                    asChild
-                    isActive={item.match.test(pathname)}
-                    tooltip={item.title}
-                    className={MENU_BUTTON_CLASSES}
-                  >
-                    <Link href={item.href}>
-                      <item.icon />
-                      <span>{item.title}</span>
-                    </Link>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-              ))}
-            </SidebarMenu>
-          </SidebarGroupContent>
-        </SidebarGroup>
-        <SidebarGroup>
-          <SidebarGroupLabel className={GROUP_LABEL_CLASSES}>Tools</SidebarGroupLabel>
-          <SidebarGroupContent>
-            <SidebarMenu>
-              {TOOL_ITEMS.map((item) => (
                 <SidebarMenuItem key={item.title}>
                   <SidebarMenuButton
                     asChild

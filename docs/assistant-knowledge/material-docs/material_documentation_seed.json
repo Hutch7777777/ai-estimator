@@ -1,0 +1,600 @@
+{
+  "version": "2026-06-27",
+  "source": "local_material_documentation_seed",
+  "references": [
+    {
+      "doc_key": "james_hardie_installation_guidance",
+      "manufacturer": "James Hardie",
+      "product_family": "HardiePlank, HardiePanel, HardieTrim, HardieShingle, ColorPlus",
+      "document_title": "James Hardie Installation Guidance and Technical Downloads",
+      "document_type": "installation_guidance",
+      "source_url": "https://www.jameshardie.com/installation-instructions-technical-docs/",
+      "division": "07",
+      "trades": ["siding"],
+      "categories": [
+        "lap_siding",
+        "panel",
+        "trim",
+        "soffit",
+        "shingle",
+        "fiber_cement",
+        "colorplus"
+      ],
+      "product_keywords": [
+        "hardie",
+        "hardieplank",
+        "hardiepanel",
+        "hardietrim",
+        "hardieshingle",
+        "colorplus",
+        "artisan"
+      ],
+      "applicability": "Use for James Hardie fiber-cement siding, trim, soffit, shingle, panel, and ColorPlus project questions.",
+      "risk_flags": [
+        "Verify the project HardieZone and use the product-specific written instructions for that zone.",
+        "Flag missing clearance, flashing, fastener, cut-edge treatment, and ColorPlus touch-up requirements.",
+        "Do not treat generic fiber-cement details as James Hardie warranty guidance."
+      ],
+      "estimating_guidance": [
+        "For proposals, include product line, texture, exposure/reveal, finish, ColorPlus color, trim system, flashing scope, caulk/touch-up expectations, and exclusions for hidden substrate damage.",
+        "For RFIs, ask for product profile, exposure, color, corner/trim material, WRB/flashing responsibility, and manufacturer-specific installation details when not shown.",
+        "For risk review, check clearances at roof, grade, decks, paving, horizontal trim, and penetrations."
+      ],
+      "source_notes": [
+        "Official James Hardie page for installation instructions, technical docs, clearance requirements, CAD details, and installation resources."
+      ],
+      "priority": 100
+    },
+    {
+      "doc_key": "james_hardie_hardietrim_hz10_instructions",
+      "manufacturer": "James Hardie",
+      "product_family": "HardieTrim HZ10 Boards",
+      "document_title": "HardieTrim Boards Installation Instructions",
+      "document_type": "installation_instructions",
+      "source_url": "https://www.buildsite.com/pdf/jameshardie/HardieTrim-Boards-Installation-Instructions-1409243.pdf",
+      "division": "07",
+      "trades": ["siding"],
+      "categories": [
+        "trim",
+        "fiber_cement",
+        "outside_corner_trim",
+        "inside_corner_trim",
+        "frieze_board",
+        "belly_band"
+      ],
+      "product_keywords": [
+        "hardietrim",
+        "trim",
+        "hz10",
+        "belly band",
+        "corner",
+        "frieze",
+        "fiber cement trim"
+      ],
+      "applicability": "Use for HardieTrim-specific scope, corner trim, frieze, belly band, window/door trim, and trim installation risks.",
+      "risk_flags": [
+        "Confirm the HardieZone and state/region applicability before relying on a specific trim instruction set.",
+        "Flag missing trim fastener type, spacing, corner build-up, flashing, and cut-edge treatment details.",
+        "Do not assume trim is interchangeable with wood, PVC, or other fiber-cement manufacturers."
+      ],
+      "estimating_guidance": [
+        "Separate HardieTrim material from whitewood/PVC alternates in proposals and change orders.",
+        "Include belly band flashing and horizontal trim water-management scope when applicable.",
+        "Ask RFIs when details show trim but do not specify thickness, finish, reveal, or fastening."
+      ],
+      "source_notes": [
+        "Current indexed HardieTrim PDF notes region applicability and states it is product/zone specific."
+      ],
+      "priority": 94
+    },
+    {
+      "doc_key": "nichiha_awp_horizontal_installation",
+      "manufacturer": "Nichiha",
+      "product_family": "AWP 1818 and AWP 3030",
+      "document_title": "Nichiha AWP Horizontal Installation Guide",
+      "document_type": "installation_guide",
+      "source_url": "https://www.nichiha.com/docs/Nichiha-Install-Guide-AWP-Horizontal-October%202020-English.pdf",
+      "division": "07",
+      "trades": ["siding"],
+      "categories": [
+        "siding",
+        "panel",
+        "rainscreen",
+        "architectural_wall_panel"
+      ],
+      "product_keywords": [
+        "nichiha",
+        "awp",
+        "architectural wall panel",
+        "1818",
+        "3030",
+        "riftsawn",
+        "naturawood",
+        "industrialblock",
+        "empireblock",
+        "corbosa"
+      ],
+      "applicability": "Use for Nichiha AWP horizontal panel systems and panelized cladding scope.",
+      "risk_flags": [
+        "Confirm panel orientation, furring/rainscreen condition, clip/accessory system, and substrate before pricing.",
+        "Flag missing outside/inside corner, starter track, compression joint, and penetration details.",
+        "Do not price Nichiha AWP like lap siding; accessories and layout waste can drive cost."
+      ],
+      "estimating_guidance": [
+        "For proposals, call out panel orientation, panel series, corner/trim approach, attachment system, and substrate assumptions.",
+        "For RFIs, ask for elevations with panel layout, joint alignment, accessory colors, and transition details."
+      ],
+      "source_notes": [
+        "Official Nichiha AWP guide for horizontal orientation; Nichiha also publishes a separate vertical guide."
+      ],
+      "priority": 92
+    },
+    {
+      "doc_key": "nichiha_awp_vertical_installation",
+      "manufacturer": "Nichiha",
+      "product_family": "AWP 3030",
+      "document_title": "Nichiha AWP Vertical Installation Guide",
+      "document_type": "installation_guide",
+      "source_url": "https://www.nichiha.com/docs/Nichiha-Install-Guide-Vertical-AWP-3030-October-2020-English.pdf",
+      "division": "07",
+      "trades": ["siding"],
+      "categories": [
+        "siding",
+        "panel",
+        "rainscreen",
+        "architectural_wall_panel"
+      ],
+      "product_keywords": [
+        "nichiha",
+        "awp",
+        "vertical",
+        "3030",
+        "architectural wall panel"
+      ],
+      "applicability": "Use when drawings/specs call for vertical Nichiha AWP 3030 installation.",
+      "risk_flags": [
+        "Do not use horizontal AWP assumptions for vertical AWP layouts.",
+        "Flag missing vertical orientation details, panel transitions, and manufacturer accessory requirements."
+      ],
+      "estimating_guidance": [
+        "Ask for manufacturer layout details when vertical panels are shown without joint/accessory information.",
+        "Separate vertical AWP labor/material assumptions from horizontal AWP or lap siding assemblies."
+      ],
+      "source_notes": [
+        "Official Nichiha vertical AWP guide covers 3030mm products in vertical application."
+      ],
+      "priority": 86
+    },
+    {
+      "doc_key": "lp_smartside_product_literature",
+      "manufacturer": "LP SmartSide",
+      "product_family": "LP SmartSide Trim and Siding, ExpertFinish",
+      "document_title": "LP SmartSide Product Literature",
+      "document_type": "resource_library",
+      "source_url": "https://www.lpcorp.com/product-literature",
+      "division": "07",
+      "trades": ["siding"],
+      "categories": [
+        "lap_siding",
+        "trim",
+        "panel",
+        "soffit",
+        "engineered_wood",
+        "prefinished"
+      ],
+      "product_keywords": [
+        "lp smartside",
+        "smartside",
+        "expertfinish",
+        "lap siding",
+        "panel siding",
+        "trim",
+        "fascia",
+        "soffit"
+      ],
+      "applicability": "Use for LP SmartSide and ExpertFinish product-specific instructions, warranty, care, maintenance, and spec sheets.",
+      "risk_flags": [
+        "Confirm whether the product is primed or ExpertFinish/pre-finished before writing finish/touch-up scope.",
+        "Flag missing cut-edge, storage, clearance, joint, flashing, and touch-up requirements.",
+        "Do not apply fiber-cement details to engineered wood siding without checking LP guidance."
+      ],
+      "estimating_guidance": [
+        "For proposals, separate primed-paint scope from ExpertFinish prefinished material scope.",
+        "For RFIs, ask for product series, texture, finish, color, exposure, trim dimensions, and maintenance/warranty requirements."
+      ],
+      "source_notes": [
+        "Official LP resource library indexes SmartSide installation, care, warranty, SDS, and product specification documents."
+      ],
+      "priority": 90
+    },
+    {
+      "doc_key": "allura_fiber_cement_installation_manual",
+      "manufacturer": "Allura",
+      "product_family": "Allura Fiber Cement Exterior Products",
+      "document_title": "Allura Fiber Cement Exterior Products Installation Manual",
+      "document_type": "installation_manual",
+      "source_url": "https://allurausa.com/resources/installation-manual-allura-fiber-cement-exterior-products",
+      "division": "07",
+      "trades": ["siding"],
+      "categories": [
+        "fiber_cement",
+        "lap_siding",
+        "trim",
+        "soffit",
+        "panel",
+        "shake"
+      ],
+      "product_keywords": [
+        "allura",
+        "fiber cement",
+        "spectrum",
+        "lap siding",
+        "shake",
+        "trim",
+        "soffit",
+        "panel"
+      ],
+      "applicability": "Use for Allura fiber-cement siding, panels, trim, soffit, shake, and Spectrum finish questions.",
+      "risk_flags": [
+        "Flag missing manufacturer, product line, fastener, joint, flashing, and finish requirements.",
+        "Do not merge Allura and James Hardie details unless the project explicitly allows substitutions.",
+        "Confirm code and project specification requirements before final scope language."
+      ],
+      "estimating_guidance": [
+        "For alternates, identify Allura as a separate manufacturer with its own installation requirements.",
+        "For proposals, call out whether finish is primed, field-painted, or factory-finished."
+      ],
+      "source_notes": [
+        "Official Allura resource states the manual should be used with project drawings/specs, codes, and compliance documents."
+      ],
+      "priority": 84
+    },
+    {
+      "doc_key": "dupont_tyvek_residential_wrb_reside",
+      "manufacturer": "DuPont",
+      "product_family": "Tyvek HomeWrap, Tyvek WRB, Tyvek Flashing Tape, Tyvek Seam Tape",
+      "document_title": "DuPont Tyvek WRB Residing Installation Guide",
+      "document_type": "installation_guidelines",
+      "source_url": "https://www.dupont.com/content/dam/dupont/amer/us/en/performance-building-solutions/public/documents/en/K22331_Residential-WRB_Install_Reside.pdf",
+      "division": "07",
+      "trades": ["siding", "windows"],
+      "categories": [
+        "wrb",
+        "water_barrier",
+        "flashing",
+        "flashing_tape",
+        "window_flashing"
+      ],
+      "product_keywords": [
+        "dupont",
+        "tyvek",
+        "homewrap",
+        "commercialwrap",
+        "flashing tape",
+        "seam tape",
+        "wrb",
+        "water-resistive barrier"
+      ],
+      "applicability": "Use for WRB replacement/integration, residing projects, window/door flashing tie-ins, and water-management RFIs.",
+      "risk_flags": [
+        "Flag missing WRB scope when residing includes tear-off or unknown existing housewrap condition.",
+        "Verify sequence: windows/doors before or after WRB affects flashing steps.",
+        "Require shingle-lap logic and proper tie-in to flashing; do not bury WRB/flashing responsibility in generic siding scope."
+      ],
+      "estimating_guidance": [
+        "For proposals, explicitly include or exclude WRB replacement, seam tape, flashing tape, window/door flashing, and integration with existing openings.",
+        "For RFIs, ask who owns WRB, window flashing, and repairs when existing flashing is missing or incompatible."
+      ],
+      "source_notes": [
+        "Official DuPont guide covers Tyvek WRB residing conditions and window/door flashing integration."
+      ],
+      "priority": 96
+    },
+    {
+      "doc_key": "osi_quad_max_product_docs",
+      "manufacturer": "OSI",
+      "product_family": "QUAD MAX Window, Door and Siding Sealant",
+      "document_title": "OSI QUAD MAX Sealant Product Documents",
+      "document_type": "technical_data",
+      "source_url": "https://www.ositough.com/products/central-pdp.html/osi-quad-max/SAP_0201X5O069F7.html",
+      "division": "07",
+      "trades": ["siding", "windows"],
+      "categories": ["sealant", "caulk", "accessories", "window_caulk"],
+      "product_keywords": [
+        "osi",
+        "quad max",
+        "sealant",
+        "caulk",
+        "window sealant",
+        "door sealant",
+        "siding sealant"
+      ],
+      "applicability": "Use for exterior sealant, siding/window/door caulk, color match, and joint-sealant scope.",
+      "risk_flags": [
+        "Flag missing sealant type/color, substrate compatibility, joint design, backer rod, and weather/application limitations.",
+        "Do not assume sealant is a substitute for flashing or WRB.",
+        "Color-match caulk should be scoped separately from field paint or factory finish."
+      ],
+      "estimating_guidance": [
+        "For proposals, separate color-matched sealant, paintable sealant, and flashing sealant where applicable.",
+        "For RFIs, ask for sealant color and whether joints require backer rod or special preparation."
+      ],
+      "source_notes": [
+        "Official OSI product page links technical data sheets and safety data sheets for QUAD MAX."
+      ],
+      "priority": 76
+    },
+    {
+      "doc_key": "fastplank_installation_guide",
+      "manufacturer": "Engage Building Products",
+      "product_family": "FastPlank Aluminum Plank Siding",
+      "document_title": "FastPlank Installation Guide",
+      "document_type": "installation_guide",
+      "source_url": "https://engagebp.com/wp-content/uploads/sites/5/2021/09/FastPlank-Installation-Guide_Jan24-2024.pdf",
+      "division": "07",
+      "trades": ["siding", "soffit"],
+      "categories": [
+        "siding",
+        "soffit",
+        "aluminum_plank",
+        "rainscreen",
+        "trim",
+        "fasteners"
+      ],
+      "product_keywords": [
+        "fastplank",
+        "engage",
+        "aluminum plank",
+        "v-notch",
+        "soffit",
+        "easytrim"
+      ],
+      "applicability": "Use for FastPlank aluminum plank siding/soffit systems and accessory-heavy cladding details.",
+      "risk_flags": [
+        "Confirm whether the assembly uses FastPlank/EasyTrim system accessories and manufacturer clips.",
+        "Flag missing starter, trim, corner, soffit, clip/fastener, and substrate details.",
+        "Do not price like ordinary lap siding; system accessories and layout control cost."
+      ],
+      "estimating_guidance": [
+        "For proposals, specify plank width/profile, color, orientation, soffit condition, trim/accessory system, and included transitions.",
+        "For RFIs, ask for details at corners, penetrations, terminations, and soffit-to-wall transitions."
+      ],
+      "source_notes": [
+        "Official Engage FastPlank guide describes a high-performance aluminum plank system with built-in rainscreen."
+      ],
+      "priority": 82
+    },
+    {
+      "doc_key": "newtechwood_all_weather_horizontal",
+      "manufacturer": "NewTechWood",
+      "product_family": "All Weather Siding",
+      "document_title": "NewTechWood All Weather Siding Horizontal Installation Guide",
+      "document_type": "installation_guide",
+      "source_url": "https://www.newtechwood.com/pdf/ALL_WEATHER_Siding_Horizontal_Installation_Guide.pdf",
+      "division": "07",
+      "trades": ["siding"],
+      "categories": ["siding", "composite_cladding", "trim", "fasteners"],
+      "product_keywords": [
+        "newtechwood",
+        "all weather siding",
+        "composite siding",
+        "roman antique",
+        "shou sugi ban",
+        "spanish walnut"
+      ],
+      "applicability": "Use for NewTechWood horizontal composite siding assemblies.",
+      "risk_flags": [
+        "Confirm horizontal vs vertical guide before drafting scope.",
+        "Flag missing trim kit, starter/clip, furring/substrate, expansion, and fastener requirements.",
+        "Follow local code and manufacturer guide; do not substitute deck-board installation assumptions."
+      ],
+      "estimating_guidance": [
+        "For proposals, specify orientation, color/profile, trim package, fasteners, and included transitions.",
+        "For RFIs, request details for penetrations, outside corners, terminations, and ventilation/rainscreen condition."
+      ],
+      "source_notes": [
+        "Official NewTechWood guide states diagrams/instructions are not a substitute for licensed professional or code requirements."
+      ],
+      "priority": 74
+    },
+    {
+      "doc_key": "azek_trim_moulding_installation",
+      "manufacturer": "Azek",
+      "product_family": "AZEK Trim and Moulding",
+      "document_title": "AZEK Trim and Moulding Installation Guide",
+      "document_type": "installation_guide",
+      "source_url": "https://azekexteriors.com/docs/installation/azek_trim_moulding_installguide.pdf",
+      "division": "07",
+      "trades": ["siding"],
+      "categories": [
+        "trim",
+        "architectural",
+        "pvc_trim",
+        "column",
+        "post",
+        "corbel"
+      ],
+      "product_keywords": [
+        "azek",
+        "pvc trim",
+        "cellular pvc",
+        "column wrap",
+        "post wrap",
+        "moulding",
+        "trim"
+      ],
+      "applicability": "Use for AZEK cellular PVC trim, moulding, post wraps, column wraps, and architectural trim alternates.",
+      "risk_flags": [
+        "Flag missing expansion/contraction, fastening, adhesive, paint, and joint-treatment requirements.",
+        "Do not treat PVC trim, wood trim, and fiber-cement trim as interchangeable in proposal assumptions.",
+        "Confirm whether trim is paint-ready or finished and who owns painting."
+      ],
+      "estimating_guidance": [
+        "For proposals, specify PVC trim as an alternate or selected trim system and clarify paint/finish scope.",
+        "For RFIs, ask for trim thickness, profile, column/post wrap details, and joint/fastener requirements."
+      ],
+      "source_notes": [
+        "Official AZEK guide covers general recommendations for AZEK Trim and Moulding, including specialty profiles."
+      ],
+      "priority": 72
+    },
+    {
+      "doc_key": "mid_america_resource_library",
+      "manufacturer": "Mid-America",
+      "product_family": "Shutters, Gable Vents, Mounting Blocks, Siding Accessories",
+      "document_title": "Mid-America Resource Library",
+      "document_type": "resource_library",
+      "source_url": "https://www.westlakeroyalbuildingproducts.com/siding-and-accessories/mid-america/resource-library",
+      "division": "07",
+      "trades": ["siding", "ventilation"],
+      "categories": [
+        "architectural",
+        "vents",
+        "shutter",
+        "gable_vent",
+        "mounting_block",
+        "accessories"
+      ],
+      "product_keywords": [
+        "mid-america",
+        "shutter",
+        "gable vent",
+        "mounting block",
+        "vinyl accessory",
+        "siding accessory"
+      ],
+      "applicability": "Use for decorative shutters, gable vents, mounting blocks, and common siding accessory scope.",
+      "risk_flags": [
+        "Confirm whether accessories are functional, decorative, paintable, vented, or owner-selected.",
+        "Flag missing size, color, fastening, substrate, and siding-depth compatibility.",
+        "For shutters, allow for expansion and do not over-tighten fasteners."
+      ],
+      "estimating_guidance": [
+        "For proposals, separate allowance-style decorative accessories from base siding scope unless clearly shown.",
+        "For RFIs, ask for sizes, colors, styles, quantities, and installation substrate details."
+      ],
+      "source_notes": [
+        "Official Westlake/Mid-America resource library provides installation guides, product brochures, technical documents, SDS, and warranties."
+      ],
+      "priority": 58
+    },
+    {
+      "doc_key": "fortifiber_fortiflash_window_flashing",
+      "manufacturer": "Fortifiber / Henry",
+      "product_family": "FortiFlash, FortiFlash Butyl, Moistop",
+      "document_title": "Fortifiber Window Flashing Method A Installation Instructions",
+      "document_type": "installation_instructions",
+      "source_url": "https://www.buildsite.com/pdf/fortifiber/Fortifiber-Window-Flashing-Method-A-Installation-Instructions-1408711.pdf",
+      "division": "07",
+      "trades": ["siding", "windows"],
+      "categories": [
+        "flashing",
+        "flashing_tape",
+        "window_flashing",
+        "waterproofing"
+      ],
+      "product_keywords": [
+        "fortifiber",
+        "fortiflash",
+        "fortiflash butyl",
+        "moistop",
+        "window flashing",
+        "self-adhered flashing"
+      ],
+      "applicability": "Use for self-adhered window/door flashing and waterproofing tie-in questions.",
+      "risk_flags": [
+        "Flag missing surface prep, primer, sealant compatibility, temperature, and sequence requirements.",
+        "Do not treat flashing tape as a replacement for proper WRB integration.",
+        "Verify whether product is used around windows, doors, penetrations, parapets, or horizontal surfaces."
+      ],
+      "estimating_guidance": [
+        "For proposals, identify whether flashing is included for new openings, replacement windows, or existing windows during reside.",
+        "For RFIs, ask for flashing sequence and whether existing windows are being removed/reinstalled."
+      ],
+      "source_notes": [
+        "Indexed Fortifiber installation instructions identify window flashing methods and limitations."
+      ],
+      "priority": 70
+    },
+    {
+      "doc_key": "gaf_timberline_layerlock_installation",
+      "manufacturer": "GAF",
+      "product_family": "Timberline HDZ, UHDZ, LayerLock shingles",
+      "document_title": "GAF Timberline LayerLock Installation Instructions",
+      "document_type": "installation_instructions",
+      "source_url": "https://www.gaf.com/en-us/document-library/documents/installation-instructions-%26-guides/timberline-layerlock-installation-instructions-trilingual-restl622.pdf",
+      "division": "07",
+      "trades": ["roofing"],
+      "categories": [
+        "shingles",
+        "starter_strip",
+        "ridge_cap",
+        "underlayment",
+        "ventilation"
+      ],
+      "product_keywords": [
+        "gaf",
+        "timberline",
+        "hdz",
+        "uhdz",
+        "layerlock",
+        "shingle",
+        "ridge cap",
+        "starter strip"
+      ],
+      "applicability": "Use for GAF Timberline shingle installation and roofing scope/risk checks when roofing trade is selected.",
+      "risk_flags": [
+        "Flag missing roof slope, deck condition, underlayment, starter, ventilation, ridge cap, and warranty-specific fastening requirements.",
+        "Do not use GAF warranty assumptions for Owens Corning or other shingle brands."
+      ],
+      "estimating_guidance": [
+        "For proposals, identify shingle product/color, underlayment, starter/ridge cap, ventilation, tear-off, decking, and ice/water scope.",
+        "For RFIs, ask for slope, ventilation, decking replacement allowance, and high-wind/warranty fastening requirements."
+      ],
+      "source_notes": [
+        "Official GAF instructions include roof slope, deck, coverage, fastening, and warranty-related installation requirements."
+      ],
+      "priority": 62
+    },
+    {
+      "doc_key": "owens_corning_roofing_install_instructions",
+      "manufacturer": "Owens Corning",
+      "product_family": "Duration shingles and roofing system components",
+      "document_title": "Owens Corning Roofing Product Install Instructions",
+      "document_type": "resource_library",
+      "source_url": "https://www.owenscorning.com/en-us/roofing/install-instructions",
+      "division": "07",
+      "trades": ["roofing"],
+      "categories": [
+        "shingles",
+        "underlayment",
+        "ice_water_shield",
+        "starter_strip",
+        "ridge_cap",
+        "ventilation"
+      ],
+      "product_keywords": [
+        "owens corning",
+        "duration",
+        "duration storm",
+        "duration flex",
+        "weatherlock",
+        "duraridge",
+        "roofing"
+      ],
+      "applicability": "Use for Owens Corning shingle and component installation questions when roofing trade is selected.",
+      "risk_flags": [
+        "Flag missing shingle series, roof deck, slope, underlayment, ice/water, starter, ridge, ventilation, and reroof limitations.",
+        "Do not apply GAF or generic roofing details to Owens Corning warranty scope without checking OC instructions."
+      ],
+      "estimating_guidance": [
+        "For proposals, separate shingle material, underlayment, starter, ridge, ventilation, ice/water, tear-off, disposal, and decking allowance.",
+        "For RFIs, ask for product series, color, ventilation requirements, and roof assembly conditions."
+      ],
+      "source_notes": [
+        "Official Owens Corning roofing install-instructions library covers shingles, underlayment, vents, and system components."
+      ],
+      "priority": 60
+    }
+  ]
+}

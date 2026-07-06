@@ -27,6 +27,7 @@ import {
   Layers,
   Sparkles,
   ZoomIn,
+  RefreshCw,
 } from 'lucide-react';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { isDevBypassEnabled } from '@/lib/hooks/useOrganization';
@@ -36,7 +37,11 @@ import type { ExtractionJob, ExtractionPage, PageType } from '@/lib/types/extrac
 // Constants
 // =============================================================================
 
-const EXTRACTION_API_URL = process.env.NEXT_PUBLIC_EXTRACTION_API_URL || 'https://extraction-api-production.up.railway.app';
+const LOCAL_EXTRACTION_API_URL =
+  process.env.NEXT_PUBLIC_LOCAL_EXTRACTION_API_URL || 'http://localhost:5050';
+const EXTRACTION_API_URL = isDevBypassEnabled()
+  ? LOCAL_EXTRACTION_API_URL
+  : process.env.NEXT_PUBLIC_EXTRACTION_API_URL || 'https://extraction-api-production.up.railway.app';
 
 // Polling interval for post-confirm status checking
 const POLLING_INTERVAL = 3000;
@@ -47,11 +52,12 @@ const PROCESSING_STEPS = [
   { id: 'convert', label: 'Converting pages', icon: Layers },
   { id: 'classify', label: 'Classifying page types', icon: FileSearch },
   { id: 'detect', label: 'Running AI detection', icon: Sparkles },
+  { id: 'refine', label: 'Refining AI markups', icon: Sparkles },
 ] as const;
 
 // Get step status based on job processing status
 function getStepStatus(stepId: string, processingStatus: string): 'complete' | 'active' | 'pending' {
-  const statusOrder = ['upload', 'convert', 'classify', 'detect'];
+  const statusOrder = ['upload', 'convert', 'classify', 'detect', 'refine'];
   const stepIndex = statusOrder.indexOf(stepId);
 
   // Map job status to current step
@@ -59,7 +65,8 @@ function getStepStatus(stepId: string, processingStatus: string): 'complete' | '
   if (processingStatus === 'converting') currentStepIndex = 1;
   else if (processingStatus === 'classifying') currentStepIndex = 2;
   else if (processingStatus === 'processing') currentStepIndex = 3;
-  else if (processingStatus === 'complete') currentStepIndex = 4; // All complete
+  else if (processingStatus === 'refining') currentStepIndex = 4;
+  else if (processingStatus === 'complete') currentStepIndex = 5; // All complete
 
   // Upload is always complete once we're processing
   if (stepId === 'upload') return 'complete';
@@ -116,6 +123,7 @@ const PAGE_TYPES: PageType[] = [
   'detail',
   'schedule',
   'floor_plan',
+  'roof_plan',
   'elevation',
   'section',
   'site_plan',
@@ -132,6 +140,8 @@ const getBadgeColor = (type: PageType | null): string => {
       return 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200';
     case 'floor_plan':
       return 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200';
+    case 'roof_plan':
+      return 'bg-cyan-100 text-cyan-800 dark:bg-cyan-900 dark:text-cyan-200';
     case 'schedule':
       return 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200';
     case 'section':
@@ -150,6 +160,28 @@ const formatPageType = (type: PageType | null): string => {
   if (!type) return 'unclassified';
   return type.replace(/_/g, ' ');
 };
+
+function hasCreditError(error?: string | null): boolean {
+  return Boolean(error && /credit balance is too low|purchase credits|plans & billing/i.test(error));
+}
+
+function hasModelNotFoundError(error?: string | null): boolean {
+  return Boolean(error && /not_found_error.*model:|model: claude-sonnet-4-20250514/i.test(error));
+}
+
+function summarizeClassifierError(error?: string | null): string | null {
+  if (!error) return null;
+  if (hasCreditError(error)) {
+    return 'Anthropic reported that the account credit balance is too low.';
+  }
+  if (hasModelNotFoundError(error)) {
+    return 'Anthropic rejected the retired Claude Sonnet 4 model. The extraction API needs to use claude-sonnet-4-6.';
+  }
+
+  const messageMatch = error.match(/"message"\s*:\s*"([^"]+)"/);
+  const message = messageMatch?.[1] || error;
+  return message.length > 180 ? `${message.slice(0, 180)}...` : message;
+}
 
 function restUrl(endpoint: string): string {
   if (isDevBypassEnabled()) {
@@ -209,6 +241,8 @@ export function ClassifyStage({ jobId, projectId, onDetectionComplete }: Classif
   // Post-confirm processing state
   const [isProcessing, setIsProcessing] = useState(false);
   const [processingStatus, setProcessingStatus] = useState<string>('processing');
+  const [retryingClassification, setRetryingClassification] = useState(false);
+  const [retryStartedAt, setRetryStartedAt] = useState<number | null>(null);
 
   // =============================================================================
   // Data Fetching
@@ -297,6 +331,44 @@ export function ClassifyStage({ jobId, projectId, onDetectionComplete }: Classif
     };
   }, [isProcessing, jobId, onDetectionComplete]);
 
+  useEffect(() => {
+    if (!retryingClassification) return;
+
+    const interval = setInterval(async () => {
+      try {
+        const response = await fetchRest(`extraction_jobs?id=eq.${jobId}&select=status,error_message`);
+        if (!response.ok) return;
+
+        const rows = await response.json();
+        const data = Array.isArray(rows) ? rows[0] : rows;
+        if (!data) return;
+
+        const hasSettledLongEnough = !retryStartedAt || Date.now() - retryStartedAt > 5000;
+        if (!hasSettledLongEnough) return;
+
+        if (data.status === 'classified') {
+          clearInterval(interval);
+          setRetryingClassification(false);
+          setRetryStartedAt(null);
+          await fetchData();
+          toast.success('Page classification refreshed');
+        } else if (data.status === 'failed') {
+          clearInterval(interval);
+          setRetryingClassification(false);
+          setRetryStartedAt(null);
+          await fetchData();
+          toast.error(data.error_message || 'Page classification failed');
+        }
+      } catch (err) {
+        console.error('[ClassificationReview] Retry polling error:', err);
+      }
+    }, POLLING_INTERVAL);
+
+    return () => {
+      clearInterval(interval);
+    };
+  }, [retryingClassification, jobId, retryStartedAt, fetchData]);
+
   // =============================================================================
   // Handlers
   // =============================================================================
@@ -304,13 +376,22 @@ export function ClassifyStage({ jobId, projectId, onDetectionComplete }: Classif
   const handleTypeChange = async (pageId: string, newType: PageType) => {
     // Optimistic update
     setPages(prev =>
-      prev.map(p => (p.id === pageId ? { ...p, page_type: newType } : p))
+      prev.map(p => (
+        p.id === pageId
+          ? { ...p, page_type: newType, page_type_confidence: 1, status: 'classified', error_message: null }
+          : p
+      ))
     );
 
     try {
       const response = await fetchRest(`extraction_pages?id=eq.${pageId}`, {
         method: 'PATCH',
-        body: JSON.stringify({ page_type: newType }),
+        body: JSON.stringify({
+          page_type: newType,
+          page_type_confidence: 1,
+          status: 'classified',
+          error_message: null,
+        }),
       });
 
       if (!response.ok) {
@@ -326,10 +407,67 @@ export function ClassifyStage({ jobId, projectId, onDetectionComplete }: Classif
     }
   };
 
+  const handleRetryClassification = async () => {
+    setRetryingClassification(true);
+    setRetryStartedAt(Date.now());
+
+    try {
+      const response = await fetch(`${EXTRACTION_API_URL}/analyze-job`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ job_id: jobId }),
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`Failed to restart page classification: ${errorText}`);
+      }
+
+      toast.success('Page classification restarted');
+    } catch (err) {
+      console.error('[ClassificationReview] Error retrying classification:', err);
+      setRetryingClassification(false);
+      setRetryStartedAt(null);
+      toast.error(err instanceof Error ? err.message : 'Failed to restart page classification');
+    }
+  };
+
   const handleConfirmAndRunDetection = async () => {
+    if (elevationCount === 0) {
+      toast.error('Select at least one elevation page before running detection.');
+      return;
+    }
+
     setSaving(true);
 
     try {
+      const typedPagesNeedingPromotion = pages.filter(
+        page => page.page_type && page.status !== 'classified' && page.status !== 'complete'
+      );
+
+      if (typedPagesNeedingPromotion.length > 0) {
+        await Promise.all(
+          typedPagesNeedingPromotion.map(page =>
+            fetchRest(`extraction_pages?id=eq.${page.id}`, {
+              method: 'PATCH',
+              body: JSON.stringify({
+                status: 'classified',
+                error_message: null,
+                page_type_confidence: page.page_type_confidence ?? 1,
+              }),
+            })
+          )
+        );
+
+        setPages(prev => prev.map(page => (
+          page.page_type && page.status !== 'complete'
+            ? { ...page, status: 'classified', error_message: null }
+            : page
+        )));
+      }
+
       const response = await fetch(`${EXTRACTION_API_URL}/process-job`, {
         method: 'POST',
         headers: {
@@ -399,6 +537,16 @@ export function ClassifyStage({ jobId, projectId, onDetectionComplete }: Classif
   // =============================================================================
 
   const elevationCount = pages.filter(p => p.page_type === 'elevation').length;
+  const unclassifiedCount = pages.filter(p => !p.page_type).length;
+  const failedClassificationPages = pages.filter(p => p.status === 'failed' && !p.page_type);
+  const classifierError = pages.find(p => p.error_message)?.error_message || job?.error_message || null;
+  const classifierErrorSummary = summarizeClassifierError(classifierError);
+  const aiClassificationFailed =
+    pages.length > 0 &&
+    unclassifiedCount > 0 &&
+    (failedClassificationPages.length > 0 ||
+      ((job?.results_summary?.failed ?? 0) > 0 && (job?.results_summary?.successful ?? 0) === 0));
+  const creditError = hasCreditError(classifierError);
 
   // =============================================================================
   // Render
@@ -494,7 +642,11 @@ export function ClassifyStage({ jobId, projectId, onDetectionComplete }: Classif
             <ArrowLeft className="mr-2 h-4 w-4" />
             Back
           </Button>
-          <Button onClick={handleConfirmAndRunDetection} disabled={saving}>
+          <Button
+            onClick={handleConfirmAndRunDetection}
+            disabled={saving || retryingClassification || elevationCount === 0}
+            title={elevationCount === 0 ? 'Select at least one elevation page before running detection' : undefined}
+          >
             {saving ? (
               <Loader2 className="mr-2 h-4 w-4 animate-spin" />
             ) : (
@@ -504,6 +656,51 @@ export function ClassifyStage({ jobId, projectId, onDetectionComplete }: Classif
           </Button>
         </div>
       </div>
+
+      {aiClassificationFailed && (
+        <Alert variant={creditError ? 'destructive' : 'default'} className="mb-6">
+          <AlertCircle className="h-4 w-4" />
+          <AlertTitle>AI page classification needs attention</AlertTitle>
+          <AlertDescription className="mt-2 space-y-3">
+            <p>
+              {unclassifiedCount} of {pages.length} pages do not have a page type. You can retry AI
+              classification after the service is available, or approve the pages manually here.
+            </p>
+            {classifierErrorSummary && (
+              <p className="text-xs opacity-90">{classifierErrorSummary}</p>
+            )}
+            <div className="flex flex-wrap gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={handleRetryClassification}
+                disabled={retryingClassification}
+              >
+                {retryingClassification ? (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                ) : (
+                  <RefreshCw className="mr-2 h-4 w-4" />
+                )}
+                Retry AI Classification
+              </Button>
+              <Button type="button" variant="ghost" size="sm" onClick={fetchData}>
+                Refresh
+              </Button>
+            </div>
+          </AlertDescription>
+        </Alert>
+      )}
+
+      {!aiClassificationFailed && elevationCount === 0 && pages.length > 0 && (
+        <Alert className="mb-6">
+          <AlertCircle className="h-4 w-4" />
+          <AlertTitle>No elevation pages selected</AlertTitle>
+          <AlertDescription>
+            Markup detection needs at least one approved elevation page.
+          </AlertDescription>
+        </Alert>
+      )}
 
       {/* Thumbnail Grid */}
       <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">

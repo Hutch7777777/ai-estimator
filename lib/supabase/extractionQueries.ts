@@ -194,6 +194,27 @@ export async function getPageDetections(
     return (drafts as unknown as DraftDetection[]).map(mapDraftToDetection);
   }
 
+  // No drafts - prefer the AI-refined pre-editor layer when available
+  let refinedQuery = supabase
+    .from('extraction_detections_refined')
+    .select('*')
+    .eq('page_id', pageId)
+    .order('detection_index', { ascending: true });
+
+  if (!includeDeleted) {
+    refinedQuery = refinedQuery.eq('is_deleted', false);
+  }
+
+  const { data: refined, error: refinedError } = await refinedQuery;
+
+  if (refinedError) {
+    console.error('Error fetching refined detections:', refinedError);
+  }
+
+  if (refined && refined.length > 0) {
+    return (refined as unknown as DraftDetection[]).map(mapDraftToDetection);
+  }
+
   // No drafts - fall back to original detections
   let query = supabase
     .from('extraction_detection_details')
@@ -232,7 +253,15 @@ export async function getJobDetections(
     return drafts.map(mapDraftToDetection);
   }
 
-  // No drafts found - fall back to original AI detections
+  // No drafts found - prefer AI-refined pre-editor detections
+  const refined = await directFetch<DraftDetection[]>(
+    `extraction_detections_refined?job_id=eq.${jobId}&select=*${deletedFilter}`
+  );
+  if (refined && refined.length > 0) {
+    return refined.map(mapDraftToDetection);
+  }
+
+  // No draft/refined rows found - fall back to original AI detections
   const statusFilter = includeDeleted ? '' : '&status=neq.deleted';
   const data = await directFetch<ExtractionDetection[]>(
     `extraction_detection_details?job_id=eq.${jobId}&select=*${statusFilter}`

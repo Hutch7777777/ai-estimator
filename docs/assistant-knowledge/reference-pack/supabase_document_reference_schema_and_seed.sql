@@ -1,0 +1,936 @@
+-- Exterior Finishes AI Estimator document reference schema for Supabase/Postgres.
+-- This stores redacted example documents and section metadata for RAG/template retrieval.
+
+create extension if not exists pgcrypto;
+
+create table if not exists public.ai_document_references (
+  id uuid primary key default gen_random_uuid(),
+  doc_key text unique not null,
+  doc_type text not null check (doc_type in ('proposal', 'contract', 'change_order', 'template', 'other')),
+  subtype text not null,
+  title text not null,
+  template_quality text not null default 'reference',
+  project_type text,
+  source_file_label text,
+  tags text[] not null default '{}',
+  full_text text not null,
+  sections jsonb not null default '{}'::jsonb,
+  pricing jsonb not null default '{}'::jsonb,
+  generation_notes jsonb not null default '[]'::jsonb,
+  privacy jsonb not null default '{}'::jsonb,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create index if not exists ai_document_references_doc_type_idx
+  on public.ai_document_references (doc_type);
+
+create index if not exists ai_document_references_subtype_idx
+  on public.ai_document_references (subtype);
+
+create index if not exists ai_document_references_tags_gin_idx
+  on public.ai_document_references using gin (tags);
+
+create index if not exists ai_document_references_sections_gin_idx
+  on public.ai_document_references using gin (sections);
+
+-- Optional: enable pgvector later if you want semantic retrieval.
+-- create extension if not exists vector;
+-- alter table public.ai_document_references add column if not exists embedding vector(1536);
+
+
+-- Seed reference examples
+
+
+insert into public.ai_document_references (
+  doc_key, doc_type, subtype, title, template_quality, project_type,
+  source_file_label, tags, full_text, sections, pricing, generation_notes, privacy
+) values (
+  'proposal_reside_colorplus_lap_fastplank_reference',
+  'proposal',
+  'reside_colorplus_lap_fastplank',
+  'Reside Proposal - ColorPlus Panel + Lap with FastPlank Alternates',
+  'final_reference',
+  'multi-family_recladding',
+  'Final Christine-style reside proposal with ColorPlus/FastPlank options',
+  array['proposal','reside','hardie','colorplus','fastplank','cedar_soffit','options','exclusions']::text[],
+  'EXTERIOR FINISHES
+WHERE SERVICE & QUALITY MEET
+
+[DATE] - Reside Proposal
+Homeowner: [CLIENT NAME]
+Address: [PROJECT ADDRESS]
+
+Project Inclusions:
+Exterior Finishes has included Material and Labor to replace current siding with James Hardie ColorPlus Smooth Fiber Cement Panel Siding, James Hardie ColorPlus 8.25" Lap Siding, and Pre-Stained Tight Knot Cedar Tongue and Groove soffit accents.
+
+Demolition
+• Removal and disposal of existing siding and trims.
+• Preparation of sheathing before WRB installation.
+• Allowance included for sheathing, framing, and insulation repairs as quantified in the estimate.
+
+Weather Resistive Barrier
+• Installation of Tyvek commercial wrap / primary WRB.
+• Installation of Tyvek tape and flashing at windows, doors, and penetrations.
+• Installation of head flashing, target flashing, sill protection, and associated sheet metal tied to the recladding scope.
+
+Fiber Cement Siding / Cedar Soffit
+• James Hardie ColorPlus 4'' x 10'' smooth fiber cement panel.
+• James Hardie ColorPlus 8.25" lap siding.
+• 5/4 x 4 trim at corners, windows, and transition areas as carried.
+• Pre-Stained TK Cedar T&G 1" x 6" soffit.
+• Associated 24 ga. Kynar vertical trims, horizontal trims, J trims, and flashing trims.
+
+Miscellaneous:
+• Porta-potty on site.
+• Disposal of job-related debris.
+• Supply and installation of light and hose bib blocks as needed.
+• Supply and installation of vents as needed.
+• Re-installation of existing exterior lights and camera. If the homeowner would like to supply new lights, we will install those at no additional charge.
+
+Total Price for the ColorPlus Panel + Lap Option: $160,816.89
+
+(Project options listed below)
+Additional options can be added to this proposal as separate takeoffs are finalized.
+
+Coping Option:
+Exterior Finishes has added an option to complete installation of new rooftop coping after siding completion. Coping option inclusions are as follows:
+• All rooftop coping metal to be replaced within the carried scope.
+• Color to be selected by homeowner.
+Total Coping Installation Cost: $20,077.85
+
+Inner Parapet Cladding Option:
+Exterior Finishes has added an option to complete inner parapet cladding in matching James Hardie ColorPlus panel system, including associated trims, WRB, rainscreen, demolition, and labor within the carried scope.
+Total Inner Parapet Cladding Cost: $11,269.08
+
+FastPlank North Elevation Option:
+Exterior Finishes has added an option to replace the carried Hardie cladding at the north elevation with 6" FastPlank material, including associated P-11 J trims, P-41 starter, plank backers, clips, touch up materials, and labor within the carried scope.
+Total FastPlank North Elevation Add Cost: $6,379.32
+
+ColorPlus Panel + FastPlank Option:
+Exterior Finishes has added an alternate siding option to replace the James Hardie ColorPlus 8.25" lap siding areas with 6" FastPlank cladding, while retaining the James Hardie ColorPlus panel areas and cedar soffit accents. This option includes associated P-11 J trims, P-41 starter, P10 corners, plank backers, clips, touch up materials, and labor within the carried scope.
+Total Price for the ColorPlus Panel + FastPlank Option: $210,043.02
+
+Project Exclusions:
+• Stain
+• Roofing
+• Fascia replacement unless specifically noted
+• Roof-to-wall flashing outside of the carried recladding scope
+• Decking
+• Masonry
+• Beam wraps
+• Post wraps
+• Landscape repair
+• Sales tax
+
+Exterior Finishes appreciates the opportunity to provide you with a quote on your upcoming project. Please feel free to reach out if you have any questions.
+
+Sincerely,
+Anthony Hutchinson
+anthony@extfinishes.com
+(425) 870-0371
+',
+  '{"header": ["company_name", "tagline", "date", "proposal_title", "homeowner", "address"], "scope_sections": ["Project Inclusions", "Demolition", "Weather Resistive Barrier", "Fiber Cement Siding / Cedar Soffit", "Miscellaneous"], "pricing_sections": ["Total Price", "Project Options"], "closeout_sections": ["Project Exclusions", "Appreciation/Contact"]}'::jsonb,
+  '{"base_total": 160816.89, "options": [{"label": "Coping Installation", "amount": 20077.85}, {"label": "Inner Parapet Cladding", "amount": 11269.08}, {"label": "FastPlank North Elevation Add", "amount": 6379.32}, {"label": "ColorPlus Panel + FastPlank Option", "amount": 210043.02}], "sales_tax": "Excluded unless specifically noted"}'::jsonb,
+  '["Use concise scope sections rather than a long narrative.", "Put the base price before project options.", "Keep exclusions simple and separated from options.", "Use this template when the input scope includes siding replacement plus optional alternates."]'::jsonb,
+  '{"pii_redacted": true, "redacted_fields": ["client_name", "client_phone", "project_address"]}'::jsonb
+)
+on conflict (doc_key) do update set
+  doc_type = excluded.doc_type,
+  subtype = excluded.subtype,
+  title = excluded.title,
+  template_quality = excluded.template_quality,
+  project_type = excluded.project_type,
+  source_file_label = excluded.source_file_label,
+  tags = excluded.tags,
+  full_text = excluded.full_text,
+  sections = excluded.sections,
+  pricing = excluded.pricing,
+  generation_notes = excluded.generation_notes,
+  privacy = excluded.privacy,
+  updated_at = now();
+
+insert into public.ai_document_references (
+  doc_key, doc_type, subtype, title, template_quality, project_type,
+  source_file_label, tags, full_text, sections, pricing, generation_notes, privacy
+) values (
+  'proposal_multi_building_reside_total_sell_reference',
+  'proposal',
+  'multi_building_total_sell',
+  'Multi-Building Reside Proposal - Unit Breakdown with Total Sell',
+  'final_reference',
+  'hoa_multi_building_repair',
+  'Final Stendall-style multi-building proposal after cleanup',
+  array['proposal','multi_building','hoa','total_sell','unit_breakdown','hardie_shingle','painting_option']::text[],
+  'EXTERIOR FINISHES
+WHERE SERVICE & QUALITY MEET
+
+[DATE] – Reside Proposal
+Property: [PROPERTY NAME]
+Address: [PROJECT ADDRESS]
+
+Project Inclusions:
+Exterior Finishes has included material and labor to address the siding, trim, chimney, gable vent, window wrap, WRB, flashing, and related exterior repair work at the buildings listed below using James Hardie primed straight edge shingle siding and associated James Hardie trim.
+
+Buildings/Units Addressed:
+| Building/Unit | Address | Work Areas Addressed |
+|---|---|---|
+| Unit 27 | [UNIT ADDRESS] | Reside chimney on all 4 sides; new chimney cap; 1 x 3 Hardie outside corner speed trim. |
+| Unit 34 | [UNIT ADDRESS] | Reside chimney on all 4 sides; new chimney cap; 1 x 3 Hardie outside corner speed trim. |
+| Unit 35 & 36 | [UNIT ADDRESS] | Straight edge shingle, outside corner/window trim, gable vent trim, chimney cap, WRB and related flashings per takeoff. |
+| Unit 37 | [UNIT ADDRESS] | Chimney siding/trim scope, top-out trim, outside corner trim, chimney cap, WRB and related flashings per takeoff. |
+| Unit 38 | [UNIT ADDRESS] | Reside bumpout wall; replace corner trims and window trims; replace top trim and add coping/cap trim. |
+| Unit 39 | [UNIT ADDRESS] | Reside chimney on all 4 sides; new chimney cap; 1 x 3 Hardie outside corner speed trim. |
+| Unit 44 | [UNIT ADDRESS] | Reside chimney on all 4 sides; new chimney cap. |
+| Unit 45 | [UNIT ADDRESS] | Reside second-level wall; replace gable vent; replace top-out/outside corner trims; replace window wraps. |
+| Unit 52 | [UNIT ADDRESS] | Replace siding; new window trims and coping on top of trims. |
+| Unit 57 | [UNIT ADDRESS] | Reside chimney on all 4 sides; new chimney cap; 1 x 3 Hardie outside corner speed trim; reside south wall with 1 gable vent. |
+| Unit 65 | [UNIT ADDRESS] | Reside chimney on all 4 sides; new chimney cap; 1 x 3 Hardie outside corner speed trim; reside second-level south wall with 1 gable vent. |
+| Unit 83 | [UNIT ADDRESS] | Reside west wall with 5 window wraps; reside south wall with 1 gable vent. |
+
+Total Sell for Base Scope (Material and Labor): $160,127.38
+
+Demolition
+• Removal and disposal of impacted siding, trims, chimney cap metals, and related job debris at the listed work areas.
+• Preparation of sheathing prior to WRB installation. Dry rot/sheathing repair outside the listed scope to be reviewed and billed on a T&M basis after approval.
+
+Weather Resistive Barrier
+• Installation of Tyvek HouseWrap BuildingWrap at the addressed walls/chimneys.
+• Installation of Tyvek flashing tape, seam tape, wrap caps, and Tyvek fluid-applied flashing as needed.
+• Installation of head flashing, chimney cap metals, gable vent flashings, window flashings, coping/cap trim, and related metals associated with the repairs.
+
+Fiber Cement Siding/Trim
+• James Hardie primed straight edge shingle siding.
+• James Hardie rustic trim, outside corner trim, window wrap trim, sill trim, top-out trim, and gable vent wrap trim as needed.
+• Cedar gable vents and associated flashing where noted.
+
+Miscellaneous
+• Porta-potty on site.
+• Disposal of job-related debris and roll-off dumpster service included in the base Total Sell.
+• Supply and installation of light blocks, hose bib blocks, vents, and miscellaneous materials as needed for the listed work areas.
+• Re-installation of exterior lights/cameras only where removed for siding access. New fixtures, if supplied by owner, can be installed at no additional labor charge when completed during the siding scope.
+
+Project Options:
+
+Painting Option:
+Exterior Finishes has included an option to supply and install 2 coats of Sherwin Williams A-100 satin paint. Color to be determined by owner/HOA.
+Total Sell for Painting Option: $36,155.49
+
+Project Exclusions:
+• Paint, unless the painting option is accepted.
+• Stain.
+• Roofing.
+• Fascia replacement.
+• Roof-to-wall flashing not specifically listed above.
+• Decking.
+• Masonry.
+• Beam wraps.
+• Post wraps.
+• Landscape repair.
+• New windows.
+• Sales tax.
+
+Exterior Finishes appreciates the opportunity to provide you with a quote on your upcoming project. Please feel free to reach out if you have any questions.
+
+Sincerely,
+Anthony Hutchinson
+anthony@extfinishes.com
+(425) 870-0371
+',
+  '{"header": ["company_logo_area", "date", "proposal_title", "property", "address"], "scope_sections": ["Project Inclusions", "Buildings/Units Addressed", "Demolition", "WRB", "Siding/Trim", "Miscellaneous"], "pricing_sections": ["Total Sell for Base Scope", "Project Options"], "closeout_sections": ["Project Exclusions", "Appreciation/Contact"]}'::jsonb,
+  '{"base_total_sell": 160127.38, "options": [{"label": "Painting Option", "amount": 36155.49}], "sales_tax": "Excluded"}'::jsonb,
+  '["Use this when multiple buildings or units must be addressed but pricing should show as a single total sell.", "Put the unit/building table before the detailed scope sections.", "Avoid window add-option language unless explicitly requested."]'::jsonb,
+  '{"pii_redacted": true, "redacted_fields": ["property_name", "unit_addresses"]}'::jsonb
+)
+on conflict (doc_key) do update set
+  doc_type = excluded.doc_type,
+  subtype = excluded.subtype,
+  title = excluded.title,
+  template_quality = excluded.template_quality,
+  project_type = excluded.project_type,
+  source_file_label = excluded.source_file_label,
+  tags = excluded.tags,
+  full_text = excluded.full_text,
+  sections = excluded.sections,
+  pricing = excluded.pricing,
+  generation_notes = excluded.generation_notes,
+  privacy = excluded.privacy,
+  updated_at = now();
+
+
+insert into public.ai_document_references (
+  doc_key, doc_type, subtype, title, template_quality, project_type,
+  source_file_label, tags, full_text, sections, pricing, generation_notes, privacy
+) values (
+  'proposal_deck_replacement_reference',
+  'proposal',
+  'deck_replacement',
+  'Deck Replacement Proposal - Trex Enhanced Basics',
+  'final_reference',
+  'residential_deck_repair_replace',
+  'Deck replacement proposal exact-format reference',
+  array['proposal','deck','trex','demolition','labor_allowance','exclusions']::text[],
+  'EXTERIOR FINISHES
+WHERE SERVICE & QUALITY MEET
+
+[DATE] - Deck Replacement Proposal
+Homeowner: [CLIENT NAME]
+Address: [PROJECT ADDRESS]
+
+Project Inclusions:
+Exterior Finishes has included Material and Labor to complete a deck replacement using Trex Enhanced Basics decking in either Clamshell or Saddle color selection.
+
+Demolition
+• Removal and disposal of existing deck boards within the carried scope.
+• Preparation of existing deck framing for new decking installation.
+• Replacement of carried deck framing lumber as needed within the takeoff allowance.
+
+Decking Installation
+• Supply and installation of Trex Enhanced Basics 1x6x16 decking.
+• Color to be selected by homeowner: Clamshell or Saddle.
+• Installation of Trex Nylon Universal Clips.
+
+Stair Riser / Kickboard
+• Supply and installation of Trex stair riser / kickboard material as carried.
+• Deck framing lumber included as carried in the estimate.
+
+Labor
+• Labor included for demolition and installation.
+• Labor allowance carried at 32 hours.
+
+Miscellaneous:
+• Disposal of job-related debris.
+• Site cleanup of job-related debris upon completion.
+• Deck replacement scope excludes railings and 4x4 posts.
+
+Total Deck Replacement Cost: $11,369.36
+
+Project Exclusions:
+• Railings
+• 4x4 posts
+• Structural framing repairs beyond the carried lumber allowance
+• Stair framing repairs unless specifically noted
+• Permit fees, if required
+• Painting or staining
+• Landscape repair
+• Sales tax unless specifically noted
+
+Exterior Finishes appreciates the opportunity to provide you with a quote on your upcoming project. Please feel free to reach out if you have any questions.
+
+Sincerely,
+Anthony Hutchinson
+anthony@extfinishes.com
+(425) 870-0371
+',
+  '{"header": ["company_name", "tagline", "date", "proposal_title", "homeowner", "address"], "scope_sections": ["Project Inclusions", "Demolition", "Decking Installation", "Stair Riser / Kickboard", "Labor", "Miscellaneous"], "pricing_sections": ["Total Deck Replacement Cost"], "closeout_sections": ["Project Exclusions", "Appreciation/Contact"]}'::jsonb,
+  '{"total_deck_replacement_cost": 11369.36, "labor_allowance_hours": 32, "sales_tax": "Excluded unless specifically noted"}'::jsonb,
+  '["Use for focused single-scope proposal with one price and no project options.", "State key exclusions clearly, especially railings, posts, structural framing, permits, paint/stain, landscape, and sales tax."]'::jsonb,
+  '{"pii_redacted": true, "redacted_fields": ["client_name", "client_phone", "project_address"]}'::jsonb
+)
+on conflict (doc_key) do update set
+  doc_type = excluded.doc_type,
+  subtype = excluded.subtype,
+  title = excluded.title,
+  template_quality = excluded.template_quality,
+  project_type = excluded.project_type,
+  source_file_label = excluded.source_file_label,
+  tags = excluded.tags,
+  full_text = excluded.full_text,
+  sections = excluded.sections,
+  pricing = excluded.pricing,
+  generation_notes = excluded.generation_notes,
+  privacy = excluded.privacy,
+  updated_at = now();
+
+
+insert into public.ai_document_references (
+  doc_key, doc_type, subtype, title, template_quality, project_type,
+  source_file_label, tags, full_text, sections, pricing, generation_notes, privacy
+) values (
+  'contract_construction_service_agreement_recladding_reference',
+  'contract',
+  'construction_service_agreement_recladding',
+  'Construction Service Agreement - Recladding with Concealed Conditions and Escalators',
+  'final_reference',
+  'multi-family_recladding_contract',
+  'Revised service agreement with escalators, concealed-condition language, mediation/dispute language, and signatures',
+  array['contract','service_agreement','recladding','concealed_conditions','allowances','escalators','payment_terms','indemnification','washington']::text[],
+  'CONSTRUCTION SERVICE AGREEMENT
+
+Agreement Details
+This Construction Contract Agreement ("Agreement") is made and entered into on [EFFECTIVE DATE], by and between:
+
+Contractor: Exterior Finishes LLC,
+Address: 2217 131st Ave NE, Lake Stevens, WA
+
+Client: [CLIENT NAME],
+Address: [CLIENT / PROJECT ADDRESS]
+
+Collectively referred to as the "Parties."
+
+Property Description
+The construction work will be performed at the following property:
+[PROJECT ADDRESS]
+
+Scope of Work
+• Full removal and disposal of existing fiber cement panel siding, cedar T&G siding/soffit, Weather Resistant Barrier, metal reveals, and associated flashing.
+• Supply and installation of new CDX plywood wall sheathing to replace damaged substrate up to the stated allowance.
+• Supply and install insulation at approximately the stated allowance percentage of the exterior wall square footage.
+• Removal and replacement of wood framing members within wall assemblies up to the stated allowance as directed by a structural engineer.
+• Supply and installation of Tyvek Commercial Wrap air barrier system with all required tapes and flexible flashings.
+• Supply and install rainscreen material at applicable locations, including bug screen protection at horizontal breaks.
+• Supply and installation of new ColorPlus Hardie Panel fiber cement siding, James Hardie ColorPlus lap siding, and pre-stained cedar T&G soffits per elevations, including trim, corners, and associated Kynar flashings.
+• Tie-in of siding system at roof-wall interface, including air-sealed blocking and coordination with existing roof membrane.
+• Coordinate temporary disconnection and reconnection of any power sources necessary to complete exterior scope safely and efficiently. Cost of city services is not included.
+• Removal and replacement of exterior vents with like materials is included.
+• Facilitation of permits needed by the carried framing-related material scope. Permit costs are not included.
+• Base contract excludes rooftop coping unless elected by Client as an optional escalator or later approved by written change order.
+• Unused allowances to be addressed upon project completion via change order.
+
+Concealed / Unknown Conditions
+Contract Sum includes a limited allowance for concealed damage discovered after demolition or opening of wall, trim, or siding assemblies, specifically:
+(a) replacement of up to thirty percent (30%) of deteriorated or damaged CDX sheathing in the work areas; and
+(b) replacement of up to five percent (5%) of deteriorated or damaged wall studs in the work areas.
+
+Except for the specific allowances stated above, the Contract Sum does not include replacement, repair, or correction of any other concealed or unknown conditions, including but not limited to additional sheathing, additional studs, sill plates, bottom plates, top plates, rim board, headers, jack studs, cripple studs, blocking, hold-downs, connectors, structural framing, mold remediation, rot extending beyond the visible work area, insect damage, hazardous materials, code-required upgrades, substrate deficiencies, or damage caused by prior construction or water intrusion. Any need for a structural engineer will be a pass-through cost to the owners and coordinated by Contractor.
+
+Any concealed or unknown condition requiring work beyond the allowances above shall be treated as extra work and performed only by written change order setting forth the scope and price adjustment, except for emergency measures reasonably necessary to protect persons or property. Allowance quantities are estimated only and are not a representation that concealed damage will be limited to those amounts.
+
+Term
+This Agreement becomes effective on the date it is signed and remains in force until completion of the described construction services. Construction is scheduled to begin one week from the Effective Date and be completed by a mutually agreed-upon date. Any extension must be agreed upon in writing by both Parties.
+
+Payment Terms
+Total Contract Amount:
+- Base Contract Sum: $40,204.22
+- Optional Escalators Elected at Signing: $7,836.73
+- Sales Tax (10.55%): $5,068.32
+- Total Initial Contract Sum: $53,109.27
+
+Payment Schedule:
+- 15% deposit due upon contract signing on the Total Initial Contract Sum selected above.
+- The remaining balance will be paid through monthly progress payments based on an approved Schedule of Values.
+
+Invoices: Issued monthly based on progress.
+Payment Method: Accepted forms include cash or check.
+
+Optional Owner-Elected Escalators
+The following items are not included in the Base Contract Sum unless specifically initialed by Client at signing or later approved by written change order. Any option elected at signing shall be added to the Total Initial Contract Sum. Any option approved after signing shall be treated as a change order and added to the Contract Sum at the amounts stated below, unless revised by a later signed writing. Sales tax to be included.
+
+1. Rooftop Coping Replacement: Add $5,019.46    Client Initials: ______
+This optional escalator includes removal/disposal of existing coping, supply/fabrication/installation of new coping, fastening, fitting, integration, trim, accessories, and incidental materials.
+
+2. Inner Parapet Cladding: Add $2,817.27    Client Initials: ______
+This optional escalator includes cladding materials, preparation, WRB or underlayment, cladding/trims/accessories, fasteners, flashings, sealants, and integration with adjacent conditions.
+
+3. FastPlank at North Elevation in lieu of carried Hardie cladding: Add $1,594.83    Client Initials: ______
+This optional escalator includes 6-inch FastPlank material, starter, joint, clip, backer, touch-up materials, installation labor, layout, fastening, fitting, and trim integration.
+
+Alternate Package Election
+In lieu of the Base Contract Sum above, Client may elect the alternate "ColorPlus Panel + FastPlank Option" for a revised base contract amount of $210,043.02 across all parties. This alternate replaces the Base Contract Sum of $160,816.89 across all parties and is not cumulative with the FastPlank North Elevation escalator unless expressly stated in a later signed writing.
+
+Exclusions and Tax
+The Base Contract Sum and any escalators listed above exclude sales tax, permit fees, and other governmental charges unless expressly stated otherwise. Sales tax will be added to invoicing. This Agreement also excludes stain, roofing, fascia replacement unless specifically noted, roof-to-wall flashing outside of the carried recladding scope, decking, masonry, beam wraps, post wraps, and landscape repair.
+
+Permits and Licenses
+The Contractor is responsible for obtaining all required permits and licenses. The Client is responsible for covering any applicable government inspection/permitting fees.
+
+Materials and Labor
+The Contractor will provide and pay for all labor, equipment, and materials. All materials used must be new and suitable for the intended purpose.
+
+Contractor Responsibilities
+The Contractor agrees to supervise and manage construction activities, maintain construction records, observe safety practices, accept responsibility for negligence or accidents caused by Contractor, guarantee work complies with the Agreement, keep the site clean, and ensure personnel are trained to handle hazardous materials when applicable.
+
+Insurance
+Contractor will maintain insurance coverage for construction operations. Client is responsible for insuring the property. GL-$1,000,000, GA-$2,000,000. Umbrella Liability EO-$2,000,000, Aggregate $2,000,000. Certificate available upon request.
+
+Termination
+This Agreement may be terminated immediately by either Party in the event of a breach not cured within 30 days of written notice, or automatically upon successful completion of all obligations by both Parties.
+
+Dispute Resolution; Mediation; Attorneys'' Fees
+No claim may be filed unless the claiming Party first provides written notice describing the alleged default or dispute in reasonable detail. The receiving Party shall have thirty (30) days after receipt to cure the claimed default, if curable. If unresolved, the Parties shall first attempt in good faith to resolve the dispute through non-binding mediation before a mutually agreed mediator located in Snohomish County or King County, Washington. If mediation is unsuccessful, either Party may pursue its claims in a court of competent jurisdiction located in Snohomish County or King County, Washington. The prevailing Party shall be entitled to recover reasonable attorneys'' fees, expert fees, and costs. Unless there is a valid safety concern or nonpayment justifying suspension, the Parties shall continue to perform their respective obligations during the dispute.
+
+Indemnification
+To the fullest extent permitted by Washington law, Contractor shall indemnify and hold harmless Client, but only from and against claims, damages, losses, and expenses, including reasonable attorneys'' fees, to the extent caused by the negligent acts or omissions of Contractor, its subcontractors, or anyone directly or indirectly employed by them in the performance of the Work. Contractor''s duty to indemnify shall not apply to the extent caused by the sole negligence of Client or its agents, and in cases of concurrent negligence, Contractor''s obligation shall apply only to the extent of Contractor''s negligence, in accordance with RCW 4.24.115.
+
+Suspension for Nonpayment
+If any payment is not made when due, Contractor may, upon written notice, suspend performance until all past-due amounts are paid in full, together with approved change orders, interest, and costs of collection. Any resulting delay shall extend the Contract Time, and Contractor shall not be responsible for damages resulting from such suspension.
+
+Governing Law
+This Agreement shall be governed by the laws of the State of Washington.
+
+Amendments
+Any amendments must be in writing and signed by both Parties.
+
+Assignment
+No Party may assign its rights or obligations under this Agreement without written consent from the other Party.
+
+Entire Agreement
+This Agreement constitutes the entire understanding between the Parties and supersedes any prior agreements, written or oral.
+
+Severability
+If any provision of this Agreement is found unenforceable, the remaining provisions shall remain in effect.
+
+Signatures
+By signing below, the Parties agree to all terms outlined in this Agreement:
+
+CONTRACTOR
+Name: ___________________________
+Signature: _______________________
+Date: ____________________________
+
+CLIENT
+Name: ___________________________
+Signature: _______________________
+Date: ____________________________
+',
+  '{"contract_sections": ["Agreement Details", "Property Description", "Scope of Work", "Concealed / Unknown Conditions", "Term", "Payment Terms", "Optional Owner-Elected Escalators", "Alternate Package Election", "Exclusions and Tax", "Permits and Licenses", "Materials and Labor", "Contractor Responsibilities", "Insurance", "Termination", "Dispute Resolution; Mediation; Attorneys'' Fees", "Indemnification", "Suspension for Nonpayment", "Governing Law", "Amendments", "Assignment", "Entire Agreement", "Severability", "Signatures"]}'::jsonb,
+  '{"example_base_contract_sum": 40204.22, "example_optional_escalators_elected": 7836.73, "example_sales_tax_rate": 10.55, "example_sales_tax": 5068.32, "example_total_initial_contract_sum": 53109.27, "deposit_percent": 15}'::jsonb,
+  '["Use this as the master legal/contract structure, but verify legal language before production use.", "Keep concealed-condition exclusions detailed and explicit.", "Use optional escalator language when the owner may elect add-ons at signing or by later change order.", "Do not invent legal terms, dates, or dollar amounts if they are missing from the input."]'::jsonb,
+  '{"pii_redacted": true, "redacted_fields": ["client_name", "client_address", "project_address"]}'::jsonb
+)
+on conflict (doc_key) do update set
+  doc_type = excluded.doc_type,
+  subtype = excluded.subtype,
+  title = excluded.title,
+  template_quality = excluded.template_quality,
+  project_type = excluded.project_type,
+  source_file_label = excluded.source_file_label,
+  tags = excluded.tags,
+  full_text = excluded.full_text,
+  sections = excluded.sections,
+  pricing = excluded.pricing,
+  generation_notes = excluded.generation_notes,
+  privacy = excluded.privacy,
+  updated_at = now();
+
+
+insert into public.ai_document_references (
+  doc_key, doc_type, subtype, title, template_quality, project_type,
+  source_file_label, tags, full_text, sections, pricing, generation_notes, privacy
+) values (
+  'change_order_rooftop_ventilation_unit_allocation_reference',
+  'change_order',
+  'rooftop_ventilation_unit_allocation',
+  'Change Order - Rooftop Ventilation at Parapet Walls',
+  'final_reference',
+  'multi-family_recladding_change_order',
+  'Rooftop ventilation change order with equal unit allocation and sales tax',
+  array['change_order','rooftop_ventilation','parapet','unit_allocation','sales_tax','fixed_price']::text[],
+  'CHANGE ORDER REQUEST
+Installation of Rooftop Ventilation at Parapet Walls
+
+Change Order No.: [CO NUMBER]
+Reference Contract: Construction Service Agreement dated [CONTRACT DATE] ([CLIENT / UNIT])
+Date Issued: [DATE ISSUED]
+
+Parties
+Contractor: Exterior Finishes LLC
+2217 131st Ave NE, Lake Stevens, WA
+
+Client: [CLIENT NAME] ([UNIT])
+[CLIENT / PROJECT ADDRESS]
+
+Project
+[PROJECT ADDRESS] — Exterior recladding and related work as set forth in the underlying Construction Service Agreement.
+
+Description of Change
+This Change Order adds the following scope to the Client''s individually allocated work under the Construction Service Agreement: installation of rooftop ventilation at the parapet walls of the building, including all associated cut-in, framing of ventilation openings, installation of vents and blocking, flashing, and weatherproofing integration with the parapet assembly.
+
+All work shall be performed in coordination with the carried recladding scope and consistent with the standards, materials, warranties, and general terms of the underlying Construction Service Agreement.
+
+Scope of Added Work
+1. Layout and cut-in of ventilation openings at the parapet walls in the locations required for proper rooftop/attic ventilation.
+2. Framing of ventilation openings, including blocking and supports as required for a sound and weathertight installation.
+3. Furnishing and installation of parapet wall vents, integrated with flashing, sealants, and the parapet assembly.
+4. Weatherproofing tie-in of the new ventilation openings to the parapet cladding and roofing assembly, coordinated with the carried recladding scope.
+
+Pricing Breakdown
+| Description | Qty | Rate | Amount | Type |
+|---|---:|---:|---:|---|
+| Installation of rooftop ventilation at parapet walls (cut-in, framing of ventilation openings, installation of vents/blocking, flashing, and weatherproofing tie-in to parapet assembly) | 1 | $3,267.86 | $3,267.86 | Fixed |
+| Subtotal |  |  | $3,267.86 |  |
+| Washington State Sales Tax (10.55%) |  |  | $344.76 | Tax |
+| TOTAL CHANGE ORDER (incl. sales tax) |  |  | $3,612.62 |  |
+
+Cost Allocation
+The total cost of the rooftop ventilation work across the building is $13,071.42 before sales tax. This amount is divided equally among the four (4) units. The Client''s individually allocated share is $3,267.86 before sales tax ($3,612.62 including Washington State sales tax at 10.55%). The amounts set forth in this Change Order are billed solely to the Client signing below and the other co-owners of the Property are not responsible for any portion of this Client''s allocated share.
+
+Exclusions
+Unless expressly included above, the following are excluded from this Change Order: any roofing replacement or reroofing beyond the immediate vent tie-in; interior finish work; mold remediation; hazardous materials abatement; mechanical, electrical, or powered ventilation equipment; and any work outside the rooftop parapet ventilation scope described herein.
+
+Schedule Impact
+The Work described in this Change Order will be performed in coordination with, and as part of, the existing recladding schedule. No additional contract time is added by this Change Order, except as may be required by concealed or unknown conditions encountered during the Work.
+
+Payment
+The amounts set forth in this Change Order are in addition to the Client''s individually allocated share of the Total Building Contract Sum under the underlying Agreement and shall be billed solely to the Client signing below. The other co-owners of the Property are not responsible for any portion of this Change Order. Amounts due under this Change Order shall be added to the next applicable monthly progress invoice and paid in accordance with the Payment Terms of the underlying Agreement.
+
+All Other Terms Unchanged
+Except as expressly modified by this Change Order, all terms, conditions, exclusions, warranties, dispute resolution provisions, and other provisions of the Construction Service Agreement dated [CONTRACT DATE] between Exterior Finishes LLC and [CLIENT NAME] remain in full force and effect and apply to the Work described herein.
+
+Acceptance
+By signing below, the Parties acknowledge and agree to the additional scope of work, pricing, and terms set forth in this Change Order.
+
+CONTRACTOR
+Name: ____________________________________
+Signature: ____________________________________
+Date: ____________________________________
+
+CLIENT
+Name: [CLIENT NAME]
+Signature: ____________________________________
+Date: ____________________________________
+',
+  '{"change_order_sections": ["Title", "Change Order No.", "Reference Contract", "Date Issued", "Parties", "Project", "Description of Change", "Scope of Added Work", "Pricing Breakdown", "Cost Allocation", "Exclusions", "Schedule Impact", "Payment", "All Other Terms Unchanged", "Acceptance"]}'::jsonb,
+  '{"line_items": [{"description": "Installation of rooftop ventilation at parapet walls", "qty": 1, "rate": 3267.86, "amount": 3267.86, "type": "Fixed"}, {"description": "Washington State Sales Tax", "rate_percent": 10.55, "amount": 344.76, "type": "Tax"}], "subtotal": 3267.86, "total": 3612.62, "building_total_before_tax": 13071.42, "unit_allocation_count": 4}'::jsonb,
+  '["Use this when one building-wide change is allocated equally among owners/units.", "Include cost allocation language when co-owners should not be liable for another unit''s share.", "Include ''All Other Terms Unchanged'' to tie the CO back to the contract."]'::jsonb,
+  '{"pii_redacted": true, "redacted_fields": ["client_name", "client_address", "project_address", "unit"]}'::jsonb
+)
+on conflict (doc_key) do update set
+  doc_type = excluded.doc_type,
+  subtype = excluded.subtype,
+  title = excluded.title,
+  template_quality = excluded.template_quality,
+  project_type = excluded.project_type,
+  source_file_label = excluded.source_file_label,
+  tags = excluded.tags,
+  full_text = excluded.full_text,
+  sections = excluded.sections,
+  pricing = excluded.pricing,
+  generation_notes = excluded.generation_notes,
+  privacy = excluded.privacy,
+  updated_at = now();
+
+
+insert into public.ai_document_references (
+  doc_key, doc_type, subtype, title, template_quality, project_type,
+  source_file_label, tags, full_text, sections, pricing, generation_notes, privacy
+) values (
+  'change_order_rot_repair_beam_replacement_reference',
+  'change_order',
+  'rot_repair_beam_replacement',
+  'Change Order - Additional Rot Repair and Beam Replacement',
+  'final_reference',
+  'multi-family_recladding_change_order',
+  'Rot repair / beam replacement CO with line-item labor/material pricing',
+  array['change_order','rot_repair','beam_replacement','drywall','paint','labor_hours','material','line_items']::text[],
+  'CHANGE ORDER REQUEST
+Additional Rot Repair and Beam Replacement
+
+Change Order No.: [CO NUMBER]
+Reference Contract: Construction Service Agreement dated [CONTRACT DATE] ([CLIENT / UNIT])
+Date Issued: [DATE ISSUED]
+
+Parties
+Contractor: Exterior Finishes LLC
+2217 131st Ave NE, Lake Stevens, WA
+
+Client: [CLIENT NAME] ([UNIT])
+[CLIENT / PROJECT ADDRESS]
+
+Project
+[PROJECT ADDRESS] - Exterior recladding and related work as set forth in the underlying Construction Service Agreement.
+
+Description of Change
+This Change Order adds additional rot repair discovered on site. The added scope includes replacement of a beam, beam wrap replacement per the original contract, drywall repair for areas damaged during beam access and replacement, painting of the affected wall area, and beam replacement material.
+
+All work shall be performed in coordination with the carried recladding scope and consistent with the standards, materials, warranties, and general terms of the underlying Construction Service Agreement.
+
+Scope of Added Work
+1. Replacement of the beam affected by rot discovered during the Work.
+2. Furnishing of beam replacement material required for the repair.
+3. Beam wrap replacement labor at twenty-eight (28) hours at $90.00 per hour, per the original contract.
+4. Repair of drywall damaged as a result of access and work required for the beam replacement.
+5. Painting of the affected wall area following drywall repair.
+
+Pricing Breakdown
+| Description | Qty | Rate | Amount | Type |
+|---|---:|---:|---:|---|
+| Drywall repair related to beam replacement access/damage | 1 | $550.00 | $550.00 | Fixed |
+| Paint of affected wall area | 1 | $75.00 | $75.00 | Fixed |
+| Beam wrap replacement labor (per original contract) | 28 hrs | $90.00/hr | $2,520.00 | Labor |
+| Beam replacement material | 1 | $105.00 | $105.00 | Material |
+| Subtotal |  |  | $3,250.00 |  |
+| TOTAL CHANGE ORDER |  |  | $3,250.00 |  |
+
+Cost Allocation
+The total cost of the additional rot repair, beam replacement, drywall repair, painting, and beam wrap replacement work described in this Change Order is $3,250.00. This amount is allocated solely to the Client signing below. The other co-owners of the Property are not responsible for any portion of this Change Order.
+
+Exclusions
+Unless expressly included above, the following are excluded from this Change Order: additional concealed rot or structural repairs beyond the beam replacement described herein; engineering or design services; permit fees; mold remediation; hazardous materials abatement; mechanical, electrical, or plumbing work; and drywall or paint work outside the affected wall area required for the beam replacement.
+
+Schedule Impact
+The Work described in this Change Order will be performed in coordination with, and as part of, the existing recladding schedule. Additional contract time may be required as necessary to complete the beam replacement, drywall repair, painting, and related work described herein, or as may be required by concealed or unknown conditions encountered during the Work.
+
+Payment
+The amounts set forth in this Change Order are in addition to the Client''s individually allocated share of the Total Building Contract Sum under the underlying Agreement and shall be billed solely to the Client signing below. The other co-owners of the Property are not responsible for any portion of this Change Order. Amounts due under this Change Order shall be added to the next applicable monthly progress invoice and paid in accordance with the Payment Terms of the underlying Agreement.
+
+All Other Terms Unchanged
+Except as expressly modified by this Change Order, all terms, conditions, exclusions, warranties, dispute resolution provisions, and other provisions of the Construction Service Agreement dated [CONTRACT DATE] between Exterior Finishes LLC and [CLIENT NAME] remain in full force and effect and apply to the Work described herein.
+
+Acceptance
+By signing below, the Parties acknowledge and agree to the additional scope of work, pricing, and terms set forth in this Change Order.
+
+CONTRACTOR
+Name: ____________________________________
+Signature: ____________________________________
+Date: ____________________________________
+
+CLIENT
+Name: [CLIENT NAME]
+Signature: ____________________________________
+Date: ____________________________________
+',
+  '{"change_order_sections": ["Title", "Change Order No.", "Reference Contract", "Date Issued", "Parties", "Project", "Description of Change", "Scope of Added Work", "Pricing Breakdown", "Cost Allocation", "Exclusions", "Schedule Impact", "Payment", "All Other Terms Unchanged", "Acceptance"]}'::jsonb,
+  '{"line_items": [{"description": "Drywall repair related to beam replacement access/damage", "qty": 1, "rate": 550.0, "amount": 550.0, "type": "Fixed"}, {"description": "Paint of affected wall area", "qty": 1, "rate": 75.0, "amount": 75.0, "type": "Fixed"}, {"description": "Beam wrap replacement labor (per original contract)", "qty": "28 hrs", "rate": "90.00/hr", "amount": 2520.0, "type": "Labor"}, {"description": "Beam replacement material", "qty": 1, "rate": 105.0, "amount": 105.0, "type": "Material"}], "subtotal": 3250.0, "total": 3250.0, "tax": "Not listed in reference"}'::jsonb,
+  '["Use this when discovered site conditions create a line-item change order.", "Include line items with qty, rate, amount, and type.", "Separate added scope from exclusions so the CO does not accidentally cover unrelated concealed damage."]'::jsonb,
+  '{"pii_redacted": true, "redacted_fields": ["client_name", "client_address", "project_address", "unit"]}'::jsonb
+)
+on conflict (doc_key) do update set
+  doc_type = excluded.doc_type,
+  subtype = excluded.subtype,
+  title = excluded.title,
+  template_quality = excluded.template_quality,
+  project_type = excluded.project_type,
+  source_file_label = excluded.source_file_label,
+  tags = excluded.tags,
+  full_text = excluded.full_text,
+  sections = excluded.sections,
+  pricing = excluded.pricing,
+  generation_notes = excluded.generation_notes,
+  privacy = excluded.privacy,
+  updated_at = now();
+
+
+insert into public.ai_document_references (
+  doc_key, doc_type, subtype, title, template_quality, project_type,
+  source_file_label, tags, full_text, sections, pricing, generation_notes, privacy
+) values (
+  'change_order_fence_modification_reference',
+  'change_order',
+  'fence_modification_new_post',
+  'Change Order - Fence Modification and New Fence Post Installation',
+  'final_reference',
+  'recladding_related_change_order',
+  'Fence modification placeholder-style CO with pricing basis and exclusions',
+  array['change_order','fence','new_post','fastplank_conflict','fixed_price','sales_tax','pricing_basis']::text[],
+  'CHANGE ORDER REQUEST
+Fence Modification and New Fence Post Installation
+
+Change Order No.: [CO NUMBER]
+Reference Contract: Construction Service Agreement dated [DATE] ([CLIENT / UNIT])
+Date Issued: [DATE ISSUED]
+
+Parties
+Contractor: Exterior Finishes LLC
+2217 131st Ave NE, Lake Stevens, WA
+
+Client: [CLIENT NAME]
+[PROJECT ADDRESS]
+
+Project
+[PROJECT ADDRESS] - Exterior recladding and related work as set forth in the underlying Construction Service Agreement.
+
+Description of Change
+This Change Order adds the following scope to the Client''s work under the Construction Service Agreement: modification and partial rebuild of an existing fence section where the fence currently conflicts with the carried siding/recladding scope, including installation of one new 4x4 wood fence post set in concrete approximately offset from the wall as required, reconnection/rebuild of the affected fence section, and associated fasteners, bracing, and cleanup.
+
+All work shall be performed in coordination with the carried recladding scope and consistent with the standards, materials, warranties, and general terms of the underlying Construction Service Agreement.
+
+Scope of Added Work
+1. Confirm fence conflict location and lay out the new post location as required to allow siding installation to continue behind/through the affected area.
+2. Detach and modify the limited section of existing wood fence attached to or interfering with the wall.
+3. Furnish and install one (1) new 4x4 treated wood fence post set in concrete.
+4. Rebuild/reconnect the affected fence section to the new post, including basic blocking, fasteners, and hardware required for a sound attachment.
+5. Clean up debris generated by the added fence modification work.
+
+Pricing Breakdown
+| Description | Qty | Rate | Amount | Type |
+|---|---:|---:|---:|---|
+| Fence modification/rebuild of limited section to allow siding/recladding installation through affected area, including one new 4x4 post set in concrete, reconnection of affected fence section, standard hardware, fasteners, and cleanup | 1 | $2,150.00 | $2,150.00 | Fixed |
+| Subtotal |  |  | $2,150.00 |  |
+| Washington State Sales Tax (10.55%) |  |  | $226.83 | Tax |
+| TOTAL CHANGE ORDER (incl. sales tax) |  |  | $2,376.83 |  |
+
+Pricing Basis
+This Change Order is based on a limited fence modification scope requiring one (1) new 4x4 post and one affected fence section. Additional posts, gate rebuild, removal of existing concrete footings, replacement of rotten or damaged fence materials beyond the immediate affected section, or expansion of scope will be handled by written change order if approved by Client.
+
+Exclusions
+Unless expressly included above, the following are excluded from this Change Order: full fence replacement; gate work; staining or painting; extensive fence repairs beyond the immediate affected section; replacement of posts, rails, or pickets not specifically listed; removal of concealed concrete footings unless expressly included; landscaping or grading; permit fees; utility relocation; owner association approvals; and any work outside the fence modification scope described herein.
+
+Schedule Impact
+The Work described in this Change Order will be performed in coordination with, and as part of, the existing recladding schedule. No additional contract time is added by this Change Order, except as may be required by weather, concrete cure time, concealed or unknown conditions, or access constraints encountered during the Work.
+
+Payment
+The amounts set forth in this Change Order are in addition to the Contract Sum under the underlying Agreement and shall be billed to the Client signing below. Amounts due under this Change Order shall be added to the next applicable progress invoice and paid in accordance with the Payment Terms of the underlying Agreement.
+
+All Other Terms Unchanged
+Except as expressly modified by this Change Order, all terms, conditions, exclusions, warranties, dispute resolution provisions, and other provisions of the underlying Construction Service Agreement remain in full force and effect and apply to the Work described herein.
+
+Acceptance
+By signing below, the Parties acknowledge and agree to the additional scope of work, pricing, and terms set forth in this Change Order.
+
+CONTRACTOR
+Name: ____________________________________
+Signature: ____________________________________
+Date: ____________________________________
+
+CLIENT
+Name: [CLIENT NAME]
+Signature: ____________________________________
+Date: ____________________________________
+',
+  '{"change_order_sections": ["Title", "Change Order No.", "Reference Contract", "Date Issued", "Parties", "Project", "Description of Change", "Scope of Added Work", "Pricing Breakdown", "Pricing Basis", "Exclusions", "Schedule Impact", "Payment", "All Other Terms Unchanged", "Acceptance"]}'::jsonb,
+  '{"line_items": [{"description": "Fence modification/rebuild of limited section", "qty": 1, "rate": 2150.0, "amount": 2150.0, "type": "Fixed"}, {"description": "Washington State Sales Tax", "rate_percent": 10.55, "amount": 226.83, "type": "Tax"}], "subtotal": 2150.0, "total": 2376.83}'::jsonb,
+  '["Use this for scope conflicts where existing site conditions block siding installation.", "Include pricing basis when scope is intentionally limited.", "Call out excluded gate work, full replacement, staining/painting, landscaping, and concealed concrete footings."]'::jsonb,
+  '{"pii_redacted": true, "redacted_fields": ["client_name", "project_address"]}'::jsonb
+)
+on conflict (doc_key) do update set
+  doc_type = excluded.doc_type,
+  subtype = excluded.subtype,
+  title = excluded.title,
+  template_quality = excluded.template_quality,
+  project_type = excluded.project_type,
+  source_file_label = excluded.source_file_label,
+  tags = excluded.tags,
+  full_text = excluded.full_text,
+  sections = excluded.sections,
+  pricing = excluded.pricing,
+  generation_notes = excluded.generation_notes,
+  privacy = excluded.privacy,
+  updated_at = now();
+
+
+insert into public.ai_document_references (
+  doc_key, doc_type, subtype, title, template_quality, project_type,
+  source_file_label, tags, full_text, sections, pricing, generation_notes, privacy
+) values (
+  'proposal_itemized_takeoff_style_reference',
+  'proposal',
+  'itemized_takeoff_style',
+  'Itemized Supply-and-Install Proposal - Takeoff Style',
+  'secondary_reference',
+  'new_construction_or_takeoff_driven_siding',
+  'Itemized proposal style using scope categories and base exclusions',
+  array['proposal','itemized','takeoff','siding','wrb','sheet_metal','base_exclusions','alternates']::text[],
+  'EXTERIOR FINISHES
+Proposal
+
+Date: [DATE]
+Project: [PROJECT NAME]
+
+Client / Project
+[CLIENT / PROJECT NAME]
+
+Project Address
+[PROJECT ADDRESS]
+
+Exterior Finishes has included pricing to supply and install the items listed below for the project. The scope has been organized in an itemized format for consistency in presentation and review.
+
+WRB System:
+• Tyvek HomeWrap building wrap
+• Tyvek seam tape
+• Tyvek flashing tape
+• Moistop at required areas
+• Stinger WRB wrap caps
+
+Sealant:
+• OSI QuadMax
+
+James Hardie Panel / Trim Scope:
+• James Hardie panel siding
+• James Hardie window, door, and garage door wrap
+• James Hardie window mullion trim ripped to fit where required
+• James Hardie belly band trim where carried
+• James Hardie outside corner trim
+• James Hardie top-out trim
+• Whitewood inside corner trim where required
+
+James Hardie Lap Siding:
+• James Hardie lap siding
+• James Hardie blades as required for installation
+
+Soffit / Entry Scope:
+• James Hardie panel at soffit or entry areas to match existing
+• Whitewood top-out at entry where carried
+
+Posts / Special Trim:
+• Hardie smooth panel wrap
+• Whitewood dado corners
+• Rustic trim
+• Custom crown moulding where carried
+
+Sheet Metal Flashings:
+• Kynar window head flashing
+• Kynar deck-to-wall flashing
+• Kynar base belly band head flashing
+• Kynar slope sill flashing
+
+Miscellaneous Products and Accessories:
+• A-11 staples
+• HDG RS siding nails
+• Finish nails
+• Gable vents
+• Light blocks
+• Hose bib blocks
+• Dryer vents
+• Dumpster allowance
+• Porta-potty allowance
+• Minor roof repair allowance
+
+Total Cost to Supply and Install Items Listed: $37,449.45
+
+Alternate Option:
+This alternate reflects the takeoff comparison carried in the estimate.
+Deduct $869.85
+
+Project Specific Exclusions:
+• Roof replacement or broader roofing scope beyond minor tie-in repairs already carried.
+• Concrete, masonry, and flatwork.
+• Painting or staining of any kind.
+• Gutters, downspouts, and leaf protection.
+• Window or door replacement, including rough opening preparation.
+• Interior work of any kind.
+
+Base Exclusions:
+• Special OCIP requirements, prevailing or special wages, permits, engineering, or testing of any kind.
+• Sheathing, blocking, structural framing, or concealed substrate repairs not visible at time of proposal.
+• Rot repair beyond minor incidental items carried in this proposal.
+• Work below grade.
+• Electrical, plumbing, HVAC, and low-voltage modifications.
+• Waterproofing systems outside of the siding and flashing scope specifically listed above.
+• Retentions greater than 5% or WSST requirements.
+
+Exterior Finishes would like to thank you for the opportunity to quote your upcoming project. Please do not hesitate to contact us if you have any questions or concerns.
+
+Sincerely,
+Anthony Hutchinson
+anthony@extfinishes.com
+(425) 870-0371
+',
+  '{"scope_sections": ["WRB System", "Sealant", "James Hardie Panel / Trim Scope", "James Hardie Lap Siding", "Soffit / Entry Scope", "Posts / Special Trim", "Sheet Metal Flashings", "Miscellaneous Products and Accessories"], "pricing_sections": ["Total Cost to Supply and Install Items Listed", "Alternate Option"], "closeout_sections": ["Project Specific Exclusions", "Base Exclusions", "Appreciation/Contact"]}'::jsonb,
+  '{"example_total_cost": 37449.45, "example_alternate_deduct": -869.85}'::jsonb,
+  '["Use when the estimator produces a takeoff-driven itemized list instead of a narrative homeowner proposal.", "Separate project-specific exclusions from base exclusions.", "Useful for commercial/GC-facing proposals."]'::jsonb,
+  '{"pii_redacted": true, "redacted_fields": ["client_name", "project_address"]}'::jsonb
+)
+on conflict (doc_key) do update set
+  doc_type = excluded.doc_type,
+  subtype = excluded.subtype,
+  title = excluded.title,
+  template_quality = excluded.template_quality,
+  project_type = excluded.project_type,
+  source_file_label = excluded.source_file_label,
+  tags = excluded.tags,
+  full_text = excluded.full_text,
+  sections = excluded.sections,
+  pricing = excluded.pricing,
+  generation_notes = excluded.generation_notes,
+  privacy = excluded.privacy,
+  updated_at = now();
+
+alter table public.ai_document_references enable row level security;
+
+drop policy if exists ai_document_references_read on public.ai_document_references;
+create policy ai_document_references_read
+  on public.ai_document_references
+  for select
+  to authenticated
+  using (true);

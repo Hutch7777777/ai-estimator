@@ -42,7 +42,7 @@ export async function DELETE(
     }
 
     // Block deletion if job is currently processing
-    if (job.status === 'processing' || job.status === 'converting') {
+    if (job.status === 'processing' || job.status === 'refining' || job.status === 'converting') {
       return NextResponse.json(
         { success: false, error: 'Cannot delete a job that is currently processing' },
         { status: 400 }

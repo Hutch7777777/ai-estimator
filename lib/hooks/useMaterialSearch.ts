@@ -2,11 +2,6 @@
 
 import { useState, useEffect, useRef } from 'react';
 
-// Type for the category query result
-interface CategoryRow {
-  category: string;
-}
-
 // Type for the pricing_items query result
 interface PricingRow {
   id: string;
@@ -86,6 +81,7 @@ const SELECTABLE_CATEGORIES: Record<string, string[]> = {
     'lap_siding', 'shingle', 'panel', 'siding', 'Siding', 'board_batten', 'artisan',
     'LAP SIDING - SMOOTH', 'LAP SIDING - CEDARMILL', 'PANEL SIDING', 'SHINGLE SIDING',
   ],
+  stone_veneer: ['stone', 'veneer', 'stone_veneer', 'brick', 'masonry', 'Stone', 'Veneer', 'Brick'],
   // Soffit products (vinyl, aluminum, Hardie)
   soffit: ['soffit', 'Soffit', 'SOFFIT'],
   // Trim products (for trim, fascia, belly band) - expanded HardieTrim widths
@@ -142,6 +138,7 @@ const CLASS_TO_CATEGORIES: Record<string, string[]> = {
   // === AREA CLASSES (SF) - Siding Products ===
   siding: SELECTABLE_CATEGORIES.siding,
   exterior_wall: SELECTABLE_CATEGORIES.siding,
+  stone_veneer: SELECTABLE_CATEGORIES.stone_veneer,
   door: SELECTABLE_CATEGORIES.siding,  // Door surrounds use siding
   garage: SELECTABLE_CATEGORIES.siding,
   gable: SELECTABLE_CATEGORIES.siding,
@@ -273,7 +270,7 @@ export function useMaterialSearch(options: UseMaterialSearchOptions = {}): UseMa
 
         if (data && isMountedRef.current) {
           // Get unique categories
-          let uniqueCategories = Array.from(
+          const uniqueCategories = Array.from(
             new Set(data.map((d) => d.category).filter(Boolean))
           );
 

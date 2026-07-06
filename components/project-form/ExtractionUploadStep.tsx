@@ -12,7 +12,7 @@ import {
   CheckCircle2,
   AlertCircle,
 } from "lucide-react";
-import { useOrganization } from "@/lib/hooks/useOrganization";
+import { isDevBypassEnabled, useOrganization } from "@/lib/hooks/useOrganization";
 import { cn } from "@/lib/utils";
 import type { JobStatus } from "@/lib/types/extraction";
 
@@ -42,7 +42,11 @@ interface StartJobResponse {
 // Constants
 // =============================================================================
 
-const EXTRACTION_API_URL = process.env.NEXT_PUBLIC_EXTRACTION_API_URL || 'https://extraction-api-production.up.railway.app';
+const LOCAL_EXTRACTION_API_URL =
+  process.env.NEXT_PUBLIC_LOCAL_EXTRACTION_API_URL || 'http://localhost:5050';
+const EXTRACTION_API_URL = isDevBypassEnabled()
+  ? LOCAL_EXTRACTION_API_URL
+  : process.env.NEXT_PUBLIC_EXTRACTION_API_URL || 'https://extraction-api-production.up.railway.app';
 const STORAGE_BUCKET = 'project-pdfs';
 const MAX_FILE_SIZE_MB = 100;
 

@@ -2,7 +2,7 @@
 
 import React, { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import { useRouter } from 'next/navigation';
-import { Loader2, AlertCircle, RefreshCw, Eye, EyeOff, X, Layers, CheckCircle, DollarSign, FileText, Download, ExternalLink } from 'lucide-react';
+import { Loader2, AlertCircle, RefreshCw, Eye, EyeOff, X, Layers, CheckCircle, DollarSign, FileText, Download, ExternalLink, Sparkles, PackageCheck, ClipboardCheck } from 'lucide-react';
 import { toast } from 'sonner';
 import JSZip from 'jszip';
 import { saveAs } from 'file-saver';
@@ -71,6 +71,13 @@ import { useSAMSegment, type SAMPendingDetection, type SAMSegmentResult } from '
 import { getMaterialById } from '@/lib/hooks/useMaterialSearch';
 import SAMClassPicker from './SAMClassPicker';
 import BluebeamImportModal from './BluebeamImportModal';
+import MaterialBucketAssistant from './MaterialBucketAssistant';
+import ScopeChecklistPanel, {
+  detectionMatchesScope,
+  getScopeChecklistItem,
+  type ScopeChecklistItem,
+  type ScopeChecklistKey,
+} from './ScopeChecklistPanel';
 import { exportTakeoffToExcel, type TakeoffData } from '@/lib/utils/exportTakeoffExcel';
 import { useOrganization } from '@/lib/hooks/useOrganization';
 import { createClient } from '@supabase/supabase-js';
@@ -389,6 +396,10 @@ export default function DetectionEditor({
 
   // Re-detection state
   const [isRedetecting, setIsRedetecting] = useState(false);
+  const [isRefiningDetections, setIsRefiningDetections] = useState(false);
+  const [showMaterialAssistant, setShowMaterialAssistant] = useState(false);
+  const [showScopeChecklist, setShowScopeChecklist] = useState(false);
+  const [activeScopeItemKey, setActiveScopeItemKey] = useState<ScopeChecklistKey | null>(null);
 
   // Unassigned filter state - show only detections without assigned materials
   const [showUnassignedOnly, setShowUnassignedOnly] = useState(false);
@@ -994,6 +1005,58 @@ export default function DetectionEditor({
     setSelectedIds(new Set([detectionId]));
     setSelectedDetectionId(detectionId);
   }, [currentPageId, setCurrentPageId]);
+
+  const handleScopeChecklistFocus = useCallback((item: ScopeChecklistItem | null) => {
+    if (!item) {
+      setActiveScopeItemKey(null);
+      setSelectedIds(new Set());
+      setSelectedDetectionId(null);
+      setToolMode('select');
+      return;
+    }
+
+    if (item.kind === 'calibration') {
+      setActiveScopeItemKey(null);
+      setSelectedIds(new Set());
+      setSelectedDetectionId(null);
+      setToolMode('calibrate');
+      toast.info('Calibration mode enabled', {
+        description: 'Click two points on a known dimension, then enter the real distance.',
+      });
+      return;
+    }
+
+    setActiveScopeItemKey(item.key);
+    setShowOriginalOnly(false);
+    setShowUnassignedOnly(false);
+
+    if (item.preferredClass) {
+      if (item.preferredTool === 'line') {
+        setLineClass(item.preferredClass);
+      } else if (item.preferredTool === 'point') {
+        setPointClass(item.preferredClass);
+      } else {
+        setCreateClass(item.preferredClass);
+      }
+    }
+
+    const matchingCurrentPageDetections = currentPageDetections.filter((detection) => (
+      detection.status !== 'deleted' && detectionMatchesScope(detection, item)
+    ));
+    const matchingIds = matchingCurrentPageDetections.map((detection) => detection.id);
+
+    setSelectedIds(new Set(matchingIds));
+    setSelectedDetectionId(matchingIds[0] || null);
+    setToolMode(matchingIds.length === 0 && item.preferredTool && item.preferredTool !== 'select'
+      ? item.preferredTool
+      : 'select');
+
+    toast.info(`Focused ${item.title}`, {
+      description: matchingIds.length > 0
+        ? `${matchingIds.length} related markup${matchingIds.length !== 1 ? 's' : ''} visible on this page.`
+        : 'No current-page markups found yet. The matching draw tool is ready.',
+    });
+  }, [currentPageDetections]);
 
   // ============================================================================
   // Detection Edit Handlers (Konva-compatible)
@@ -2567,8 +2630,13 @@ export default function DetectionEditor({
       filtered = filtered.filter((d) => !d.assigned_material_id);
     }
 
+    const activeScopeItem = getScopeChecklistItem(activeScopeItemKey);
+    if (activeScopeItem && activeScopeItem.targetClasses.length > 0) {
+      filtered = filtered.filter((d) => detectionMatchesScope(d, activeScopeItem));
+    }
+
     return filtered;
-  }, [currentPageDetections, showDeleted, showOriginalOnly, minConfidence, showLowConfidence, showUnassignedOnly]);
+  }, [activeScopeItemKey, currentPageDetections, showDeleted, showOriginalOnly, minConfidence, showLowConfidence, showUnassignedOnly]);
 
   // Compute detection counts for confidence filter UI
   const confidenceFilterCounts = useMemo(() => {
@@ -3015,14 +3083,14 @@ export default function DetectionEditor({
       return null;
     }
 
-    // Helper function to filter detections the same way as currentPageDetections
-    // This excludes building/exterior_wall/roof classes which are hidden from UI
+    // Helper function to filter detections the same way as currentPageDetections.
+    // Exterior walls remain visible because they drive siding/facade takeoff.
     const filterDetectionsForPage = (pageId: string): ExtractionDetection[] => {
       const pageDetections = detections.get(pageId) || [];
       return pageDetections.filter((d) => {
         const cls = d.class as string;
         // Same filter as currentPageDetections in useExtractionData
-        if (cls === 'exterior_wall' || cls === 'building' || cls === 'roof') return false;
+        if (cls === 'building' || cls === 'roof') return false;
         if (d.status === 'deleted') return false;
         return true;
       });
@@ -3982,6 +4050,112 @@ export default function DetectionEditor({
     }
   }, [currentPageId, minConfidence, refresh]);
 
+  const handleRefineDetections = useCallback(async () => {
+    if (!currentPageId) {
+      toast.error('No page selected');
+      return;
+    }
+
+    setIsRefiningDetections(true);
+    const focusedDetectionIds = selectedIds.size > 0
+      ? Array.from(selectedIds)
+      : selectedDetectionId
+        ? [selectedDetectionId]
+        : [];
+    const isFocusedRefine = focusedDetectionIds.length > 0;
+    toast.info(
+      isFocusedRefine
+        ? `Reviewing ${focusedDetectionIds.length} selected markup${focusedDetectionIds.length === 1 ? '' : 's'}...`
+        : 'Reviewing siding and gable markups...',
+      { duration: 3000 }
+    );
+
+    try {
+      const previewResponse = await fetch('/api/refine-detections', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          page_id: currentPageId,
+          apply: false,
+          classes: ['exterior_wall', 'gable'],
+          detection_ids: focusedDetectionIds,
+        }),
+      });
+
+      const preview = await previewResponse.json();
+      if (!previewResponse.ok || !preview.success) {
+        if (preview.setup_required) {
+          toast.error('Add OPENAI_API_KEY to the extraction API env, then restart it');
+        } else {
+          toast.error(preview.error || 'AI refinement failed');
+        }
+        return;
+      }
+
+      const safeActions = (preview.actions || []).filter(
+        (action: { status?: string; type?: string }) =>
+          action.status === 'valid' && action.type !== 'keep'
+      );
+      const blockedActions = (preview.actions || []).filter(
+        (action: { status?: string }) => action.status === 'blocked'
+      );
+
+      if (safeActions.length === 0) {
+        const keepReason = (preview.actions || []).find(
+          (action: { status?: string; type?: string; reason?: string }) =>
+            action.status === 'valid' && action.type === 'keep' && action.reason
+        )?.reason;
+        toast.info(
+          keepReason
+            ? `AI kept the selected markup: ${keepReason}`
+            : blockedActions.length > 0
+            ? `No safe changes found; ${blockedActions.length} suggestion${blockedActions.length === 1 ? '' : 's'} blocked`
+            : 'No markup changes needed'
+        );
+        return;
+      }
+
+      const confirmed = window.confirm(
+        `AI found ${safeActions.length} safe refinement change${safeActions.length === 1 ? '' : 's'} ${isFocusedRefine ? 'for the selected markup' : 'for this page'}.\n\nApply them to the editable markups now?`
+      );
+      if (!confirmed) {
+        toast.info('AI refinement preview cancelled');
+        return;
+      }
+
+      toast.info('Applying AI refinement...', { duration: 3000 });
+      const applyResponse = await fetch('/api/refine-detections', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          page_id: currentPageId,
+          apply: true,
+          classes: ['exterior_wall', 'gable'],
+          detection_ids: focusedDetectionIds,
+          actions: preview.actions || [],
+        }),
+      });
+
+      const result = await applyResponse.json();
+      if (!applyResponse.ok || !result.success) {
+        toast.error(result.error || 'Failed to apply AI refinement');
+        return;
+      }
+
+      const applied = result.apply_summary?.applied || 0;
+      const blocked = result.apply_summary?.blocked || 0;
+      toast.success(
+        `Applied ${applied} refinement${applied === 1 ? '' : 's'}${blocked ? `; ${blocked} blocked` : ''}`
+      );
+      await refresh();
+    } catch (error) {
+      console.error('[AI Refine] Error:', error);
+      toast.error('Failed to refine detections');
+    } finally {
+      setIsRefiningDetections(false);
+    }
+  }, [currentPageId, refresh, selectedDetectionId, selectedIds]);
+
   // Region Detect: Handle region selection from canvas
   const handleRegionSelected = useCallback(async (region: DetectionRegion) => {
     console.log('[DetectionEditor] Region selected:', region);
@@ -4679,8 +4853,61 @@ export default function DetectionEditor({
                     aboveThresholdCount={confidenceFilterCounts.aboveThreshold}
                     isActive={isConfidenceFilterActive}
                   />
+                  <button
+                    type="button"
+                    onClick={handleRefineDetections}
+                    disabled={isRefiningDetections || isRedetecting || !currentPageId}
+                    title="AI refine siding and gable markups"
+                    className="inline-flex h-9 items-center gap-2 rounded-md border border-gray-700 bg-gray-800 px-3 text-sm font-medium text-white shadow-sm transition-colors hover:bg-gray-700 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {isRefiningDetections ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <Sparkles className="h-4 w-4" />
+                    )}
+                    <span className="hidden sm:inline">AI Refine</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setShowMaterialAssistant(true)}
+                    disabled={loading || allDetectionsForList.length === 0}
+                    title="Assign materials by grouped markup buckets"
+                    className="inline-flex h-9 items-center gap-2 rounded-md border border-gray-700 bg-gray-800 px-3 text-sm font-medium text-white shadow-sm transition-colors hover:bg-gray-700 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    <PackageCheck className="h-4 w-4" />
+                    <span className="hidden sm:inline">Material Assist</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setShowScopeChecklist(true)}
+                    disabled={loading}
+                    title="Open guided takeoff checklist"
+                    className={`inline-flex h-9 items-center gap-2 rounded-md border px-3 text-sm font-medium text-white shadow-sm transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
+                      showScopeChecklist || activeScopeItemKey
+                        ? 'border-blue-500 bg-blue-600 hover:bg-blue-500'
+                        : 'border-gray-700 bg-gray-800 hover:bg-gray-700'
+                    }`}
+                  >
+                    <ClipboardCheck className="h-4 w-4" />
+                    <span className="hidden sm:inline">Checklist</span>
+                  </button>
                 </div>
               )}
+
+              <ScopeChecklistPanel
+                isOpen={showScopeChecklist}
+                onClose={() => setShowScopeChecklist(false)}
+                detections={allDetectionsForList}
+                pages={pages}
+                currentPageId={currentPageId}
+                activeItemKey={activeScopeItemKey}
+                estimateConfig={estimateConfig}
+                currentPageScaleRatio={currentPage?.scale_ratio || null}
+                onFocusItem={handleScopeChecklistFocus}
+                onEstimateConfigChange={(nextConfig) => {
+                  saveEstimateConfig(trimSystem, wrbProduct, nextConfig);
+                }}
+              />
 
               {/* Region Detection Pending Panel - appears when there are region pending detections */}
               {regionPendingDetections.length > 0 && (
@@ -5040,6 +5267,15 @@ export default function DetectionEditor({
           </div>
         </div>
       )}
+
+      <MaterialBucketAssistant
+        isOpen={showMaterialAssistant}
+        onClose={() => setShowMaterialAssistant(false)}
+        detections={allDetectionsForList}
+        pages={pages}
+        currentPageId={currentPageId}
+        onMaterialAssign={handleMaterialAssign}
+      />
 
       {/* Calibration Modal */}
       <CalibrationModal

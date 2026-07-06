@@ -84,6 +84,7 @@ export type AllDetectionClasses = DetectionClass | InternalDetectionClass;
 export type PageType =
   | 'elevation'
   | 'floor_plan'
+  | 'roof_plan'
   | 'schedule'
   | 'cover'
   | 'detail'
@@ -97,8 +98,10 @@ export type JobStatus =
   | 'importing'   // Bluebeam fresh import in progress
   | 'converting'
   | 'classifying'
+  | 'analyzing'
   | 'classified'  // Pages classified, ready for user review
   | 'processing'
+  | 'refining'
   | 'complete'
   | 'approved'    // Detections approved, takeoff generated
   | 'failed';
@@ -188,6 +191,7 @@ export interface ExtractionJob {
   completed_at: string | null;
   default_scale_ratio: number | null;
   plan_dpi: number | null;
+  error_message?: string | null;
   // Results from intelligent analysis and aggregation
   results_summary?: {
     // From intelligent analysis
@@ -231,6 +235,7 @@ export interface ExtractionPage {
   original_height: number | null;
   // Annotated image with Bluebeam markups visible (for "Show Bluebeam Markups" toggle)
   annotated_image_url?: string | null;
+  error_message?: string | null;
 }
 
 export interface ExtractionDetection {

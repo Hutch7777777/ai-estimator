@@ -292,6 +292,8 @@ export function ExtractionsTable() {
         return "Ready for Review";
       case "processing":
         return "Detecting Objects";
+      case "refining":
+        return "Refining Markups";
       case "complete":
         return "Complete";
       case "approved":
@@ -320,6 +322,7 @@ export function ExtractionsTable() {
       case "classified":
         return "bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200";
       case "processing":
+      case "refining":
         return "bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200";
       default:
         return "bg-gray-100 text-gray-800 dark:bg-gray-900 dark:text-gray-200";
@@ -526,9 +529,9 @@ export function ExtractionsTable() {
                         variant="ghost"
                         className="h-8 w-8 text-gray-400 hover:text-red-500 disabled:opacity-50 disabled:cursor-not-allowed"
                         onClick={() => setConfirmDeleteId(job.id)}
-                        disabled={job.status === 'processing' || job.status === 'converting'}
+                        disabled={job.status === 'processing' || job.status === 'refining' || job.status === 'converting'}
                         title={
-                          job.status === 'processing' || job.status === 'converting'
+                          job.status === 'processing' || job.status === 'refining' || job.status === 'converting'
                             ? 'Cannot delete while processing'
                             : 'Delete extraction job'
                         }

@@ -289,12 +289,13 @@ const GrandTotalRow = memo(function GrandTotalRow({
 const PageTotals = memo(function PageTotals({ detections, scaleRatio }: PageTotalsProps) {
   // Calculate totals grouped by class
   const { classTotals, grandTotal } = useMemo(() => {
-    // Filter out deleted detections and internal classes
+    // Filter out deleted detections and internal classes.
+    // Exterior walls are visible/editable siding/facade markups.
     const validDetections = detections.filter((d) => {
       if (d.status === 'deleted') return false;
       // Cast to check for internal classes
       const cls = d.class as AllDetectionClasses;
-      if (cls === 'building' || cls === 'exterior_wall') return false;
+      if (cls === 'building') return false;
       return true;
     });
 

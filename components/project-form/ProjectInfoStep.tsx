@@ -1,11 +1,11 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { ProjectFormData } from "@/lib/types/project-form";
-import { projectInfoSchema, validateField } from "@/lib/validation/project-form";
+import { ProjectFormData, ProjectIntakeType } from "@/lib/types/project-form";
+import { projectInfoSchema } from "@/lib/validation/project-form";
 import { AlertCircle, CheckCircle2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -13,32 +13,73 @@ interface ProjectInfoStepProps {
   data: ProjectFormData;
   onUpdate: (data: Partial<ProjectFormData>) => void;
   onValidationChange?: (isValid: boolean) => void;
+  intakeType?: ProjectIntakeType | null;
 }
 
-export function ProjectInfoStep({ data, onUpdate, onValidationChange }: ProjectInfoStepProps) {
-  const [errors, setErrors] = useState<Record<string, string>>({});
-  const [touched, setTouched] = useState<Record<string, boolean>>({});
+const COPY_BY_INTAKE: Record<ProjectIntakeType, {
+  title: string;
+  description: string;
+  projectNameLabel: string;
+  projectNamePlaceholder: string;
+  customerNameLabel: string;
+  customerNamePlaceholder: string;
+  addressLabel: string;
+  addressPlaceholder: string;
+}> = {
+  hover: {
+    title: "Project Information",
+    description: "Enter basic information about your construction project",
+    projectNameLabel: "Project Name",
+    projectNamePlaceholder: "e.g., Smith Residence Siding",
+    customerNameLabel: "Customer Name",
+    customerNamePlaceholder: "e.g., John Smith",
+    addressLabel: "Project Address",
+    addressPlaceholder: "e.g., 123 Main St, City, State ZIP",
+  },
+  plans: {
+    title: "Plan Set Details",
+    description: "Identify the job before uploading the construction plans",
+    projectNameLabel: "Project / Plan Set Name",
+    projectNamePlaceholder: "e.g., Smith Residence Exterior Plans",
+    customerNameLabel: "Client / Builder",
+    customerNamePlaceholder: "e.g., John Smith or Acme Builders",
+    addressLabel: "Project Site Address",
+    addressPlaceholder: "e.g., 123 Main St, City, State ZIP",
+  },
+};
 
-  // Validate whenever data changes
-  useEffect(() => {
-    const result = projectInfoSchema.safeParse({
+export function ProjectInfoStep({
+  data,
+  onUpdate,
+  onValidationChange,
+  intakeType,
+}: ProjectInfoStepProps) {
+  const [touched, setTouched] = useState<Record<string, boolean>>({});
+  const copy = COPY_BY_INTAKE[intakeType ?? "hover"];
+
+  const validationResult = useMemo(() => (
+    projectInfoSchema.safeParse({
       projectName: data.projectName || "",
       customerName: data.customerName || "",
       address: data.address || "",
       notes: data.notes || "",
-    });
+    })
+  ), [data.projectName, data.customerName, data.address, data.notes]);
 
+  const errors = useMemo(() => {
     const newErrors: Record<string, string> = {};
-    if (!result.success && result.error?.issues) {
-      result.error.issues.forEach((err: any) => {
-        const field = err.path[0] as string;
-        newErrors[field] = err.message;
+    if (!validationResult.success) {
+      validationResult.error.issues.forEach((err) => {
+        const field = String(err.path[0] ?? "");
+        if (field) newErrors[field] = err.message;
       });
     }
+    return newErrors;
+  }, [validationResult]);
 
-    setErrors(newErrors);
-    onValidationChange?.(result.success);
-  }, [data.projectName, data.customerName, data.address, data.notes, onValidationChange]);
+  useEffect(() => {
+    onValidationChange?.(validationResult.success);
+  }, [validationResult.success, onValidationChange]);
 
   const handleBlur = (field: string) => {
     setTouched((prev) => ({ ...prev, [field]: true }));
@@ -54,9 +95,9 @@ export function ProjectInfoStep({ data, onUpdate, onValidationChange }: ProjectI
   return (
     <Card className="shadow-soft rounded-xl">
       <CardHeader>
-        <CardTitle className="font-heading">Project Information</CardTitle>
+        <CardTitle className="font-heading">{copy.title}</CardTitle>
         <CardDescription>
-          Enter basic information about your construction project
+          {copy.description}
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-6">
@@ -64,7 +105,7 @@ export function ProjectInfoStep({ data, onUpdate, onValidationChange }: ProjectI
         <div className="space-y-2">
           <div className="flex items-center justify-between">
             <Label htmlFor="projectName" className="flex items-center gap-2">
-              Project Name
+              {copy.projectNameLabel}
               {isFieldValid("projectName") && (
                 <CheckCircle2 className="h-4 w-4 text-brand-foreground" />
               )}
@@ -76,7 +117,7 @@ export function ProjectInfoStep({ data, onUpdate, onValidationChange }: ProjectI
           </div>
           <Input
             id="projectName"
-            placeholder="e.g., Smith Residence Siding"
+            placeholder={copy.projectNamePlaceholder}
             value={data.projectName}
             onChange={(e) => onUpdate({ projectName: e.target.value })}
             onBlur={() => handleBlur("projectName")}
@@ -97,7 +138,7 @@ export function ProjectInfoStep({ data, onUpdate, onValidationChange }: ProjectI
         <div className="space-y-2">
           <div className="flex items-center justify-between">
             <Label htmlFor="customerName" className="flex items-center gap-2">
-              Customer Name
+              {copy.customerNameLabel}
               {isFieldValid("customerName") && (
                 <CheckCircle2 className="h-4 w-4 text-brand-foreground" />
               )}
@@ -109,7 +150,7 @@ export function ProjectInfoStep({ data, onUpdate, onValidationChange }: ProjectI
           </div>
           <Input
             id="customerName"
-            placeholder="e.g., John Smith"
+            placeholder={copy.customerNamePlaceholder}
             value={data.customerName}
             onChange={(e) => onUpdate({ customerName: e.target.value })}
             onBlur={() => handleBlur("customerName")}
@@ -130,7 +171,7 @@ export function ProjectInfoStep({ data, onUpdate, onValidationChange }: ProjectI
         <div className="space-y-2">
           <div className="flex items-center justify-between">
             <Label htmlFor="address" className="flex items-center gap-2">
-              Project Address
+              {copy.addressLabel}
               {isFieldValid("address") && (
                 <CheckCircle2 className="h-4 w-4 text-brand-foreground" />
               )}
@@ -142,7 +183,7 @@ export function ProjectInfoStep({ data, onUpdate, onValidationChange }: ProjectI
           </div>
           <Input
             id="address"
-            placeholder="e.g., 123 Main St, City, State ZIP"
+            placeholder={copy.addressPlaceholder}
             value={data.address}
             onChange={(e) => onUpdate({ address: e.target.value })}
             onBlur={() => handleBlur("address")}

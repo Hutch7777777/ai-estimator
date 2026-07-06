@@ -48,7 +48,7 @@ export function AddMeasurementsModal({
       icon: FileText,
       onSelect: () => {
         onOpenChange(false);
-        router.push(NEW_PROJECT_HREF);
+        router.push(`${NEW_PROJECT_HREF}?type=hover`);
       },
     },
     {
@@ -66,7 +66,7 @@ export function AddMeasurementsModal({
       icon: ScanSearch,
       onSelect: () => {
         onOpenChange(false);
-        router.push(NEW_PROJECT_HREF);
+        router.push(`${NEW_PROJECT_HREF}?type=plans`);
       },
     },
   ];

@@ -25,7 +25,7 @@ import {
   Settings,
   Layers
 } from "lucide-react";
-import { ProjectFormData } from "@/lib/types/project-form";
+import { ProjectFormData, ProjectIntakeType } from "@/lib/types/project-form";
 import { createClient } from "@/lib/supabase/client";
 import type { TradeConfiguration, ProductCatalog, ShowIfCondition } from "@/lib/types/database";
 import { cn } from "@/lib/utils";
@@ -34,6 +34,7 @@ interface ProductConfigStepProps {
   data: ProjectFormData;
   onUpdate: (data: Partial<ProjectFormData>) => void;
   onValidationChange?: (isValid: boolean) => void;
+  intakeType?: ProjectIntakeType | null;
 }
 
 interface GroupedProducts {
@@ -99,7 +100,20 @@ function formatPrice(price: number | null): string {
 /**
  * Get trade-specific description explaining that accessories are auto-calculated
  */
-function getTradeDescription(trade: string): string {
+function getTradeDescription(trade: string, intakeType?: ProjectIntakeType | null): string {
+  if (intakeType === 'plans') {
+    switch (trade) {
+      case 'siding':
+        return 'Select the main siding products the PDF editor should use for material assignment and takeoff calculation. Accessories will be calculated from reviewed plan detections.';
+      case 'windows':
+        return 'Select the window defaults the PDF editor should use when reviewing detected windows and trim quantities.';
+      case 'gutters':
+        return 'Select the gutter system the PDF editor should use when gutter and downspout detections are present.';
+      default:
+        return 'Configure products for the PDF editor. These settings are saved to this job before extraction starts.';
+    }
+  }
+
   switch (trade) {
     case 'siding':
       return 'Select your main siding products. Accessories (WRB, flashing, trim, etc.) will be automatically calculated based on your selections and HOVER measurements.';
@@ -114,7 +128,12 @@ function getTradeDescription(trade: string): string {
   }
 }
 
-export function ProductConfigStep({ data, onUpdate, onValidationChange }: ProductConfigStepProps) {
+export function ProductConfigStep({
+  data,
+  onUpdate,
+  onValidationChange,
+  intakeType,
+}: ProductConfigStepProps) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [configurations, setConfigurations] = useState<TradeConfiguration[]>([]);
@@ -1144,7 +1163,7 @@ export function ProductConfigStep({ data, onUpdate, onValidationChange }: Produc
           ?.filter(trade => groupedByTradeAndSection[trade])
           .map((trade) => {
             const sections = groupedByTradeAndSection[trade];
-            const tradeDescription = getTradeDescription(trade);
+            const tradeDescription = getTradeDescription(trade, intakeType);
             const tradeName = toTitleCase(trade);
 
             return (

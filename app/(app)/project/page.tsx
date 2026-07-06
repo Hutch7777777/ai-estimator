@@ -8,7 +8,7 @@ import { redirect } from 'next/navigation';
 const TAB_TARGETS: Record<string, string> = {
   overview: '/dashboard',
   new: '/projects/new',
-  cad: '/tools/cad-markup',
+  cad: '/projects',
   extractions: '/projects',
   past: '/projects',
 };

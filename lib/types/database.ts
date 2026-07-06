@@ -39,6 +39,7 @@ export type DetectionClass =
 export type PageType =
   | 'elevation'
   | 'floor_plan'
+  | 'roof_plan'
   | 'schedule'
   | 'cover'
   | 'detail'
@@ -52,6 +53,7 @@ export type JobStatus =
   | 'converting'
   | 'classifying'
   | 'processing'
+  | 'refining'
   | 'complete'
   | 'failed';
 
