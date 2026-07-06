@@ -57,6 +57,19 @@ export type JobStatus =
   | 'complete'
   | 'failed';
 
+// AI assistant RAG enums
+export type AssistantScope = 'global' | 'project';
+
+export type AssistantMessageRole = 'system' | 'user' | 'assistant' | 'tool';
+
+export type KnowledgeCollectionType = 'core' | 'company' | 'project' | 'template' | 'rule';
+
+export type KnowledgeVisibility = 'organization' | 'project';
+
+export type KnowledgeDocumentStatus = 'uploaded' | 'extracting' | 'chunking' | 'embedding' | 'ready' | 'error';
+
+export type AssistantFeedbackRating = 'helpful' | 'not_helpful';
+
 // ============================================================================
 // TABLE INTERFACES
 // ============================================================================
@@ -316,6 +329,173 @@ export interface TakeoffLineItem {
 export interface LineItemWithState extends TakeoffLineItem {
   isNew?: boolean; // Flag for newly added rows
   isModified?: boolean; // Flag for modified rows
+}
+
+/**
+ * Knowledge Collections Table
+ *
+ * Groups documents, rules, templates, and core/company/project knowledge for retrieval.
+ * project_id is nullable so the same table supports global and project-specific assistant scope.
+ */
+export interface KnowledgeCollection {
+  id: string;
+  organization_id: string;
+  project_id: string | null;
+  name: string;
+  description: string | null;
+  collection_type: KnowledgeCollectionType;
+  visibility: KnowledgeVisibility;
+  metadata: Record<string, unknown>;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+/**
+ * Documents Table
+ *
+ * Tracks uploaded source files and extraction/chunking status for the assistant knowledge library.
+ */
+export interface KnowledgeDocumentRecord {
+  id: string;
+  organization_id: string;
+  project_id: string | null;
+  collection_id: string | null;
+  uploaded_by: string | null;
+  title: string;
+  file_name: string | null;
+  file_type: string | null;
+  mime_type: string | null;
+  storage_bucket: string | null;
+  storage_path: string | null;
+  source_url: string | null;
+  status: KnowledgeDocumentStatus;
+  extracted_text_checksum: string | null;
+  chunk_count: number;
+  metadata: Record<string, unknown>;
+  error_message: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+/**
+ * Document Chunks Table
+ *
+ * Stores searchable content segments and optional pgvector embeddings.
+ */
+export interface DocumentChunk {
+  id: string;
+  organization_id: string;
+  project_id: string | null;
+  document_id: string;
+  collection_id: string | null;
+  chunk_index: number;
+  content: string;
+  token_count: number | null;
+  embedding: number[] | null;
+  metadata: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+}
+
+/**
+ * Chat Threads Table
+ *
+ * Conversation containers for global or project-level assistant chats.
+ */
+export interface ChatThread {
+  id: string;
+  organization_id: string;
+  project_id: string | null;
+  title: string;
+  scope: AssistantScope;
+  created_by: string | null;
+  archived_at: string | null;
+  metadata: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+}
+
+/**
+ * Chat Messages Table
+ *
+ * Stores user/assistant messages and citation metadata.
+ */
+export interface ChatMessage {
+  id: string;
+  organization_id: string;
+  project_id: string | null;
+  thread_id: string;
+  role: AssistantMessageRole;
+  content: string;
+  citations: Record<string, unknown>[];
+  token_count: number | null;
+  metadata: Record<string, unknown>;
+  created_by: string | null;
+  created_at: string;
+}
+
+/**
+ * Assistant Feedback Table
+ *
+ * Captures thumbs-up/down feedback and future save-as-rule actions.
+ */
+export interface AssistantFeedback {
+  id: string;
+  organization_id: string;
+  project_id: string | null;
+  thread_id: string | null;
+  message_id: string | null;
+  user_id: string | null;
+  rating: AssistantFeedbackRating;
+  feedback_type: string | null;
+  comment: string | null;
+  saved_as_rule: boolean;
+  metadata: Record<string, unknown>;
+  created_at: string;
+}
+
+/**
+ * Company Rules Table
+ *
+ * Stores reusable estimating rules from manual entry or assistant feedback.
+ */
+export interface CompanyRule {
+  id: string;
+  organization_id: string;
+  project_id: string | null;
+  collection_id: string | null;
+  source_feedback_id: string | null;
+  title: string;
+  content: string;
+  rule_type: string;
+  active: boolean;
+  metadata: Record<string, unknown>;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+/**
+ * Prompt Templates Table
+ *
+ * Stores reusable assistant prompts for company and project workflows.
+ */
+export interface PromptTemplate {
+  id: string;
+  organization_id: string;
+  project_id: string | null;
+  name: string;
+  description: string | null;
+  template_key: string;
+  system_prompt: string;
+  user_prompt: string | null;
+  variables: Record<string, unknown>[];
+  active: boolean;
+  metadata: Record<string, unknown>;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
 }
 
 // ============================================================================
@@ -579,6 +759,47 @@ export interface Database {
         Row: ExtractionJobTotal;
         Insert: Omit<ExtractionJobTotal, 'id'>;
         Update: Partial<Omit<ExtractionJobTotal, 'id'>>;
+      };
+      // AI assistant RAG tables
+      knowledge_collections: {
+        Row: KnowledgeCollection;
+        Insert: Omit<KnowledgeCollection, 'id' | 'created_at' | 'updated_at'>;
+        Update: Partial<Omit<KnowledgeCollection, 'id' | 'created_at' | 'updated_at'>>;
+      };
+      documents: {
+        Row: KnowledgeDocumentRecord;
+        Insert: Omit<KnowledgeDocumentRecord, 'id' | 'created_at' | 'updated_at' | 'chunk_count'> & Partial<Pick<KnowledgeDocumentRecord, 'chunk_count'>>;
+        Update: Partial<Omit<KnowledgeDocumentRecord, 'id' | 'created_at' | 'updated_at'>>;
+      };
+      document_chunks: {
+        Row: DocumentChunk;
+        Insert: Omit<DocumentChunk, 'id' | 'created_at' | 'updated_at'>;
+        Update: Partial<Omit<DocumentChunk, 'id' | 'created_at' | 'updated_at'>>;
+      };
+      chat_threads: {
+        Row: ChatThread;
+        Insert: Omit<ChatThread, 'id' | 'created_at' | 'updated_at'>;
+        Update: Partial<Omit<ChatThread, 'id' | 'created_at' | 'updated_at'>>;
+      };
+      chat_messages: {
+        Row: ChatMessage;
+        Insert: Omit<ChatMessage, 'id' | 'created_at'>;
+        Update: Partial<Omit<ChatMessage, 'id' | 'created_at'>>;
+      };
+      assistant_feedback: {
+        Row: AssistantFeedback;
+        Insert: Omit<AssistantFeedback, 'id' | 'created_at'>;
+        Update: Partial<Omit<AssistantFeedback, 'id' | 'created_at'>>;
+      };
+      company_rules: {
+        Row: CompanyRule;
+        Insert: Omit<CompanyRule, 'id' | 'created_at' | 'updated_at'>;
+        Update: Partial<Omit<CompanyRule, 'id' | 'created_at' | 'updated_at'>>;
+      };
+      prompt_templates: {
+        Row: PromptTemplate;
+        Insert: Omit<PromptTemplate, 'id' | 'created_at' | 'updated_at'>;
+        Update: Partial<Omit<PromptTemplate, 'id' | 'created_at' | 'updated_at'>>;
       };
     };
   };

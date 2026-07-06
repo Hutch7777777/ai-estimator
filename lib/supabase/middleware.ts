@@ -30,12 +30,17 @@ export async function updateSession(request: NextRequest) {
   // Use getSession() instead of getUser() - validates JWT locally without network call
   const { data: { session }, error } = await supabase.auth.getSession();
 
-  if (error) {
+  if (error && error.message !== 'Auth session missing!') {
     console.error('Middleware auth error:', error.message);
   }
 
-  const publicRoutes = ['/login', '/signup', '/auth/callback', '/auth/confirm', '/onboarding', '/api'];
-  const isPublicRoute = publicRoutes.some(route => request.nextUrl.pathname.startsWith(route));
+  // '/' is the public landing page — exact match only, so authed sub-routes stay guarded.
+  const publicRoutes = ['/', '/login', '/signup', '/auth/callback', '/auth/confirm', '/onboarding', '/api'];
+  const isPublicRoute = publicRoutes.some(route =>
+    route === '/'
+      ? request.nextUrl.pathname === '/'
+      : request.nextUrl.pathname.startsWith(route)
+  );
 
   if (isLocalDevBypass) {
     return supabaseResponse;

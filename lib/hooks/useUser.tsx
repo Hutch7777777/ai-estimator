@@ -5,6 +5,27 @@ import { createClient } from '@/lib/supabase/client';
 import { User } from '@supabase/supabase-js';
 
 const USER_LOADING_TIMEOUT_MS = 5000; // 5 second timeout for user loading
+const REQUEST_TIMEOUT_MS = 8000;
+
+function withTimeout<T>(promise: PromiseLike<T>, label: string): Promise<T | null> {
+  return new Promise((resolve, reject) => {
+    const timeoutId = window.setTimeout(() => {
+      console.warn(`${label} timed out`);
+      resolve(null);
+    }, REQUEST_TIMEOUT_MS);
+
+    promise.then(
+      (value) => {
+        window.clearTimeout(timeoutId);
+        resolve(value);
+      },
+      (error) => {
+        window.clearTimeout(timeoutId);
+        reject(error);
+      }
+    );
+  });
+}
 
 // =============================================================================
 // DEV AUTH BYPASS - For local development only
@@ -61,7 +82,7 @@ export function UserProvider({ children }: { children: ReactNode }) {
   const [isDevBypass, setIsDevBypass] = useState(false);
 
   // Always start with loading state for consistent SSR/client hydration
-  const [user, setUser] = useState<User | null>(null);
+  const [user, setUserState] = useState<User | null>(null);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [hasSession, setHasSession] = useState(false);
@@ -70,6 +91,17 @@ export function UserProvider({ children }: { children: ReactNode }) {
   const hasCompletedRef = useRef(false);
 
   const supabase = useMemo(() => createClient(), []);
+
+  // Keep a stable `user` object reference while the id is unchanged. Both
+  // getUser() and the INITIAL_SESSION / TOKEN_REFRESHED auth events deliver
+  // fresh User objects for the same account; without this, every event
+  // changed the reference and restarted anything keyed on `user` (notably
+  // the organization loader), which is what left the workspace spinner
+  // stuck. This does not gate on isMounted — React ignores setState after
+  // unmount and the stable-identity guarantee must hold on every call.
+  const setUser = useCallback((next: User | null) => {
+    setUserState((prev) => ((prev?.id ?? null) === (next?.id ?? null) ? prev : next));
+  }, []);
 
   // Check for dev bypass after hydration (client-side only)
   useEffect(() => {
@@ -81,15 +113,20 @@ export function UserProvider({ children }: { children: ReactNode }) {
       setIsLoading(false);
       hasCompletedRef.current = true;
     }
-  }, []); // Run once on mount
+  }, [setUser]); // Run once on mount
 
   const fetchProfile = useCallback(async (userId: string, retryCount = 0): Promise<UserProfile | null> => {
     try {
-      const { data, error } = await supabase
-        .from('user_profiles')
-        .select('*')
-        .eq('id', userId)
-        .single();
+      const result = await withTimeout(
+        supabase
+          .from('user_profiles')
+          .select('*')
+          .eq('id', userId)
+          .single(),
+        'Profile fetch'
+      );
+      if (!result) return null;
+      const { data, error } = result;
 
       if (error) {
         console.error('Profile fetch error:', error.message);
@@ -102,7 +139,10 @@ export function UserProvider({ children }: { children: ReactNode }) {
       }
       return data as UserProfile;
     } catch (err) {
-      console.error('Profile fetch exception:', err);
+      console.warn(
+        'Profile fetch exception:',
+        err instanceof Error ? err.message : String(err)
+      );
       // Retry once on exception
       if (retryCount < 1) {
         await new Promise(resolve => setTimeout(resolve, 500));
@@ -133,7 +173,7 @@ export function UserProvider({ children }: { children: ReactNode }) {
       console.error('Sign out error:', err);
     }
     window.location.href = '/login';
-  }, [supabase, isDevBypass]);
+  }, [supabase, isDevBypass, setUser]);
 
   // Global timeout to prevent infinite loading
   useEffect(() => {
@@ -164,7 +204,7 @@ export function UserProvider({ children }: { children: ReactNode }) {
     return () => {
       clearTimeout(timeoutId);
     };
-  }, [supabase]);
+  }, [supabase, setUser]);
 
   useEffect(() => {
     if (isDevBypassEnabled()) {
@@ -173,10 +213,39 @@ export function UserProvider({ children }: { children: ReactNode }) {
 
     let isMounted = true;
 
+    const loadProfile = (userId: string) => {
+      void fetchProfile(userId).then((userProfile) => {
+        if (isMounted) {
+          setProfile(userProfile);
+        }
+      });
+    };
+
     const initialize = async () => {
 
       try {
-        const { data: { user: authUser }, error } = await supabase.auth.getUser();
+        const result = await withTimeout(
+          supabase.auth.getUser(),
+          'Auth user fetch'
+        );
+        if (!result) {
+          const sessionResult = await withTimeout(
+            supabase.auth.getSession(),
+            'Auth session fallback'
+          );
+          const sessionUser = sessionResult?.data.session?.user ?? null;
+
+          if (isMounted) {
+            setUser(sessionUser);
+            setHasSession(!!sessionUser);
+            setProfile(null);
+            if (sessionUser) {
+              loadProfile(sessionUser.id);
+            }
+          }
+          return;
+        }
+        const { data: { user: authUser }, error } = result;
 
 
         if (!isMounted || hasCompletedRef.current) return;
@@ -184,17 +253,20 @@ export function UserProvider({ children }: { children: ReactNode }) {
         if (authUser) {
           setUser(authUser);
           setHasSession(true);
-          const userProfile = await fetchProfile(authUser.id);
-          if (isMounted && !hasCompletedRef.current) {
-            setProfile(userProfile);
-          }
+          // Load the profile without blocking initialize() — a slow/hung
+          // profile fetch must not keep isLoading true (July loading fix).
+          setProfile(null);
+          loadProfile(authUser.id);
         } else {
           setUser(null);
           setProfile(null);
           setHasSession(false);
         }
       } catch (err) {
-        console.error('useUser: Initialize error', err);
+        console.warn(
+          'useUser: Initialize error',
+          err instanceof Error ? err.message : String(err)
+        );
         if (isMounted && !hasCompletedRef.current) {
           setUser(null);
           setProfile(null);
@@ -210,8 +282,7 @@ export function UserProvider({ children }: { children: ReactNode }) {
     initialize();
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      async (event, session) => {
-
+      (event, session) => {
         if (!isMounted) return;
 
         const currentUser = session?.user ?? null;
@@ -219,10 +290,8 @@ export function UserProvider({ children }: { children: ReactNode }) {
         setHasSession(!!currentUser);
 
         if (currentUser) {
-          const userProfile = await fetchProfile(currentUser.id);
-          if (isMounted) {
-            setProfile(userProfile);
-          }
+          setProfile(null);
+          window.setTimeout(() => loadProfile(currentUser.id), 0);
         } else {
           setProfile(null);
         }
@@ -233,7 +302,7 @@ export function UserProvider({ children }: { children: ReactNode }) {
       isMounted = false;
       subscription.unsubscribe();
     };
-  }, [supabase, fetchProfile]);
+  }, [supabase, fetchProfile, setUser]);
 
   const value = useMemo(() => ({
     user,

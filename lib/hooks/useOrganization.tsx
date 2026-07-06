@@ -1,10 +1,32 @@
 'use client';
 
-import { createContext, useContext, useEffect, useState, ReactNode, useMemo, useRef } from 'react';
+import { createContext, useCallback, useContext, useEffect, useState, ReactNode, useMemo, useRef } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { useUser } from './useUser';
 
-const LOADING_TIMEOUT_MS = 8000; // 8 second timeout to prevent infinite loading
+// The global deadline must outlast one request timeout, or the two race.
+const LOADING_TIMEOUT_MS = 10000; // 10 second timeout to prevent infinite loading
+const REQUEST_TIMEOUT_MS = 8000;
+
+function withTimeout<T>(promise: PromiseLike<T>, label: string): Promise<T | null> {
+  return new Promise((resolve, reject) => {
+    const timeoutId = window.setTimeout(() => {
+      console.warn(`${label} timed out`);
+      resolve(null);
+    }, REQUEST_TIMEOUT_MS);
+
+    promise.then(
+      (value) => {
+        window.clearTimeout(timeoutId);
+        resolve(value);
+      },
+      (error) => {
+        window.clearTimeout(timeoutId);
+        reject(error);
+      }
+    );
+  });
+}
 
 // =============================================================================
 // DEV AUTH BYPASS - For local development only
@@ -69,6 +91,14 @@ interface OrganizationContextType {
   isDevBypass: boolean;
 }
 
+interface OrganizationMembershipQueryRow {
+  id: string;
+  organization_id: string;
+  role: OrganizationMembership['role'];
+  joined_at: string;
+  organization: Organization | Organization[] | null;
+}
+
 const OrganizationContext = createContext<OrganizationContextType | undefined>(undefined);
 
 const CURRENT_ORG_KEY = 'estimate_current_org';
@@ -104,27 +134,35 @@ export function OrganizationProvider({ children }: { children: ReactNode }) {
     }
   }, []); // Run once on mount
 
-  const fetchOrganizations = async (userId: string, retryCount = 0): Promise<OrganizationMembership[]> => {
+  const fetchOrganizations = useCallback(async function fetchOrganizations(
+    userId: string,
+    retryCount = 0
+  ): Promise<OrganizationMembership[]> {
     try {
-      const { data, error } = await supabase
-        .from('organization_memberships')
-        .select(`
-          id,
-          organization_id,
-          role,
-          joined_at,
-          organization:organizations(
+      const result = await withTimeout(
+        supabase
+          .from('organization_memberships')
+          .select(`
             id,
-            name,
-            slug,
-            logo_url,
-            settings,
-            subscription_tier,
-            created_at
-          )
-        `)
-        .eq('user_id', userId)
-        .order('joined_at', { ascending: true });
+            organization_id,
+            role,
+            joined_at,
+            organization:organizations(
+              id,
+              name,
+              slug,
+              logo_url,
+              settings,
+              subscription_tier,
+              created_at
+            )
+          `)
+          .eq('user_id', userId)
+          .order('joined_at', { ascending: true }),
+        'Organization fetch'
+      );
+      if (!result) return [];
+      const { data, error } = result;
 
       if (error) {
         console.error('Error fetching organizations:', error.message);
@@ -140,17 +178,23 @@ export function OrganizationProvider({ children }: { children: ReactNode }) {
         return [];
       }
 
-      return data.map((item: any) => ({
-        id: item.id,
-        organization_id: item.organization_id,
-        role: item.role as 'owner' | 'admin' | 'estimator' | 'viewer',
-        joined_at: item.joined_at,
-        organization: Array.isArray(item.organization)
-          ? item.organization[0]
-          : item.organization,
-      }));
+      const rows = data as OrganizationMembershipQueryRow[];
+      return rows
+        .map((item) => ({
+          id: item.id,
+          organization_id: item.organization_id,
+          role: item.role as 'owner' | 'admin' | 'estimator' | 'viewer',
+          joined_at: item.joined_at,
+          organization: Array.isArray(item.organization)
+            ? item.organization[0] ?? null
+            : item.organization,
+        }))
+        .filter((m): m is OrganizationMembership => m.organization !== null);
     } catch (err) {
-      console.error('Organization fetch exception:', err);
+      console.warn(
+        'Organization fetch exception:',
+        err instanceof Error ? err.message : String(err)
+      );
       // Retry once on exception
       if (retryCount < 1) {
         await new Promise(resolve => setTimeout(resolve, 500));
@@ -158,7 +202,7 @@ export function OrganizationProvider({ children }: { children: ReactNode }) {
       }
       return [];
     }
-  };
+  }, [supabase]);
 
   const refreshOrganization = async () => {
     if (user) {
@@ -183,9 +227,14 @@ export function OrganizationProvider({ children }: { children: ReactNode }) {
     };
   }, []); // Only run once on mount
 
+  // Depend on the user id (a stable string), not the user object. Auth
+  // events deliver fresh User objects for the same account; keying the
+  // loader on the object identity restarted this effect on every event and
+  // cleared the safety timeout each time, so the spinner could hang forever.
+  const userId = user?.id ?? null;
+
   useEffect(() => {
     let isMounted = true;
-    const loadingStartTime = Date.now();
 
     const loadOrganizations = async () => {
       // If we've already completed (via timeout), don't restart loading
@@ -193,17 +242,13 @@ export function OrganizationProvider({ children }: { children: ReactNode }) {
         return;
       }
 
-
       // If user is still loading but we're approaching timeout, proceed anyway
       const elapsedSinceMount = Date.now() - mountTimeRef.current;
       if (isUserLoading && elapsedSinceMount < LOADING_TIMEOUT_MS - 1000) {
         return;
       }
 
-      if (isUserLoading) {
-      }
-
-      if (!user) {
+      if (!userId) {
         if (isMounted && !hasCompletedRef.current) {
           setOrganizations([]);
           setCurrentOrgId(null);
@@ -213,27 +258,33 @@ export function OrganizationProvider({ children }: { children: ReactNode }) {
         return;
       }
 
-      const orgs = await fetchOrganizations(user.id);
+      try {
+        const orgs = await fetchOrganizations(userId);
 
-      if (!isMounted || hasCompletedRef.current) return;
+        if (!isMounted || hasCompletedRef.current) return;
 
-      setOrganizations(orgs);
+        setOrganizations(orgs);
 
-      // Try to restore saved org, or use first one
-      const savedOrgId = typeof window !== 'undefined' ? localStorage.getItem(CURRENT_ORG_KEY) : null;
-      const validSavedOrg = orgs.find(o => o.organization_id === savedOrgId);
+        // Try to restore saved org, or use first one
+        const savedOrgId = typeof window !== 'undefined' ? localStorage.getItem(CURRENT_ORG_KEY) : null;
+        const validSavedOrg = orgs.find(o => o.organization_id === savedOrgId);
 
-      if (validSavedOrg) {
-        setCurrentOrgId(validSavedOrg.organization_id);
-      } else if (orgs.length > 0) {
-        setCurrentOrgId(orgs[0].organization_id);
-        if (typeof window !== 'undefined') {
-          localStorage.setItem(CURRENT_ORG_KEY, orgs[0].organization_id);
+        if (validSavedOrg) {
+          setCurrentOrgId(validSavedOrg.organization_id);
+        } else if (orgs.length > 0) {
+          setCurrentOrgId(orgs[0].organization_id);
+          if (typeof window !== 'undefined') {
+            localStorage.setItem(CURRENT_ORG_KEY, orgs[0].organization_id);
+          }
+        } else {
+          setCurrentOrgId(null);
+        }
+      } finally {
+        if (isMounted && !hasCompletedRef.current) {
+          hasCompletedRef.current = true;
+          setIsLoading(false);
         }
       }
-
-      hasCompletedRef.current = true;
-      setIsLoading(false);
     };
 
     loadOrganizations();
@@ -241,7 +292,7 @@ export function OrganizationProvider({ children }: { children: ReactNode }) {
     return () => {
       isMounted = false;
     };
-  }, [user, isUserLoading, supabase]);
+  }, [userId, isUserLoading, fetchOrganizations]);
 
   const switchOrganization = (orgId: string) => {
     const org = organizations.find(o => o.organization_id === orgId);

@@ -66,3 +66,17 @@ export interface AssistantProjectOption {
   selectedTrades: string[];
   createdAt: string | null;
 }
+
+export type AssistantConfidence = "low" | "medium" | "high";
+
+/** A draft estimate suggested by the assistant (money in integer cents). */
+export interface AssistantProposal {
+  title: string;
+  summary: string;
+  lineItems: Array<{
+    description: string;
+    quantity: number;
+    unit: string;
+    unitCostCents: number;
+  }>;
+}

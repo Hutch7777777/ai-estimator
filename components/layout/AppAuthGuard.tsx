@@ -5,6 +5,7 @@ import { Loader2 } from 'lucide-react';
 import { useUser } from '@/lib/hooks/useUser';
 import { useOrganization } from '@/lib/hooks/useOrganization';
 import { NoOrganization } from '@/components/no-organization';
+import { clearStaleSupabaseAuth } from '@/lib/supabase/clear-stale-auth';
 
 export function AppAuthGuard({ children }: { children: React.ReactNode }) {
   const { user, isLoading: isUserLoading, hasSession } = useUser();
@@ -13,6 +14,9 @@ export function AppAuthGuard({ children }: { children: React.ReactNode }) {
   // Redirect to login if user loading is complete and no user/session
   useEffect(() => {
     if (!isUserLoading && !user && !hasSession) {
+      // Stale sb-* auth tokens can leave GoTrue in a limbo state where the
+      // login page immediately bounces back here; clear them before redirecting.
+      clearStaleSupabaseAuth();
       window.location.href = '/login';
     }
   }, [isUserLoading, user, hasSession]);

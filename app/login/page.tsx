@@ -1,7 +1,7 @@
 'use client';
 
 import { Suspense, useState } from 'react';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { createClient } from '@/lib/supabase/client';
 import { Button } from '@/components/ui/button';
@@ -11,7 +11,6 @@ import { Loader2, Mail, Lock, ArrowRight } from 'lucide-react';
 import { toast } from 'sonner';
 
 function LoginForm() {
-  const router = useRouter();
   const searchParams = useSearchParams();
   const redirectTo = searchParams.get('redirectTo') || '/dashboard';
 
@@ -39,9 +38,8 @@ function LoginForm() {
       }
 
       toast.success('Welcome back!');
-      router.push(redirectTo);
-      router.refresh();
-    } catch (error) {
+      window.location.assign(redirectTo);
+    } catch {
       toast.error('An unexpected error occurred');
     } finally {
       setIsLoading(false);
@@ -62,7 +60,7 @@ function LoginForm() {
         toast.error(error.message);
         setIsLoading(false);
       }
-    } catch (error) {
+    } catch {
       toast.error('Failed to connect with Google');
       setIsLoading(false);
     }
@@ -90,7 +88,7 @@ function LoginForm() {
 
       setShowMagicLinkSent(true);
       toast.success('Check your email for the login link!');
-    } catch (error) {
+    } catch {
       toast.error('Failed to send magic link');
     } finally {
       setIsMagicLinkLoading(false);
@@ -209,7 +207,7 @@ function LoginForm() {
         </div>
 
         <p className="text-center text-sm text-muted-foreground">
-          Don't have an account?{' '}
+          Don&apos;t have an account?{' '}
           <Link href="/signup" className="font-medium text-foreground underline underline-offset-2 hover:text-ink">
             Sign up
           </Link>

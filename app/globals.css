@@ -697,3 +697,10 @@
   border-radius: 6px;
 }
 
+
+/* Hide app chrome when printing a proposal document. */
+@media print {
+  .no-print {
+    display: none !important;
+  }
+}
