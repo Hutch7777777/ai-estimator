@@ -329,14 +329,22 @@ interface PaintSheetOptions {
  * - Labor (paint labor by SF/LF)
  * - Supplies (brushes, rollers, etc.)
  */
+/** Row references on the Paint sheet, used for cross-sheet formulas */
+interface PaintSheetRefs {
+  /** Row of the paint markup dollar amount (cell E{markupRow}) */
+  markupRow: number;
+  /** Row of PAINT GRAND TOTAL with markup (cell E{grandTotalRow}) */
+  grandTotalRow: number;
+}
+
 function createPaintSheet(
   workbook: ExcelJS.Workbook,
   options: PaintSheetOptions
-): void {
+): PaintSheetRefs | null {
   const { clientName, address, paintItems, paintLaborItems = [], markupDecimal } = options;
 
   // Skip if no paint items
-  if (paintItems.length === 0 && paintLaborItems.length === 0) return;
+  if (paintItems.length === 0 && paintLaborItems.length === 0) return null;
 
   const sheet = workbook.addWorksheet('Paint', { views: [{ state: 'frozen', xSplit: 0, ySplit: 5 }] });
 
@@ -628,6 +636,10 @@ function createPaintSheet(
   row++;
   sheet.getCell(`A${row}`).value = '• Pricing based on 2-coat application unless otherwise specified';
   sheet.getCell(`A${row}`).font = { size: 10 };
+
+  // Expose totals rows so the Takeoff sheet can include paint in the
+  // customer-facing grand total via live cross-sheet formulas
+  return { markupRow, grandTotalRow };
 }
 
 // =============================================================================
@@ -670,8 +682,9 @@ export async function exportTakeoffToExcel(data: TakeoffData, filename?: string)
   // ==========================================================================
   // PAINT SHEET (created first if paint items exist)
   // ==========================================================================
+  let paintSheetRefs: PaintSheetRefs | null = null;
   if (paintItems.length > 0 || paintLaborItems.length > 0) {
-    createPaintSheet(workbook, {
+    paintSheetRefs = createPaintSheet(workbook, {
       clientName: takeoff.client_name || takeoff.project_name || takeoff.takeoff_name || 'Estimate',
       address: takeoff.address || '',
       paintItems,
@@ -754,6 +767,11 @@ export async function exportTakeoffToExcel(data: TakeoffData, filename?: string)
   summarySheet.getCell(`D${row}`).value = { formula: `B${row}+C${row}` }; summarySheet.getCell(`D${row}`).numFmt = '"$"#,##0.00'; styleDataCell(summarySheet.getCell(`D${row}`), overheadAltRow);
   row++;
 
+  // Last category data row — the Profit row's SUM range must stop here.
+  // (A hardcoded +3 range previously swallowed the SUBTOTAL row whenever
+  // a job had no paint, double-counting markup into Profit.)
+  const summaryLastDataRow = row - 1;
+
   // Subtotal Row
   summarySheet.getCell(`A${row}`).value = 'SUBTOTAL'; styleSubtotalRow(summarySheet.getCell(`A${row}`)); summarySheet.getCell(`A${row}`).alignment = { horizontal: 'right' };
   summarySheet.getCell(`B${row}`).value = { formula: `SUM(B${summaryDataStartRow}:B${row-1})` }; summarySheet.getCell(`B${row}`).numFmt = '"$"#,##0.00'; styleSubtotalRow(summarySheet.getCell(`B${row}`));
@@ -821,8 +839,8 @@ export async function exportTakeoffToExcel(data: TakeoffData, filename?: string)
   summarySheet.getCell(`A${summaryProfitRow}`).font = { bold: true };
   summarySheet.getCell(`A${summaryProfitRow}`).alignment = { horizontal: 'right' };
   summarySheet.mergeCells(`A${summaryProfitRow}:C${summaryProfitRow}`);
-  // Formula: sum of markup column (C) from the data rows
-  summarySheet.getCell(`D${summaryProfitRow}`).value = { formula: `SUM(C${summaryDataStartRow}:C${summaryDataStartRow + 3})` };
+  // Formula: sum of markup column (C) across exactly the category data rows
+  summarySheet.getCell(`D${summaryProfitRow}`).value = { formula: `SUM(C${summaryDataStartRow}:C${summaryLastDataRow})` };
   summarySheet.getCell(`D${summaryProfitRow}`).numFmt = '"$"#,##0.00';
   summarySheet.getCell(`D${summaryProfitRow}`).font = { bold: true };
   row++;
@@ -1125,13 +1143,16 @@ export async function exportTakeoffToExcel(data: TakeoffData, filename?: string)
     row += 2;
   }
 
-  // GRAND TOTAL (Materials + Labor + Overhead on this sheet; Paint is on separate tab)
+  // GRAND TOTAL (Materials + Labor + Overhead + Paint). Paint line items
+  // stay on their own tab, but their grand total is pulled in cross-sheet
+  // so "Total Sell to Customer" matches the on-screen final price.
   const grandTotalRowNum = row;
   takeoffSheet.getCell(`A${grandTotalRowNum}`).value = 'Total Sell to Customer'; styleGrandTotal(takeoffSheet.getCell(`A${grandTotalRowNum}`)); takeoffSheet.getCell(`A${grandTotalRowNum}`).alignment = { horizontal: 'right' };
   takeoffSheet.mergeCells(`A${grandTotalRowNum}:E${grandTotalRowNum}`);
   const grandTotalRefs = [`F${matTotalRowNum}`];
   if (laborTotalRowNum) grandTotalRefs.push(`F${laborTotalRowNum}`);
   if (overheadTotalRowNum) grandTotalRefs.push(`F${overheadTotalRowNum}`);
+  if (paintSheetRefs) grandTotalRefs.push(`'Paint'!E${paintSheetRefs.grandTotalRow}`);
   takeoffSheet.getCell(`F${grandTotalRowNum}`).value = { formula: grandTotalRefs.join('+') }; takeoffSheet.getCell(`F${grandTotalRowNum}`).numFmt = '"$"#,##0.00'; styleGrandTotal(takeoffSheet.getCell(`F${grandTotalRowNum}`));
   row++;
 
@@ -1210,10 +1231,12 @@ export async function exportTakeoffToExcel(data: TakeoffData, filename?: string)
   takeoffSheet.getCell(`E${profitRow}`).value = 'Profit:';
   takeoffSheet.getCell(`E${profitRow}`).font = { bold: true };
   takeoffSheet.getCell(`E${profitRow}`).alignment = { horizontal: 'right' };
-  // Build profit formula from markup rows
+  // Build profit formula from markup rows (paint markup included so
+  // Profit and Margin stay consistent with the paint-inclusive grand total)
   const markupRefs: string[] = [`F${matMarkupRowNum}`]; // Material markup
   if (laborMarkupRowNumGlobal) markupRefs.push(`F${laborMarkupRowNumGlobal}`);
   if (overheadMarkupRowNumGlobal) markupRefs.push(`F${overheadMarkupRowNumGlobal}`);
+  if (paintSheetRefs) markupRefs.push(`'Paint'!E${paintSheetRefs.markupRow}`);
   takeoffSheet.getCell(`F${profitRow}`).value = { formula: markupRefs.join('+') };
   takeoffSheet.getCell(`F${profitRow}`).numFmt = '"$"#,##0.00';
   takeoffSheet.getCell(`F${profitRow}`).font = { bold: true };

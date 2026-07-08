@@ -1232,6 +1232,12 @@ export interface MaterialAssignment {
   // Price overrides (user-edited prices that override pricing_items defaults)
   material_cost_override?: number | null;
   labor_cost_override?: number | null;
+  // Page-level provenance so line items can be traced back to the plan
+  // page that produced them (e.g. "Front Elevation, page 3"). Additive —
+  // the calculation engine can stamp these into source references.
+  page_id?: string | null;
+  page_number?: number | null;
+  elevation_name?: string | null;
 }
 
 // =============================================================================

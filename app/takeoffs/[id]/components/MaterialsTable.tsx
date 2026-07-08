@@ -289,10 +289,26 @@ export function MaterialsTable({ items, totalMaterialCost }: MaterialsTableProps
                         ${idx % 2 === 0 ? 'bg-white dark:bg-gray-900' : 'bg-gray-50 dark:bg-gray-800/50'}
                         hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors
                       `}
+                      title={item.formula_used || item.notes || undefined}
                     >
                       <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">
-                        <div className="max-w-md" title={item.description}>
+                        <div
+                          className="max-w-md"
+                          title={
+                            [item.description, item.formula_used || item.notes]
+                              .filter(Boolean)
+                              .join("\n") || undefined
+                          }
+                        >
                           {item.description}
+                          {(item.formula_used || item.notes) && (
+                            <span
+                              className="ml-1.5 text-gray-400 dark:text-gray-500 cursor-help select-none"
+                              aria-label="Has calculation source"
+                            >
+                              ⓘ
+                            </span>
+                          )}
                         </div>
                       </td>
                       <td className="px-4 py-3 text-sm text-right font-mono text-gray-900 dark:text-white whitespace-nowrap">

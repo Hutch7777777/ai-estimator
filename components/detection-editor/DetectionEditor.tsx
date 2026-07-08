@@ -3536,6 +3536,10 @@ export default function DetectionEditor({
         // Include price overrides for user-edited prices
         material_cost_override: d.material_cost_override ?? null,
         labor_cost_override: d.labor_cost_override ?? null,
+        // Page-level provenance: which plan page this quantity came from
+        page_id: d.page_id ?? null,
+        page_number: detectionPage?.page_number ?? null,
+        elevation_name: detectionPage?.elevation_name ?? null,
       };
     });
 
@@ -4130,6 +4134,21 @@ export default function DetectionEditor({
     // > jobTotals (from DB - used for Bluebeam imports without calibrated pages)
     const rawTotals = allPagesTotals || liveDerivedTotals || jobTotals;
 
+    // Bluebeam imports with no calibrated pages fall back to DB job totals
+    // whose measurements rely entirely on Bluebeam's own internal scale —
+    // nothing in this app has verified them. Make the estimator acknowledge
+    // before those quantities become a takeoff.
+    if (!allPagesTotals && !liveDerivedTotals && jobTotals && hasBluebeamData) {
+      const proceed = window.confirm(
+        'Scale not verified in this app.\n\n' +
+        'These quantities come from Bluebeam’s own calibration — no pages ' +
+        'are scale-calibrated here, so a wrong Bluebeam scale would flow ' +
+        'silently into the takeoff.\n\n' +
+        'Generate the takeoff anyway?'
+      );
+      if (!proceed) return;
+    }
+
     if (!jobId || !rawTotals) {
       console.error('[Approve] Missing job ID or calculations:', {
         jobId: !!jobId,
@@ -4353,6 +4372,7 @@ export default function DetectionEditor({
     allPagesTotals,
     liveDerivedTotals,
     jobTotals,
+    hasBluebeamData,
     buildApprovePayload,
     refresh,
     onError,
