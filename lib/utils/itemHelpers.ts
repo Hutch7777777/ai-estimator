@@ -42,20 +42,13 @@ export interface GroupedMaterials {
   [presentationGroup: string]: LineItemWithState[];
 }
 
-export interface SectionTotals {
-  materialsTotal: number;
-  laborTotal: number;
-  overheadTotal: number;
-  paintTotal: number;
-  grandTotal: number;
-}
-
 // ============================================================================
 // CONSTANTS
 // ============================================================================
-
-// L&I Insurance Rate (Labor & Industries, Washington State)
-const LI_INSURANCE_RATE = 0.1265; // 12.65%
+// NOTE: All estimate math (per-line totals, category rollups, markup, L&I
+// assumptions) lives in lib/utils/estimateTotals.ts — the canonical engine
+// shared by the legacy editor, the live /api/takeoffs route, and both Excel
+// exporters. Nothing in this file computes money anymore.
 
 // Presentation group display configuration
 export const PRESENTATION_GROUP_CONFIG: Record<
@@ -218,143 +211,22 @@ export function sortGroupKeys(groupKeys: string[]): string[] {
 }
 
 // ============================================================================
-// TOTAL CALCULATIONS
+// TOTAL CALCULATIONS — moved to the canonical engine
 // ============================================================================
-
-/**
- * Calculate total for a material item
- */
-export function calculateMaterialTotal(item: LineItemWithState): number {
-  const quantity = item.quantity || 0;
-  const unitCost = item.material_unit_cost || 0;
-  return quantity * unitCost;
-}
-
-/**
- * Calculate total for a labor item (includes L&I insurance)
- *
- * Two methods:
- * 1. Parse from formula_used (more accurate, includes exact L&I)
- * 2. Calculate: quantity × labor_unit_cost × (1 + L&I rate)
- *
- * @note In V2 responses, labor is calculated by the API using squares.
- * Use getLaborSubtotal(labor) for the authoritative labor total.
- * This function is for legacy line-item-based labor calculations.
- */
-export function calculateLaborTotal(item: LineItemWithState): number {
-  // Method 1: Try parsing from formula_used
-  const formulaUsed = (item as any).formula_used;
-  if (formulaUsed && typeof formulaUsed === "string") {
-    // Look for pattern: "= $X,XXX.XX" at end of formula
-    const match = formulaUsed.match(/=\s*\$([0-9,]+\.?\d*)\s*$/);
-    if (match) {
-      const total = parseFloat(match[1].replace(/,/g, ""));
-      if (!isNaN(total)) {
-        return total;
-      }
-    }
-  }
-
-  // Method 2: Calculate with L&I markup
-  const quantity = item.quantity || 0;
-  const laborRate = item.labor_unit_cost || 0;
-  const baseLabor = quantity * laborRate;
-  const totalWithLI = baseLabor * (1 + LI_INSURANCE_RATE);
-
-  return totalWithLI;
-}
-
-/**
- * Calculate total for an overhead item
- * (equipment_unit_cost already contains the total)
- *
- * @note In V2 responses, overhead is calculated by the API.
- * Use getOverheadSubtotal(overhead) for the authoritative overhead total.
- * This function is for legacy line-item-based overhead calculations.
- */
-export function calculateOverheadTotal(item: LineItemWithState): number {
-  return item.equipment_unit_cost || 0;
-}
-
-/**
- * Calculate total for a paint item (materials + labor combined)
- * Paint items can have both material_unit_cost (paint gallons) and labor_unit_cost (paint labor per SF)
- */
-export function calculatePaintTotal(item: LineItemWithState): number {
-  const quantity = item.quantity || 0;
-  const materialCost = item.material_unit_cost || 0;
-  const laborCost = item.labor_unit_cost || 0;
-  return quantity * (materialCost + laborCost);
-}
-
-/**
- * Calculate totals for a section (all items combined)
- */
-export function calculateSectionTotals(
-  materials: LineItemWithState[],
-  labor: LineItemWithState[],
-  overhead: LineItemWithState[],
-  paint: LineItemWithState[] = []
-): SectionTotals {
-  const materialsTotal = materials.reduce(
-    (sum, item) => sum + calculateMaterialTotal(item),
-    0
-  );
-
-  const laborTotal = labor.reduce(
-    (sum, item) => sum + calculateLaborTotal(item),
-    0
-  );
-
-  const overheadTotal = overhead.reduce(
-    (sum, item) => sum + calculateOverheadTotal(item),
-    0
-  );
-
-  const paintTotal = paint.reduce(
-    (sum, item) => sum + calculatePaintTotal(item),
-    0
-  );
-
-  const grandTotal = materialsTotal + laborTotal + overheadTotal + paintTotal;
-
-  return {
-    materialsTotal,
-    laborTotal,
-    overheadTotal,
-    paintTotal,
-    grandTotal,
-  };
-}
-
-/**
- * Calculate totals for all sections grouped by section_id
- */
-export function calculateTotalsBySections(
-  lineItems: LineItemWithState[]
-): Record<string, SectionTotals> {
-  // Group by section_id
-  const itemsBySection: Record<string, LineItemWithState[]> = {};
-
-  lineItems.forEach((item) => {
-    const sectionId = item.section_id;
-    if (!itemsBySection[sectionId]) {
-      itemsBySection[sectionId] = [];
-    }
-    itemsBySection[sectionId].push(item);
-  });
-
-  // Calculate totals for each section
-  const totals: Record<string, SectionTotals> = {};
-
-  Object.keys(itemsBySection).forEach((sectionId) => {
-    const sectionItems = itemsBySection[sectionId];
-    const { materials, labor, overhead, paint } = separateItemsByType(sectionItems);
-    totals[sectionId] = calculateSectionTotals(materials, labor, overhead, paint);
-  });
-
-  return totals;
-}
+// The per-item and rollup money math that used to live here (including a
+// 12.65% L&I multiplier that double-counted burden already priced upstream)
+// has been replaced by lib/utils/estimateTotals.ts. Re-exported here for
+// discoverability.
+export {
+  calculateEstimateTotals,
+  separateLineItems,
+  materialLineTotal,
+  laborLineTotal,
+  overheadLineTotal,
+  paintLineTotal,
+  applyMarkup,
+  resolveMarkupPercent,
+} from "./estimateTotals";
 
 // ============================================================================
 // FORMATTING HELPERS
@@ -441,107 +313,6 @@ export function getOverheadItems(overhead: OverheadSection | undefined): Overhea
 // ============================================================================
 
 /**
- * Project insurance rate: $24.38 per $1,000
- */
-export const PROJECT_INSURANCE_RATE = 24.38;
-
-/**
- * Default markup rate: 26%
- */
-export const DEFAULT_MARKUP_RATE = 0.26;
-
-/**
- * Calculate project insurance amount
- * Formula: (subtotal / 1000) * $24.38
- */
-export function calculateProjectInsurance(subtotal: number): number {
-  return (subtotal / 1000) * PROJECT_INSURANCE_RATE;
-}
-
-/**
- * Display-ready totals structure
- */
-export interface DisplayTotals {
-  materialCost: number;
-  materialMarkup: number;
-  materialTotal: number;
-  laborCost: number;
-  overheadCost: number;
-  laborSubtotal: number;
-  laborMarkup: number;
-  laborTotal: number;
-  subtotal: number;
-  projectInsurance: number;
-  grandTotal: number;
-}
-
-/**
- * Get display-ready totals from projectTotals or calculate from components
- *
- * Priority:
- * 1. Use projectTotals if available (V2 response - most accurate)
- * 2. Fall back to calculating from labor/overhead sections
- * 3. Fall back to calculating from line items (legacy)
- */
-export function getDisplayTotals(
-  projectTotals?: ProjectTotals,
-  lineItems?: LineItemWithState[],
-  labor?: LaborSection,
-  overhead?: OverheadSection,
-  markupRate: number = DEFAULT_MARKUP_RATE
-): DisplayTotals {
-  // Prefer projectTotals if available (V2 response)
-  if (projectTotals) {
-    return {
-      materialCost: projectTotals.material_cost,
-      materialMarkup: projectTotals.material_markup_amount,
-      materialTotal: projectTotals.material_total,
-      laborCost: projectTotals.installation_labor_subtotal,
-      overheadCost: projectTotals.overhead_subtotal,
-      laborSubtotal: projectTotals.labor_cost_before_markup,
-      laborMarkup: projectTotals.labor_markup_amount,
-      laborTotal: projectTotals.labor_total,
-      subtotal: projectTotals.subtotal,
-      projectInsurance: projectTotals.project_insurance,
-      grandTotal: projectTotals.grand_total,
-    };
-  }
-
-  // Fallback calculation for legacy responses
-  const materialCost = lineItems?.reduce(
-    (sum, item) => sum + calculateMaterialTotal(item),
-    0
-  ) || 0;
-  const laborCost = labor?.installation_subtotal || 0;
-  const overheadCost = overhead?.subtotal || 0;
-
-  const materialMarkup = materialCost * markupRate;
-  const materialTotal = materialCost + materialMarkup;
-
-  const laborSubtotal = laborCost + overheadCost;
-  const laborMarkup = laborSubtotal * markupRate;
-  const laborTotal = laborSubtotal + laborMarkup;
-
-  const subtotal = materialTotal + laborTotal;
-  const projectInsurance = calculateProjectInsurance(subtotal);
-  const grandTotal = subtotal + projectInsurance;
-
-  return {
-    materialCost,
-    materialMarkup,
-    materialTotal,
-    laborCost,
-    overheadCost,
-    laborSubtotal,
-    laborMarkup,
-    laborTotal,
-    subtotal,
-    projectInsurance,
-    grandTotal,
-  };
-}
-
-/**
  * Check if response has V2 project totals
  */
 export function hasV2ProjectTotals(projectTotals?: ProjectTotals): boolean {
@@ -589,43 +360,6 @@ export function formatLaborRate(rate: number): string {
 // ============================================================================
 // DEPRECATION NOTES
 // ============================================================================
-
-/**
- * @deprecated In V2 responses, all line_items are materials.
- * Labor comes from the separate `labor` section of the API response.
- * Use getLaborSubtotal(labor) or projectTotals.installation_labor_subtotal.
- *
- * This function is kept for backward compatibility with legacy responses
- * where labor items were mixed with materials.
- */
-export function calculateLaborFromLineItems(lineItems: LineItemWithState[]): number {
-  if (process.env.NODE_ENV === "development") {
-    console.warn(
-      "[DEPRECATED] calculateLaborFromLineItems: " +
-      "In V2 responses, labor is calculated by the API based on squares. " +
-      "Use getLaborSubtotal(labor) from the API response instead."
-    );
-  }
-  const { labor } = separateItemsByType(lineItems);
-  return labor.reduce((sum, item) => sum + calculateLaborTotal(item), 0);
-}
-
-/**
- * @deprecated In V2 responses, all line_items are materials.
- * Overhead comes from the separate `overhead` section of the API response.
- * Use getOverheadSubtotal(overhead) or projectTotals.overhead_subtotal.
- *
- * This function is kept for backward compatibility with legacy responses
- * where overhead items were mixed with materials.
- */
-export function calculateOverheadFromLineItems(lineItems: LineItemWithState[]): number {
-  if (process.env.NODE_ENV === "development") {
-    console.warn(
-      "[DEPRECATED] calculateOverheadFromLineItems: " +
-      "In V2 responses, overhead is calculated by the API. " +
-      "Use getOverheadSubtotal(overhead) from the API response instead."
-    );
-  }
-  const { overhead } = separateItemsByType(lineItems);
-  return overhead.reduce((sum, item) => sum + calculateOverheadTotal(item), 0);
-}
+// calculateLaborFromLineItems / calculateOverheadFromLineItems removed —
+// deprecated wrappers with no consumers; use calculateEstimateTotals from
+// lib/utils/estimateTotals.ts instead.

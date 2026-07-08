@@ -24,13 +24,8 @@ import {
   ChevronDown,
   ChevronRight,
 } from "lucide-react";
-import { exportProfessionalEstimate, exportVendorTakeoff } from "@/lib/utils/excelExportProfessional";
-import {
-  separateItemsByType,
-  calculateMaterialTotal,
-  calculateLaborTotal,
-  calculateOverheadTotal,
-} from "@/lib/utils/itemHelpers";
+import { exportProfessionalEstimate, exportVendorTakeoffLegacy } from "@/lib/utils/excelExportProfessional";
+import { calculateEstimateTotals } from "@/lib/utils/estimateTotals";
 
 interface EstimateSummaryProps {
   takeoff: Takeoff;
@@ -103,23 +98,27 @@ export function EstimateSummary({
   // Determine if we have V2 project totals from the API
   const hasProjectTotals = !!projectTotals;
 
-  // Separate items by type (material, labor, overhead) - for fallback calculation
-  const { materials, labor: laborItems, overhead: overheadItems } = separateItemsByType(lineItems);
+  // Fallback totals from line items (reflects unsaved changes), computed by
+  // the canonical shared engine — the same math /api/takeoffs/[id] uses.
+  // heuristic mode: legacy rows may predate item_type and carry payable
+  // labor on material rows; laborFromFormula keeps totals faithful for old
+  // rows whose burdened labor total only exists in formula_used text.
+  const legacyShared = calculateEstimateTotals(lineItems, takeoff?.markup_percent, {
+    mode: "heuristic",
+    laborFromFormula: true,
+  });
 
-  // Calculate current totals from line items (reflects unsaved changes) - FALLBACK
   const legacyTotals = {
-    material: materials.reduce((sum, item) => sum + calculateMaterialTotal(item), 0),
-    labor: laborItems.reduce((sum, item) => sum + calculateLaborTotal(item), 0),
-    overhead: overheadItems.reduce((sum, item) => sum + calculateOverheadTotal(item), 0),
-    total: 0,
-    markup: 0,
+    // Paint folds into the material bucket for this card's display tiles
+    // (the /takeoffs viewer also lists paint alongside materials);
+    // the grand total is exact either way.
+    material: legacyShared.material_cost + legacyShared.paint_cost,
+    labor: legacyShared.labor_cost,
+    overhead: legacyShared.overhead_cost,
+    total: legacyShared.final_price,
+    markup: legacyShared.markup_amount,
   };
-
-  const legacyTotalCosts = legacyTotals.material + legacyTotals.labor + legacyTotals.overhead;
-  const legacyMarkupRate = takeoff?.markup_percent ?? 15;
-  const legacyMarkupAmount = legacyTotalCosts * (legacyMarkupRate / 100);
-  legacyTotals.total = legacyTotalCosts + legacyMarkupAmount;
-  legacyTotals.markup = legacyMarkupAmount;
+  const legacyMarkupRate = legacyShared.markup_percent;
 
   // Use project_totals if available, otherwise fall back to line item calculation
   const displayData = hasProjectTotals ? {
@@ -216,7 +215,7 @@ export function EstimateSummary({
         jobAddress: projectInfo.address,
       };
 
-      await exportVendorTakeoff(
+      await exportVendorTakeoffLegacy(
         sections,
         lineItemsBySection,
         exportProjectInfo

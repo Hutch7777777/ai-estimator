@@ -13,6 +13,7 @@
 
 import ExcelJS from 'exceljs';
 import { separateItemsByType } from './itemHelpers';
+import { laborLineTotal, resolveMarkupPercent } from './estimateTotals';
 import type {
   LaborSection,
   LaborLineItem,
@@ -219,26 +220,12 @@ function formatCurrency(value: number): string {
 }
 
 /**
- * Calculate labor total (includes L&I insurance 12.65%)
- * Parse from formula_used or calculate
+ * Labor line total via the canonical shared engine. L&I burden is priced
+ * upstream in labor_unit_cost (or captured in formula_used text on older
+ * rows) — it is never re-applied here.
  */
 function getLaborTotal(item: LineItem): number {
-  // Method 1: Parse from formula_used (most accurate)
-  if (item.formula_used && typeof item.formula_used === 'string') {
-    const match = item.formula_used.match(/=\s*\$([0-9,]+\.?\d*)\s*$/);
-    if (match) {
-      const total = parseFloat(match[1].replace(/,/g, ''));
-      if (!isNaN(total)) {
-        return total;
-      }
-    }
-  }
-
-  // Method 2: Calculate with L&I markup
-  const quantity = safeNum(item.quantity);
-  const laborRate = safeNum(item.labor_unit_cost);
-  const baseLabor = quantity * laborRate;
-  return baseLabor * 1.1265; // 12.65% L&I insurance
+  return laborLineTotal(item, { parseFormula: true });
 }
 
 // ============================================================================
@@ -633,6 +620,7 @@ function addTotalsRow(
 // ============================================================================
 function createSummarySheet(
   workbook: ExcelJS.Workbook,
+  takeoff: Takeoff,
   sections: Section[],
   lineItemsBySection: Record<string, LineItem[]>,
   projectInfo: ProjectInfo
@@ -878,7 +866,46 @@ function createSummarySheet(
     row += 2;
   }
 
-  // BUG FIX #8: Grand Total = Trade Subtotal + Overhead Subtotal
+  // Cost Subtotal = Trade Subtotal + Overhead Subtotal
+  const costSubtotalRow = row;
+  const costSubtotalLabel = sheet.getCell(`A${costSubtotalRow}`);
+  costSubtotalLabel.value = 'COST SUBTOTAL';
+  costSubtotalLabel.font = { bold: true, size: 11 };
+  costSubtotalLabel.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COLORS.SUBTOTAL_BG } };
+  costSubtotalLabel.alignment = { horizontal: 'right' };
+  sheet.mergeCells(`A${costSubtotalRow}:D${costSubtotalRow}`);
+
+  const costSubtotalCell = sheet.getCell(`E${costSubtotalRow}`);
+  if (overheadSubtotalRow) {
+    costSubtotalCell.value = { formula: `E${tradeSubtotalRow}+E${overheadSubtotalRow}` };
+  } else {
+    costSubtotalCell.value = { formula: `E${tradeSubtotalRow}` };
+  }
+  costSubtotalCell.numFmt = '$#,##0.00';
+  costSubtotalCell.font = { bold: true, size: 11 };
+  costSubtotalCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COLORS.SUBTOTAL_BG } };
+  row++;
+
+  // Markup — the client-facing margin from takeoffs.markup_percent, written
+  // as a live formula so adjusting costs in Excel stays honest. Matches the
+  // on-screen Estimate Summary (both use the canonical shared engine's rate).
+  const markupPercent = resolveMarkupPercent(takeoff?.markup_percent);
+  const markupRow = row;
+  const markupLabel = sheet.getCell(`A${markupRow}`);
+  markupLabel.value = `Markup (${markupPercent}%)`;
+  markupLabel.font = { bold: true, size: 11 };
+  markupLabel.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COLORS.SUBTOTAL_BG } };
+  markupLabel.alignment = { horizontal: 'right' };
+  sheet.mergeCells(`A${markupRow}:D${markupRow}`);
+
+  const markupCell = sheet.getCell(`E${markupRow}`);
+  markupCell.value = { formula: `E${costSubtotalRow}*${(markupPercent / 100).toFixed(4)}` };
+  markupCell.numFmt = '$#,##0.00';
+  markupCell.font = { bold: true, size: 11 };
+  markupCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COLORS.SUBTOTAL_BG } };
+  row++;
+
+  // Grand Total = Cost Subtotal + Markup (the client-facing sell price)
   const grandRow = row;
   const grandLabelCell = sheet.getCell(`A${grandRow}`);
   grandLabelCell.value = 'PROJECT GRAND TOTAL';
@@ -887,13 +914,7 @@ function createSummarySheet(
   sheet.mergeCells(`A${grandRow}:D${grandRow}`);
 
   const grandTotalCell = sheet.getCell(`E${grandRow}`);
-  // If we have overhead, sum Trade Subtotal + Overhead Subtotal
-  // Otherwise, just use Trade Subtotal
-  if (overheadSubtotalRow) {
-    grandTotalCell.value = { formula: `E${tradeSubtotalRow}+E${overheadSubtotalRow}` };
-  } else {
-    grandTotalCell.value = { formula: `E${tradeSubtotalRow}` };
-  }
+  grandTotalCell.value = { formula: `E${costSubtotalRow}+E${markupRow}` };
   grandTotalCell.numFmt = '$#,##0.00';
   styleGrandTotal(grandTotalCell);
 
@@ -908,7 +929,11 @@ function createSummarySheet(
   sheet.getCell(`A${row}`).font = { size: 10 };
 
   row++;
-  sheet.getCell(`A${row}`).value = '• Labor costs include 12.65% L&I insurance';
+  sheet.getCell(`A${row}`).value = '• Labor rates include L&I insurance (priced upstream)';
+  sheet.getCell(`A${row}`).font = { size: 10 };
+
+  row++;
+  sheet.getCell(`A${row}`).value = `• Grand total includes ${markupPercent}% markup`;
   sheet.getCell(`A${row}`).font = { size: 10 };
 
   row++;
@@ -1533,7 +1558,7 @@ export async function exportProfessionalEstimate(
   } else {
     // Legacy Export: Original multi-sheet format
     // Create Summary sheet
-    createSummarySheet(workbook, sections, lineItemsBySection, projectInfo);
+    createSummarySheet(workbook, takeoff, sections, lineItemsBySection, projectInfo);
 
     // Create individual trade sheets
     sections.forEach(section => {
@@ -1568,8 +1593,10 @@ export async function exportProfessionalEstimate(
 
 // ============================================================================
 // VENDOR TAKEOFF EXPORT (No pricing)
+// Named "Legacy" to distinguish it from the unrelated exportVendorTakeoff
+// in exportTakeoffExcel.ts used by the live /takeoffs viewer.
 // ============================================================================
-export async function exportVendorTakeoff(
+export async function exportVendorTakeoffLegacy(
   sections: Section[],
   lineItemsBySection: Record<string, LineItem[]>,
   projectInfo: ProjectInfo

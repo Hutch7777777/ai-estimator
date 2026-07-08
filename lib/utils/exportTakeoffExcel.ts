@@ -1,5 +1,6 @@
 import ExcelJS from 'exceljs';
 import { saveAs } from 'file-saver';
+import { resolveMarkupPercent } from './estimateTotals';
 
 // =============================================================================
 // Types - Enhanced for Mike Skjei Format
@@ -644,7 +645,9 @@ export async function exportTakeoffToExcel(data: TakeoffData, filename?: string)
   const laborItems = data.labor_items || [];
   const overheadItems = data.overhead_items || [];
 
-  const markupPercent = safeNum(takeoff.markup_percent) || 15;
+  // Canonical markup resolution: honors an explicit 0% markup instead of
+  // silently exporting at 15% while the screen shows 0% (old `|| 15` bug)
+  const markupPercent = resolveMarkupPercent(takeoff.markup_percent);
   const markupDecimal = markupPercent / 100;
   const squares = safeNum(takeoff.squares) || 0;
 

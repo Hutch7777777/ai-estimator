@@ -66,6 +66,7 @@ export type JobStatus =
  */
 export interface Project {
   id: string; // UUID
+  organization_id: string; // UUID - owning organization (RLS scope)
   name: string; // Project name
   client_name: string; // Customer/client name
   address: string;
@@ -74,6 +75,7 @@ export interface Project {
   hover_pdf_url: string | null;
   excel_url: string | null;
   markup_percent: number; // Markup percentage (e.g., 15.00 for 15%)
+  notes: string | null;
   processing_started_at: string | null; // ISO timestamp
   processing_completed_at: string | null; // ISO timestamp
   error_message: string | null;
@@ -270,6 +272,10 @@ export interface TakeoffLineItem {
   item_number: number;
   description: string;
   sku: string | null;
+
+  // Item classification — set by the calculation pipeline; older rows may
+  // be null (consumers fall back to cost-based detection)
+  item_type?: 'material' | 'labor' | 'overhead' | 'paint' | null;
 
   // Quantity
   quantity: number;

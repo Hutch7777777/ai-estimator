@@ -1,5 +1,6 @@
 import { createClient } from '@/lib/supabase/server';
 import { NextResponse } from 'next/server';
+import { calculateEstimateTotals } from '@/lib/utils/estimateTotals';
 
 // =============================================================================
 // Types
@@ -192,45 +193,22 @@ export async function GET(
       }));
 
     // ==========================================================================
-    // Calculate totals from separated items
+    // Calculate totals via the canonical shared engine (strict item_type
+    // classification — same formulas this route previously computed inline,
+    // now shared with the legacy editor so the two can never disagree)
     // ==========================================================================
 
-    // Separate paint items from material items for cost calculation
-    const materialOnlyItems = line_items.filter(item => item.item_type === 'material');
-    const paintOnlyItems = line_items.filter(item => item.item_type === 'paint');
+    const calculatedTotals = calculateEstimateTotals(allItems, takeoff.markup_percent, {
+      mode: 'strict',
+    });
 
-    const calculatedMaterialCost = materialOnlyItems.reduce(
-      (sum, item) => sum + (item.material_extended || 0),
-      0
-    );
-
-    // Paint cost includes both material and labor extended costs
-    const calculatedPaintCost = paintOnlyItems.reduce(
-      (sum, item) => sum + (item.material_extended || 0) + (item.labor_extended || 0),
-      0
-    );
-
-    const calculatedLaborCost = labor_items.reduce(
-      (sum, item) => sum + (item.total || 0),
-      0
-    );
-
-    const calculatedOverheadCost = overhead_items.reduce(
-      (sum, item) => sum + (item.amount || 0),
-      0
-    );
-
-    // Always use calculated totals from filtered line items
-    // Database stored totals may include paint items in wrong categories
-    // Paint items are now separated, so we recalculate everything from line items
-    const materialCost = calculatedMaterialCost;
-    const paintCost = calculatedPaintCost;
-    const laborCost = calculatedLaborCost;
-    const overheadCost = calculatedOverheadCost;
-    const subtotal = materialCost + paintCost + laborCost + overheadCost;
-    const markupPercent = takeoff.markup_percent ?? 15;
-    // Recalculate final price from new subtotal
-    const finalPrice = subtotal * (1 + markupPercent / 100);
+    const materialCost = calculatedTotals.material_cost;
+    const paintCost = calculatedTotals.paint_cost;
+    const laborCost = calculatedTotals.labor_cost;
+    const overheadCost = calculatedTotals.overhead_cost;
+    const subtotal = calculatedTotals.subtotal;
+    const markupPercent = calculatedTotals.markup_percent;
+    const finalPrice = calculatedTotals.final_price;
 
     // ==========================================================================
     // Return response
