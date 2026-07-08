@@ -1,6 +1,13 @@
 # Waste Factor Audit & Fix Plan
 
-**Date:** 2026-07-07 · **Status:** PROPOSAL — nothing here has been applied.
+**Date:** 2026-07-07 · **Status:** ENGINE SIDE IMPLEMENTED on branch
+`feat/org-waste-factor` (commit 4c915e6 in exterior-estimation-api — NOT
+merged/pushed; tsc clean, 69/69 tests pass; zero behavior change until rules
+are migrated). One deliberate divergence from Section III below: the final
+fallback is **10%** (not 12%) so that rewriting `* 1.10 → * waste_factor`
+is behavior-preserving for orgs without explicit settings — the 10%-vs-12%
+call is Verification step 2. The SQL rule migration (Section III) and MN568
+protocol (Section IV) remain manual and user-gated.
 **Scope:** frontend repo (`ai-estimator`) + calculation engine working tree
 (`~/projects/estimatepros/exterior-estimation-api`, read-only audit).
 **Why:** `organizations.settings.labor_rates.default_waste_factor_percent`

@@ -5,8 +5,19 @@
  * Run with: node scripts/audit-autoscope.js
  */
 
-const SUPABASE_URL = 'https://okwtyttfqbfmcqtenize.supabase.co';
-const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9rd3R5dHRmcWJmbWNxdGVuaXplIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjI0NDYwNTEsImV4cCI6MjA3ODAyMjA1MX0.I1HRDRZpj4ExWp9_8tB_k1Bxzuc2SjqQ6DSyAar2AOE';
+// Read credentials from the environment (matches .env.local) instead of
+// hardcoding them into a committed file.
+const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL;
+const SUPABASE_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY;
+
+if (!SUPABASE_URL || !SUPABASE_KEY) {
+  console.error(
+    'Missing Supabase credentials. Run with:\n' +
+    '  NEXT_PUBLIC_SUPABASE_URL=... NEXT_PUBLIC_SUPABASE_ANON_KEY=... node scripts/audit-autoscope.js\n' +
+    'or: set -a; source .env.local; set +a; node scripts/audit-autoscope.js'
+  );
+  process.exit(1);
+}
 
 async function fetchTable(table, params = {}) {
   const searchParams = new URLSearchParams(params);
