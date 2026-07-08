@@ -119,7 +119,10 @@ export async function GET(
       console.error('[API] Line items fetch error:', itemsError);
     }
 
-    const allItems = (allItemsData || []) as LineItemRecord[];
+    // Exclude soft-deleted rows so they never reach totals or the UI
+    const allItems = ((allItemsData || []) as LineItemRecord[]).filter(
+      (item) => !(item as { is_deleted?: boolean }).is_deleted
+    );
 
     // ==========================================================================
     // Separate items by item_type

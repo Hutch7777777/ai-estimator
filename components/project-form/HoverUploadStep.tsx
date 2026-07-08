@@ -16,12 +16,9 @@ import {
   Loader2,
   CheckCircle2,
   AlertCircle,
-  Download,
-  ChevronLeft,
-  Sparkles,
 } from "lucide-react";
-import { ProjectFormData } from "@/app/project/new/page";
-import { createClient } from "@/lib/supabase/client";
+import { ProjectFormData } from "@/lib/types/project-form";
+import { submitProject } from "@/lib/project-submission";
 import { useOrganization } from "@/lib/hooks/useOrganization";
 import { cn } from "@/lib/utils";
 
@@ -39,7 +36,6 @@ export function HoverUploadStep({ data, onUpdate }: HoverUploadStepProps) {
   const [errorMessage, setErrorMessage] = useState('');
 
   const { organization } = useOrganization();
-  const supabase = createClient();
 
   // Validation helper
   const validateFile = (file: File): string | null => {
@@ -127,111 +123,11 @@ export function HoverUploadStep({ data, onUpdate }: HoverUploadStepProps) {
     }());
   };
 
-  // Upload PDF to Supabase Storage
-  const uploadHoverPDF = async (file: File, tempProjectId: string): Promise<string> => {
-    const fileName = `${tempProjectId}/${Date.now()}_${file.name}`;
-
-    const { data, error } = await supabase.storage
-      .from('hover-pdfs')
-      .upload(fileName, file, {
-        cacheControl: '3600',
-        upsert: false
-      });
-
-    if (error) throw new Error(`Upload failed: ${error.message}`);
-
-    const { data: { publicUrl } } = supabase.storage
-      .from('hover-pdfs')
-      .getPublicUrl(data.path);
-
-    return publicUrl;
-  };
-
-  // Remove empty strings, null, and undefined values from config objects
-  const cleanConfig = (config: Record<string, unknown>): Record<string, unknown> => {
-    const cleaned: Record<string, unknown> = {};
-
-    for (const [key, value] of Object.entries(config)) {
-      // Skip empty strings, null, and undefined
-      if (value === '' || value === null || value === undefined) {
-        continue;
-      }
-      // Keep false, 0, and empty arrays (these are valid values)
-      // Recursively clean nested objects
-      if (typeof value === 'object' && !Array.isArray(value) && value !== null) {
-        const cleanedNested = cleanConfig(value as Record<string, unknown>);
-        if (Object.keys(cleanedNested).length > 0) {
-          cleaned[key] = cleanedNested;
-        }
-      } else {
-        cleaned[key] = value;
-      }
-    }
-
-    return cleaned;
-  };
-
-  // Package project data for webhook
-  const packageProjectData = (pdfUrl: string, newProjectId: string) => {
-    // Clean configurations to remove empty strings
-    const cleanedSiding = cleanConfig(data.configurations?.siding || {});
-    const cleanedRoofing = cleanConfig(data.configurations?.roofing || {});
-    const cleanedWindows = cleanConfig(data.configurations?.windows || {});
-    const cleanedGutters = cleanConfig(data.configurations?.gutters || {});
-
-    // Validation: Warn if siding_product_type is missing when siding is selected
-    if (data.selectedTrades?.includes('siding') && !cleanedSiding.siding_product_type) {
-      console.warn('⚠️ Warning: siding_product_type is missing but siding trade is selected');
-      console.warn('  Original siding config:', data.configurations?.siding);
-      console.warn('  Cleaned siding config:', cleanedSiding);
-    }
-
-    const payload = {
-      project_id: newProjectId,
-      project_name: data.projectName,
-      client_name: data.customerName,
-      address: data.address,
-      selected_trades: data.selectedTrades,
-      markup_percent: data.configurations?.siding?.markup_percent ?? data.markupPercent ?? 15, // Use siding markup, fallback to global, default 15
-      siding: cleanedSiding,
-      roofing: cleanedRoofing,
-      windows: cleanedWindows,
-      gutters: cleanedGutters,
-      hover_pdf_url: pdfUrl,
-      created_at: new Date().toISOString()
-    };
-
-    return payload;
-  };
-
-  // Trigger n8n workflow (proxied through Next.js API to avoid CORS)
-  const triggerWorkflow = async (projectData: any) => {
-    const response = await fetch('/api/n8n/multi-trade-coordinator', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(projectData)
-    });
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(`Workflow trigger failed: ${errorText}`);
-    }
-
-    const blob = await response.blob();
-    const url = window.URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `Estimate_${data.projectName}_${Date.now()}.xlsx`;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    window.URL.revokeObjectURL(url);
-    return { success: true };
-  };
-
-  // Main handler
+  // Main handler — delegates to the shared, idempotent submission flow.
+  // On retry after a failure, stages that already succeeded (upload,
+  // project insert) are skipped instead of creating duplicates.
   const handleGenerateEstimate = async () => {
-    if (!selectedFile) return;
+    if (!selectedFile && !data.pdfUrl) return;
 
     // Verify organization is selected before proceeding
     if (!organization?.id) {
@@ -242,62 +138,34 @@ export function HoverUploadStep({ data, onUpdate }: HoverUploadStepProps) {
     }
 
     try {
-      // Generate a temporary project ID
-      const tempProjectId = crypto.randomUUID();
-
-      // Step 1: Upload PDF
       setUploadState('uploading');
       setProgress(0);
-      toast.loading('Uploading HOVER PDF...', { id: 'upload-progress' });
 
-      const pdfUrl = await uploadHoverPDF(selectedFile, tempProjectId);
-      setProgress(100);
-      onUpdate({ pdfUrl });
-      toast.success('PDF uploaded successfully!', { id: 'upload-progress' });
+      const result = await submitProject(
+        { ...data, pdfFile: selectedFile ?? data.pdfFile },
+        organization.id,
+        {
+          onUploadStart: () => {
+            toast.loading('Uploading HOVER PDF...', { id: 'upload-progress' });
+          },
+          onUploaded: (pdfUrl) => {
+            setProgress(100);
+            onUpdate({ pdfUrl });
+            toast.success('PDF uploaded successfully!', { id: 'upload-progress' });
+          },
+          onProjectSaved: (projectId) => {
+            onUpdate({ projectId });
+          },
+          onProcessingStart: () => {
+            setUploadState('processing');
+            toast.loading('AI is analyzing your project...', { id: 'processing' });
+          },
+        }
+      );
 
-      // Step 2: Save to database
-      const projectInsert = {
-        id: tempProjectId,
-        organization_id: organization.id,
-        name: data.projectName,
-        client_name: data.customerName,
-        address: data.address,
-        selected_trades: data.selectedTrades,
-        hover_pdf_url: pdfUrl,
-        markup_percent: data.markupPercent, // User's desired markup percentage
-        status: 'pending' as const
-      };
+      onUpdate({ pdfUrl: result.pdfUrl, projectId: result.projectId });
 
-      const { error: dbError } = await supabase
-        .from('projects')
-        // @ts-expect-error - Supabase generated types return never for insert
-        .insert(projectInsert)
-        .select()
-        .single();
-
-      if (dbError) throw new Error(`Database error: ${dbError.message}`);
-
-      // Save configurations for each trade
-      const configInserts = data.selectedTrades.map(trade => ({
-        project_id: tempProjectId,
-        trade,
-        configuration_data: data.configurations?.[trade] || {}
-      }));
-
-      const { error: configError } = await supabase
-        .from('project_configurations')
-        // @ts-expect-error - Supabase generated types return never for insert
-        .insert(configInserts);
-
-      if (configError) throw new Error(`Configuration save error: ${configError.message}`);
-
-      // Step 3: Trigger n8n workflow
-      setUploadState('processing');
-      toast.loading('AI is analyzing your project...', { id: 'processing' });
-      const projectData = packageProjectData(pdfUrl, tempProjectId);
-      await triggerWorkflow(projectData);
-
-      // Step 4: Complete (file has been automatically downloaded)
+      // Complete (file has been automatically downloaded)
       setUploadState('complete');
       toast.success('Your estimate is ready!', {
         id: 'processing',
@@ -309,6 +177,7 @@ export function HoverUploadStep({ data, onUpdate }: HoverUploadStepProps) {
 
     } catch (error) {
       console.error('Error generating estimate:', error);
+      toast.dismiss('upload-progress');
       setUploadState('error');
       setErrorMessage(error instanceof Error ? error.message : 'An unknown error occurred');
       toast.error('Failed to generate estimate', {

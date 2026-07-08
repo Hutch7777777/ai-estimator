@@ -51,17 +51,14 @@ export function ProjectGrid({ onProjectSelect }: ProjectGridProps) {
 
       // Guard against multiple simultaneous fetches
       if (isFetchingRef.current) {
-        console.log('ProjectGrid: Already fetching, skipping...');
         return;
       }
 
       isFetchingRef.current = true;
-      console.log('ProjectGrid: loadProjects starting...');
       setLoading(true);
 
       try {
         const { data, error: fetchError } = await fetchProjects(organization.id);
-        console.log('ProjectGrid: fetchProjects returned', { hasData: !!data, hasError: !!fetchError });
         if (fetchError) {
           setError(fetchError);
           toast.error("Failed to load projects");
@@ -69,14 +66,12 @@ export function ProjectGrid({ onProjectSelect }: ProjectGridProps) {
         } else {
           setError(null);
           setProjects(data || []);
-          console.log('ProjectGrid: Set', data?.length || 0, 'projects');
         }
       } catch (err) {
         console.error('ProjectGrid: Exception in loadProjects:', err);
         setError(err instanceof Error ? err.message : "Failed to load projects");
         toast.error("Failed to load projects");
       } finally {
-        console.log('ProjectGrid: Setting loading to false');
         setLoading(false);
         isFetchingRef.current = false;
       }

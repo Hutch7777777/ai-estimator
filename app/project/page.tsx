@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { ArrowLeft, BarChart3, Pencil, Layers } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -14,8 +14,20 @@ import { UserMenu } from "@/components/layout/UserMenu";
 // Note: Auth and organization checks are handled by the parent layout.tsx
 // This page only renders when user is authenticated and has an organization
 
+const TAB_VALUES = ["overview", "new", "cad", "extractions", "past"];
+
 export default function ProjectDashboard() {
   const [activeTab, setActiveTab] = useState("overview");
+
+  // Honor ?tab= links (e.g. the post-submit redirect to /project?tab=past).
+  // Read in an effect rather than useSearchParams to avoid needing a
+  // Suspense boundary for static prerendering.
+  useEffect(() => {
+    const tab = new URLSearchParams(window.location.search).get("tab");
+    if (tab && TAB_VALUES.includes(tab)) {
+      setActiveTab(tab);
+    }
+  }, []);
 
   // Simple tab change handler - no forced remount needed
   const handleTabChange = (value: string) => {

@@ -38,6 +38,9 @@ export default function ProjectEstimatePage() {
   // Local state for line items (synced with database)
   const [localLineItems, setLocalLineItems] = useState<LineItemWithState[]>([]);
 
+  // DB ids of rows the user removed; deleted from the database on save
+  const [deletedItemIds, setDeletedItemIds] = useState<string[]>([]);
+
   const supabase = createClient();
   const { organization, isLoading: isOrgLoading } = useOrganization();
 
@@ -121,10 +124,18 @@ export default function ProjectEstimatePage() {
     });
   }, []);
 
+  // Track removed rows so save can delete them from the database
+  const handleLineItemsDelete = useCallback((ids: string[]) => {
+    setDeletedItemIds((prev) => [...new Set([...prev, ...ids])]);
+  }, []);
+
   // Handle save
   const handleSave = useCallback(async () => {
     try {
-      await saveLineItems(localLineItems);
+      await saveLineItems(localLineItems, deletedItemIds);
+
+      // Deletions are now persisted
+      setDeletedItemIds([]);
 
       // Clear isNew and isModified flags after successful save
       setLocalLineItems((prev) =>
@@ -141,7 +152,7 @@ export default function ProjectEstimatePage() {
       console.error("Save failed:", err);
       // Error is already set by useLineItemsSave hook
     }
-  }, [localLineItems, saveLineItems, refresh]);
+  }, [localLineItems, deletedItemIds, saveLineItems, refresh]);
 
   // Loading state
   if (isOrgLoading || projectLoading || takeoffLoading) {
@@ -309,11 +320,9 @@ export default function ProjectEstimatePage() {
         }}
         onApprove={() => {
           // TODO: Implement approval workflow
-          console.log("Approve estimate");
         }}
         onSend={() => {
           // TODO: Implement send to client
-          console.log("Send to client");
         }}
       />
 
@@ -324,6 +333,8 @@ export default function ProjectEstimatePage() {
           lineItems={localLineItems}
           takeoffId={takeoff.id}
           onLineItemsChange={handleLineItemsChange}
+          onLineItemsDelete={handleLineItemsDelete}
+          hasPendingDeletes={deletedItemIds.length > 0}
           onSave={canEdit ? handleSave : undefined}
           isSaving={isSaving}
         />

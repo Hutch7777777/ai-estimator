@@ -95,7 +95,6 @@ export function CADViewer({
   // Handle image load
   const handleImageLoad = useCallback((e: React.SyntheticEvent<HTMLImageElement>) => {
     const img = e.currentTarget;
-    console.log("[CADViewer] Image loaded via <img> element:", img.naturalWidth, "x", img.naturalHeight);
     setImageDimensions({ width: img.naturalWidth, height: img.naturalHeight });
     setImageLoaded(true);
     setIsLoading(false);
@@ -260,7 +259,6 @@ export function CADViewer({
     // Debounce: wait 300ms after zoom stops
     rerenderTimeoutRef.current = setTimeout(async () => {
       setIsRerendering(true);
-      console.log("[CADViewer] Re-rendering PDF at scale:", currentScale.toFixed(2));
       try {
         const newImageUrl = await renderPdfAtScale(pdfDocument, pdfPageNumber, currentScale);
         onImageUrlChange(newImageUrl);
@@ -736,7 +734,6 @@ export function CADViewer({
       if (canvas.width !== width || canvas.height !== height) {
         canvas.width = width;
         canvas.height = height;
-        console.log("[CADViewer] Canvas resized:", width, "x", height);
       }
     };
 
@@ -772,7 +769,6 @@ export function CADViewer({
       const newOffsetX = mouseX - imageX * newScale;
       const newOffsetY = mouseY - imageY * newScale;
 
-      console.log("[CADViewer] Wheel zoom - scale:", newScale.toFixed(2));
 
       onViewTransformChange({
         scale: newScale,

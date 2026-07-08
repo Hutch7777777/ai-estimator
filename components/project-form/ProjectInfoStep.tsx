@@ -4,7 +4,7 @@ import { useState, useEffect } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { ProjectFormData } from "@/app/project/new/page";
+import { ProjectFormData } from "@/lib/types/project-form";
 import { projectInfoSchema, validateField } from "@/lib/validation/project-form";
 import { AlertCircle, CheckCircle2 } from "lucide-react";
 import { cn } from "@/lib/utils";

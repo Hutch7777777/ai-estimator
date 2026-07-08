@@ -10,6 +10,10 @@ interface SectionTabsProps {
   lineItems: LineItemWithState[];
   takeoffId: string;
   onLineItemsChange: (sectionId: string, items: LineItemWithState[]) => void;
+  /** Called with DB ids of persisted rows the user removed */
+  onLineItemsDelete?: (ids: string[]) => void;
+  /** True when removed rows haven't been saved (deleted from DB) yet */
+  hasPendingDeletes?: boolean;
   onSave?: () => Promise<void>;
   isSaving?: boolean;
 }
@@ -26,6 +30,8 @@ export function SectionTabs({
   lineItems,
   takeoffId,
   onLineItemsChange,
+  onLineItemsDelete,
+  hasPendingDeletes = false,
   onSave,
   isSaving = false,
 }: SectionTabsProps) {
@@ -123,6 +129,8 @@ export function SectionTabs({
               sectionId={section.id}
               takeoffId={takeoffId}
               onItemsChange={(updatedItems) => onLineItemsChange(section.id, updatedItems)}
+              onItemsDelete={onLineItemsDelete}
+              hasPendingDeletes={hasPendingDeletes}
               onSave={onSave}
               isSaving={isSaving}
             />

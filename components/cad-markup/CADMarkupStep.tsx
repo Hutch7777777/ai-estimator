@@ -83,14 +83,12 @@ async function renderPdfPageToDataUrl(
   await page.render(renderContext).promise;
 
   const dataUrl = canvas.toDataURL("image/png");
-  console.log("[CADMarkup] PDF page", pageNumber, "converted:", viewport.width, "x", viewport.height);
 
   return dataUrl;
 }
 
 // Load PDF document and return it with page count
 async function loadPdfDocument(file: File): Promise<{ pdfDoc: any; numPages: number }> {
-  console.log("[CADMarkup] Loading PDF document...");
 
   // Dynamic import to avoid SSR issues with DOMMatrix
   const pdfjsLib = await import("pdfjs-dist");
@@ -101,7 +99,6 @@ async function loadPdfDocument(file: File): Promise<{ pdfDoc: any; numPages: num
   const arrayBuffer = await file.arrayBuffer();
   const pdfDoc = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
 
-  console.log("[CADMarkup] PDF loaded:", pdfDoc.numPages, "pages");
   return { pdfDoc, numPages: pdfDoc.numPages };
 }
 
@@ -118,7 +115,6 @@ interface MarkupState {
 }
 
 export function CADMarkupStep({ data, onUpdate, onValidationChange }: CADMarkupStepProps) {
-  console.log('[CADMarkupStep] Component rendering, mode will be browse initially');
 
   // State
   const [imageUrl, setImageUrl] = useState<string>(data?.imageUrl || "");
@@ -207,7 +203,6 @@ export function CADMarkupStep({ data, onUpdate, onValidationChange }: CADMarkupS
   useEffect(() => {
     return () => {
       if (blobUrlRef.current) {
-        console.log("[CADMarkup] Cleanup: revoking blob URL on unmount");
         URL.revokeObjectURL(blobUrlRef.current);
       }
       pdfDocRef.current = null;
@@ -275,7 +270,6 @@ export function CADMarkupStep({ data, onUpdate, onValidationChange }: CADMarkupS
     }
 
     setIsLoadingFile(true);
-    console.log("[CADMarkup] Processing file:", file.name, file.type);
 
     try {
       let url: string;
@@ -283,7 +277,6 @@ export function CADMarkupStep({ data, onUpdate, onValidationChange }: CADMarkupS
 
       // Revoke previous blob URL if exists (cleanup)
       if (blobUrlRef.current) {
-        console.log("[CADMarkup] Revoking previous blob URL");
         URL.revokeObjectURL(blobUrlRef.current);
         blobUrlRef.current = null;
       }
@@ -316,7 +309,6 @@ export function CADMarkupStep({ data, onUpdate, onValidationChange }: CADMarkupS
         // Regular image - create blob URL
         url = URL.createObjectURL(file);
         blobUrlRef.current = url; // Store ref to prevent GC and allow cleanup
-        console.log("[CADMarkup] Created blob URL for image, stored in ref");
       }
 
       setImageUrl(url);

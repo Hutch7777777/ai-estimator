@@ -52,6 +52,10 @@ interface EstimateGridProps {
   sectionId: string;
   takeoffId: string;
   onItemsChange: (items: LineItemWithState[]) => void;
+  /** Called with the DB ids of persisted rows the user removed, so the save can delete them */
+  onItemsDelete?: (ids: string[]) => void;
+  /** True when rows were removed but the deletion hasn't been saved yet */
+  hasPendingDeletes?: boolean;
   onSave?: () => Promise<void>;
   isSaving?: boolean;
 }
@@ -89,7 +93,6 @@ const getGroupDisplayName = (presentationGroup: string | null | undefined): stri
 
 // Transform flat items array into grouped structure with header rows
 const createGroupedRows = (items: LineItemWithState[], expandedGroups: Record<string, boolean>): any[] => {
-  console.log('📊 [createGroupedRows] Called with expandedGroups:', expandedGroups);
 
   // Group items by presentation_group
   const groups = new Map<string, LineItemWithState[]>();
@@ -123,11 +126,6 @@ const createGroupedRows = (items: LineItemWithState[], expandedGroups: Record<st
     const groupDisplayName = getGroupDisplayName(groupKey);
     const isExpanded = expandedGroups[groupKey] !== false; // Default to expanded if not set
 
-    console.log(`📊 [createGroupedRows] Group ${groupKey}:`, {
-      groupDisplayName,
-      isExpanded,
-      itemCount,
-    });
 
     // Add group header row
     rows.push({
@@ -147,7 +145,6 @@ const createGroupedRows = (items: LineItemWithState[], expandedGroups: Record<st
     }
   });
 
-  console.log('📊 [createGroupedRows] Total rows returned:', rows.length);
 
   return rows;
 };
@@ -280,10 +277,6 @@ function ActionsCellRenderer(props: {
 
         {/* Replace Material */}
         <DropdownMenuItem onClick={() => {
-          console.log('🎯 [Dropdown] Replace Material clicked for row:', {
-            id: props.data.id,
-            description: props.data.description,
-          });
           props.onOpenSearchModal(props.data);
         }}>
           Replace Material...
@@ -390,6 +383,8 @@ export function EstimateGrid({
   sectionId,
   takeoffId,
   onItemsChange,
+  onItemsDelete,
+  hasPendingDeletes = false,
   onSave,
   isSaving = false,
 }: EstimateGridProps) {
@@ -418,17 +413,13 @@ export function EstimateGrid({
   });
 
   const toggleGroupExpansion = useCallback((groupKey: string) => {
-    console.log('🔄 [toggleGroupExpansion] Called with groupKey:', groupKey);
     setExpandedGroups((prev) => {
       const currentState = prev[groupKey];
       const newState = !currentState;
-      console.log('🔄 [toggleGroupExpansion] Current state:', currentState, '→ New state:', newState);
-      console.log('🔄 [toggleGroupExpansion] Full state before:', prev);
       const updated = {
         ...prev,
         [groupKey]: newState,
       };
-      console.log('🔄 [toggleGroupExpansion] Full state after:', updated);
       return updated;
     });
   }, []);
@@ -568,6 +559,23 @@ export function EstimateGrid({
                  params.data.equipment_unit_cost ||
                  0;
         },
+        valueSetter: (params) => {
+          // Write the edit back to the SAME field the valueGetter displayed,
+          // so editing a labor-only or equipment-only row doesn't silently
+          // move its cost into material_unit_cost
+          if (!params.data) return false;
+          const newValue = Number(params.newValue) || 0;
+          const target = params.data.material_unit_cost
+            ? "material_unit_cost"
+            : params.data.labor_unit_cost
+              ? "labor_unit_cost"
+              : params.data.equipment_unit_cost
+                ? "equipment_unit_cost"
+                : "material_unit_cost";
+          if (params.data[target] === newValue) return false;
+          params.data[target] = newValue;
+          return true;
+        },
         valueFormatter: currencyFormatter,
         cellClass: "text-right",
       },
@@ -706,9 +714,18 @@ export function EstimateGrid({
         isModified: true,
       }));
 
+    // Rows that already exist in the database must be deleted on save;
+    // rows that were never saved (isNew) can just vanish from local state
+    const persistedIds = selectedRows
+      .filter((row) => !row.isNew)
+      .map((row) => row.id);
+    if (persistedIds.length > 0) {
+      onItemsDelete?.(persistedIds);
+    }
+
     onItemsChange(updatedItems);
     setSelectedRows([]);
-  }, [items, selectedRows, onItemsChange]);
+  }, [items, selectedRows, onItemsChange, onItemsDelete]);
 
   const handleGridExport = useCallback(async () => {
     try {
@@ -990,9 +1007,13 @@ export function EstimateGrid({
           isModified: true,
         }));
 
+      if (!row.isNew) {
+        onItemsDelete?.([row.id]);
+      }
+
       onItemsChange(updatedItems);
     },
-    [items, onItemsChange]
+    [items, onItemsChange, onItemsDelete]
   );
 
   const handleContextMenuOpen = useCallback(async (row: LineItemWithState) => {
@@ -1074,7 +1095,8 @@ export function EstimateGrid({
     return <DetailPanel data={params.data} />;
   }, [toggleGroupExpansion]);
 
-  const hasUnsavedChanges = items.some((item) => item.isNew || item.isModified);
+  const hasUnsavedChanges =
+    items.some((item) => item.isNew || item.isModified) || hasPendingDeletes;
 
   return (
     <>
@@ -1257,10 +1279,6 @@ export function EstimateGrid({
 
                 {/* Replace Material */}
                 <ContextMenuItem onClick={() => {
-                  console.log('🔓 [ContextMenu] Opening search modal for row:', {
-                    id: contextMenuRow?.id,
-                    description: contextMenuRow?.description,
-                  });
 
                   if (!contextMenuRow) {
                     console.error('❌ [ContextMenu] contextMenuRow is null!');
@@ -1270,7 +1288,6 @@ export function EstimateGrid({
                   setRowToReplace(contextMenuRow);
                   rowToReplaceRef.current = contextMenuRow;
 
-                  console.log('🔓 [ContextMenu] Row stored in state and ref');
 
                   setIsProductSearchOpen(true);
                 }}>

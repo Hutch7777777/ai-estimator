@@ -6,7 +6,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { CheckCircle2, Percent } from "lucide-react";
-import { ProjectFormData } from "@/app/project/new/page";
+import { ProjectFormData } from "@/lib/types/project-form";
 
 interface ReviewSubmitStepProps {
   data: ProjectFormData;

@@ -31,7 +31,6 @@ export async function fetchProjects(organizationId?: string): Promise<{
 
   try {
     const url = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/rest/v1/bluebeam_projects?select=*&organization_id=eq.${organizationId}&order=updated_at.desc`;
-    console.log('[fetchProjects] Fetching with URL:', url);
 
     const response = await fetch(
       url,

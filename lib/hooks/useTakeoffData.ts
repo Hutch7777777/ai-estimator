@@ -76,7 +76,6 @@ export function useTakeoffData(projectId: string): UseTakeoffDataReturn {
           filter: `id=eq.${takeoff.id}`,
         },
         (payload) => {
-          console.log("Takeoff updated:", payload);
           if (payload.new) {
             setTakeoff(payload.new as Takeoff);
           }
@@ -90,8 +89,7 @@ export function useTakeoffData(projectId: string): UseTakeoffDataReturn {
           table: "takeoff_sections",
           filter: `takeoff_id=eq.${takeoff.id}`,
         },
-        (payload) => {
-          console.log("Section changed:", payload);
+        () => {
           fetchData(); // Refresh all data when sections change
         }
       )
@@ -104,16 +102,21 @@ export function useTakeoffData(projectId: string): UseTakeoffDataReturn {
           filter: `takeoff_id=eq.${takeoff.id}`,
         },
         (payload) => {
-          console.log("Line item changed:", payload);
-
           if (payload.eventType === "INSERT" && payload.new) {
-            setLineItems((prev) => [...prev, payload.new as LineItemWithState]);
+            const newItem = payload.new as LineItemWithState;
+            if (!newItem.is_deleted) {
+              setLineItems((prev) => [...prev, newItem]);
+            }
           } else if (payload.eventType === "UPDATE" && payload.new) {
-            setLineItems((prev) =>
-              prev.map((item) =>
-                item.id === payload.new.id ? (payload.new as LineItemWithState) : item
-              )
-            );
+            const updatedItem = payload.new as LineItemWithState;
+            if (updatedItem.is_deleted) {
+              // Soft-deleted elsewhere (e.g. by the n8n workflow) — remove it
+              setLineItems((prev) => prev.filter((item) => item.id !== updatedItem.id));
+            } else {
+              setLineItems((prev) =>
+                prev.map((item) => (item.id === updatedItem.id ? updatedItem : item))
+              );
+            }
           } else if (payload.eventType === "DELETE" && payload.old) {
             setLineItems((prev) => prev.filter((item) => item.id !== payload.old.id));
           }

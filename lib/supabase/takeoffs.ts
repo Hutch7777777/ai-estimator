@@ -43,16 +43,21 @@ export async function getTakeoffByProjectId(
       return { takeoff: null, sections: [], lineItems: [], error: null };
     }
 
-    // Fetch sections
+    // Fetch sections (sorted client-side by sort_order — the column the
+    // schema actually defines; ordering server-side on a wrong column
+    // name fails the whole query)
     const { data: sections, error: sectionsError } = await supabase
       .from("takeoff_sections")
       .select("*")
-      .eq("takeoff_id", takeoff.id)
-      .order("display_order", { ascending: true });
+      .eq("takeoff_id", takeoff.id);
 
     if (sectionsError) throw sectionsError;
 
-    // Fetch line items
+    const sortedSections = (sections || []).sort(
+      (a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0)
+    );
+
+    // Fetch line items, excluding soft-deleted rows
     const { data: lineItems, error: lineItemsError } = await supabase
       .from("takeoff_line_items")
       .select("*")
@@ -61,10 +66,14 @@ export async function getTakeoffByProjectId(
 
     if (lineItemsError) throw lineItemsError;
 
+    const activeLineItems = (lineItems || []).filter(
+      (item: TakeoffLineItem) => !item.is_deleted
+    );
+
     return {
       takeoff,
-      sections: sections || [],
-      lineItems: lineItems || [],
+      sections: sortedSections,
+      lineItems: activeLineItems,
       error: null,
     };
   } catch (error) {
@@ -157,6 +166,37 @@ export async function deleteLineItem(
 }
 
 /**
+ * Delete multiple line items (hard delete).
+ *
+ * Hard delete (not is_deleted=true) because item numbers are renumbered
+ * after deletion and the UNIQUE(section_id, item_number) constraint would
+ * collide with soft-deleted rows still holding their numbers. The DB's
+ * AFTER DELETE trigger recalculates section/takeoff totals.
+ */
+export async function deleteLineItems(
+  supabase: TypedSupabaseClient,
+  lineItemIds: string[]
+) {
+  if (lineItemIds.length === 0) return { error: null };
+
+  try {
+    const { error } = await supabase
+      .from("takeoff_line_items")
+      .delete()
+      .in("id", lineItemIds);
+
+    if (error) throw error;
+
+    return { error: null };
+  } catch (error) {
+    console.error("Error deleting line items:", error);
+    return {
+      error: error instanceof Error ? error.message : "Unknown error",
+    };
+  }
+}
+
+/**
  * Bulk upsert line items (create new or update existing)
  */
 export async function upsertLineItems(
@@ -178,7 +218,48 @@ export async function upsertLineItems(
       errors: [],
     };
 
-    // Insert new items
+    // Update existing items FIRST, in ascending item_number order.
+    // Renumbering after a delete shifts numbers downward; ascending order
+    // means each update frees the number the next one needs, so the
+    // UNIQUE(section_id, item_number) constraint is never violated.
+    const orderedUpdates = [...existingItems].sort(
+      (a, b) => a.item_number - b.item_number
+    );
+
+    for (const item of orderedUpdates) {
+      const { data: updated, error: updateError } = await supabase
+        .from("takeoff_line_items")
+        .update({
+          item_number: item.item_number,
+          description: item.description,
+          sku: item.sku,
+          product_id: item.product_id,
+          quantity: item.quantity,
+          unit: item.unit,
+          material_unit_cost: item.material_unit_cost,
+          labor_unit_cost: item.labor_unit_cost,
+          equipment_unit_cost: item.equipment_unit_cost,
+          calculation_source: item.calculation_source,
+          source_id: item.source_id,
+          formula_used: item.formula_used,
+          notes: item.notes,
+          is_optional: item.is_optional,
+          sort_order: item.sort_order,
+          presentation_group: item.presentation_group,
+        })
+        .eq("id", item.id)
+        .select()
+        .single();
+
+      if (updateError) {
+        results.errors.push(`Update error for ${item.id}: ${updateError.message}`);
+      } else if (updated) {
+        results.updated.push(updated);
+      }
+    }
+
+    // Insert new items after updates so freshly assigned item numbers
+    // can't collide with rows that were being renumbered downward
     if (newItems.length > 0) {
       const insertData = newItems.map((item) => ({
         takeoff_id: item.takeoff_id,
@@ -196,6 +277,9 @@ export async function upsertLineItems(
         source_id: item.source_id,
         formula_used: item.formula_used,
         notes: item.notes,
+        is_optional: item.is_optional,
+        sort_order: item.sort_order,
+        presentation_group: item.presentation_group,
       }));
 
       const { data: inserted, error: insertError } = await supabase
@@ -207,33 +291,6 @@ export async function upsertLineItems(
         results.errors.push(`Insert error: ${insertError.message}`);
       } else if (inserted) {
         results.inserted = inserted;
-      }
-    }
-
-    // Update existing items
-    for (const item of existingItems) {
-      const { data: updated, error: updateError } = await supabase
-        .from("takeoff_line_items")
-        .update({
-          item_number: item.item_number,
-          description: item.description,
-          sku: item.sku,
-          product_id: item.product_id,
-          quantity: item.quantity,
-          unit: item.unit,
-          material_unit_cost: item.material_unit_cost,
-          labor_unit_cost: item.labor_unit_cost,
-          equipment_unit_cost: item.equipment_unit_cost,
-          notes: item.notes,
-        })
-        .eq("id", item.id)
-        .select()
-        .single();
-
-      if (updateError) {
-        results.errors.push(`Update error for ${item.id}: ${updateError.message}`);
-      } else if (updated) {
-        results.updated.push(updated);
       }
     }
 

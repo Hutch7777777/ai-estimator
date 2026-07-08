@@ -9,7 +9,6 @@ export { ColorPicker } from "./ColorPicker";
 export { CategoryPicker } from "./CategoryPicker";
 export { PageNavigation } from "./PageNavigation";
 export { PageThumbnails } from "./PageThumbnails";
-export { ProjectSelector } from "./ProjectSelector";
 export { ProjectCard } from "./ProjectCard";
 export { ProjectGrid } from "./ProjectGrid";
 export { SaveStatus } from "./SaveStatus";

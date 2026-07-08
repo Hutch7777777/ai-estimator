@@ -76,16 +76,7 @@ export function ProductSearchModal({
 
   const handleReplaceProduct = useCallback(
     (product: ProductCatalog) => {
-      console.log('🔄 [ProductSearchModal] Replace clicked');
-      console.log('🔄 [ProductSearchModal] Product to replace with:', {
-        id: product.id,
-        name: product.product_name,
-        sku: product.sku,
-        physical_properties: product.physical_properties,
-      });
-      console.log('🔄 [ProductSearchModal] Calling onReplace callback');
       onReplace(product);
-      console.log('🔄 [ProductSearchModal] Closing modal');
       onClose();
       setSearchQuery("");
       setSearchResults([]);
@@ -194,7 +185,6 @@ export function ProductSearchModal({
                 variant={selectedCategory === null ? "default" : "outline"}
                 size="sm"
                 onClick={() => {
-                  console.log('🏷️ Category filter: All Categories');
                   setSelectedCategory(null);
                 }}
               >
@@ -206,7 +196,6 @@ export function ProductSearchModal({
                   variant={selectedCategory === filter.value ? "default" : "outline"}
                   size="sm"
                   onClick={() => {
-                    console.log('🏷️ Category filter clicked:', filter.value, '(', filter.label, ')');
                     setSelectedCategory(filter.value);
                   }}
                 >
