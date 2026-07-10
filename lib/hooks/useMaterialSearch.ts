@@ -273,7 +273,7 @@ export function useMaterialSearch(options: UseMaterialSearchOptions = {}): UseMa
 
         if (data && isMountedRef.current) {
           // Get unique categories
-          let uniqueCategories = Array.from(
+          const uniqueCategories = Array.from(
             new Set(data.map((d) => d.category).filter(Boolean))
           );
 

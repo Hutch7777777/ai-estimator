@@ -18,13 +18,22 @@ export default function Home() {
         <div className="absolute top-0 -right-4 w-72 h-72 bg-chart-3/30 rounded-full mix-blend-multiply filter blur-xl opacity-70 animate-float" style={{ animationDelay: '1s' }} />
         <div className="absolute -bottom-8 left-20 w-72 h-72 bg-chart-4/30 rounded-full mix-blend-multiply filter blur-xl opacity-70 animate-float" style={{ animationDelay: '2s' }} />
 
-        <main className="container relative mx-auto px-4 py-20 sm:px-6 lg:px-8 sm:py-32">
-          <div className="flex flex-col items-center justify-center space-y-10 text-center">
-            {/* Logo */}
-            <div className="animate-scale-in">
-              <Logo size="lg" className="scale-150 sm:scale-[2]" />
-            </div>
+        <header className="container relative z-10 mx-auto flex items-center justify-between px-4 py-5 sm:px-6 lg:px-8">
+          <Link href="/" aria-label="Estimate.ai home">
+            <Logo size="md" />
+          </Link>
+          <nav className="flex items-center gap-3" aria-label="Account">
+            <Button asChild variant="ghost">
+              <Link href="/login">Sign in</Link>
+            </Button>
+            <Button asChild>
+              <Link href="/signup">Request access</Link>
+            </Button>
+          </nav>
+        </header>
 
+        <main className="container relative mx-auto px-4 py-20 sm:px-6 lg:px-8 sm:py-28">
+          <div className="flex flex-col items-center justify-center space-y-10 text-center">
             {/* Hero Title */}
             <div className="space-y-6 animate-fade-in-up">
               <h1 className="text-5xl font-bold tracking-tight sm:text-6xl md:text-7xl lg:text-8xl font-heading">
@@ -68,8 +77,8 @@ export default function Home() {
                   <Zap className="h-6 w-6 text-primary" />
                 </div>
                 <div className="text-left">
-                  <p className="text-sm font-medium text-muted-foreground">Average Time Savings</p>
-                  <p className="text-2xl font-bold gradient-text">45 min → 5 min</p>
+                  <p className="text-sm font-medium text-muted-foreground">Workflow focus</p>
+                  <p className="text-2xl font-bold gradient-text">Reviewable takeoffs in one place</p>
                 </div>
               </div>
             </div>
@@ -82,7 +91,7 @@ export default function Home() {
               </div>
               <div className="flex items-center gap-2">
                 <CheckCircle2 className="h-4 w-4 text-[#00cc6a]" />
-                <span>89% time savings</span>
+                <span>Human review built in</span>
               </div>
               <div className="flex items-center gap-2">
                 <CheckCircle2 className="h-4 w-4 text-[#00cc6a]" />
@@ -175,7 +184,7 @@ export default function Home() {
               <div className="absolute top-0 left-0 w-full h-2 gradient-bg-primary" />
               <CardHeader className="text-center pb-12 pt-12">
                 <Badge variant="outline" className="mb-4 px-4 py-1 mx-auto">
-                  Enterprise Features
+                  Contractor Workflow
                 </Badge>
                 <CardTitle className="text-4xl sm:text-5xl font-bold mb-4 font-heading">
                   Perfect for Siding Contractors
@@ -231,9 +240,9 @@ export default function Home() {
                       <TrendingUp className="h-6 w-6 text-white" />
                     </div>
                     <div>
-                      <h3 className="font-bold text-lg mb-2 font-heading">89% Time Savings</h3>
+                      <h3 className="font-bold text-lg mb-2 font-heading">Faster Estimating Workflow</h3>
                       <p className="text-muted-foreground">
-                        Reduce estimation time from 45 minutes down to just 5 minutes per project
+                        Reduce repetitive quantity entry while keeping review and pricing decisions in your hands
                       </p>
                     </div>
                   </div>
@@ -291,7 +300,7 @@ export default function Home() {
             <div className="flex flex-wrap items-center justify-center gap-8 pt-8 text-white/80">
               <div className="flex items-center gap-2">
                 <CheckCircle2 className="h-5 w-5" />
-                <span className="font-medium">Free to start</span>
+                <span className="font-medium">Invite-only pilot</span>
               </div>
               <div className="flex items-center gap-2">
                 <CheckCircle2 className="h-5 w-5" />
@@ -299,7 +308,7 @@ export default function Home() {
               </div>
               <div className="flex items-center gap-2">
                 <CheckCircle2 className="h-5 w-5" />
-                <span className="font-medium">Professional results</span>
+                <span className="font-medium">Review before export</span>
               </div>
             </div>
           </div>
@@ -331,6 +340,16 @@ export default function Home() {
                 <li>
                   <Link href="#how-it-works" className="hover:text-foreground transition-colors">
                     How It Works
+                  </Link>
+                </li>
+                <li>
+                  <Link href="/terms" className="hover:text-foreground transition-colors">
+                    Terms of Service
+                  </Link>
+                </li>
+                <li>
+                  <Link href="/privacy" className="hover:text-foreground transition-colors">
+                    Privacy Policy
                   </Link>
                 </li>
               </ul>

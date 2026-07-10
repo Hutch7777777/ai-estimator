@@ -306,7 +306,7 @@ export default function TakeoffDetailsPage() {
     setIsExportingBluebeam(true);
 
     try {
-      const apiUrl = process.env.NEXT_PUBLIC_EXTRACTION_API_URL || 'https://extraction-api-production.up.railway.app';
+      const apiUrl = '/api/extraction';
 
       const response = await fetch(`${apiUrl}/export-bluebeam`, {
         method: 'POST',

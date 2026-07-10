@@ -15,6 +15,7 @@ import {
 import { useOrganization } from "@/lib/hooks/useOrganization";
 import { cn } from "@/lib/utils";
 import type { JobStatus } from "@/lib/types/extraction";
+import { createClient } from "@/lib/supabase/client";
 
 // =============================================================================
 // Types
@@ -42,7 +43,7 @@ interface StartJobResponse {
 // Constants
 // =============================================================================
 
-const EXTRACTION_API_URL = process.env.NEXT_PUBLIC_EXTRACTION_API_URL || 'https://extraction-api-production.up.railway.app';
+const EXTRACTION_API_URL = '/api/extraction';
 const STORAGE_BUCKET = 'project-pdfs';
 const MAX_FILE_SIZE_MB = 100;
 
@@ -134,35 +135,28 @@ export function ExtractionUploadStep({
   const uploadPdfToStorage = async (file: File): Promise<string> => {
     const timestamp = Date.now();
     const sanitizedName = file.name.replace(/[^a-zA-Z0-9.-]/g, '_');
-    const filePath = `${projectId}/${timestamp}_${sanitizedName}`;
+    if (!organization?.id) throw new Error('No organization selected');
+    const filePath = `${organization.id}/${projectId}/${timestamp}_${sanitizedName}`;
 
     setUploadProgress(0);
 
-    const response = await fetch(
-      `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/${STORAGE_BUCKET}/${filePath}`,
-      {
-        method: 'POST',
-        headers: {
-          'apikey': process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-          'Authorization': `Bearer ${process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY}`,
-          'Content-Type': file.type,
-          'Cache-Control': '3600',
-          'x-upsert': 'false'
-        },
-        body: file
-      }
-    );
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error('[ExtractionUpload] Storage upload failed:', response.status, errorText);
-      throw new Error(`Upload failed: ${response.statusText}`);
-    }
+    const supabase = createClient();
+    const { error: uploadError } = await supabase.storage
+      .from(STORAGE_BUCKET)
+      .upload(filePath, file, { cacheControl: '3600', upsert: false });
+    if (uploadError) throw new Error(`Upload failed: ${uploadError.message}`);
 
     setUploadProgress(100);
 
-    const publicUrl = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/${STORAGE_BUCKET}/${filePath}`;
-    return publicUrl;
+    // The extraction service needs temporary access; the object itself stays
+    // private and the URL expires after the longest expected processing run.
+    const { data: signedData, error: signedError } = await supabase.storage
+      .from(STORAGE_BUCKET)
+      .createSignedUrl(filePath, 60 * 60 * 6);
+    if (signedError || !signedData?.signedUrl) {
+      throw new Error(`Could not authorize extraction: ${signedError?.message || 'Unknown storage error'}`);
+    }
+    return signedData.signedUrl;
   };
 
   // =============================================================================

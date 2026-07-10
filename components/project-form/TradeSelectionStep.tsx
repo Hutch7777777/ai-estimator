@@ -5,6 +5,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
 import { ProjectFormData } from "@/lib/types/project-form";
+import type { Trade } from "@/lib/types/database";
 
 interface TradeSelectionStepProps {
   data: ProjectFormData;
@@ -12,7 +13,7 @@ interface TradeSelectionStepProps {
   onValidationChange?: (isValid: boolean) => void;
 }
 
-const AVAILABLE_TRADES = [
+const AVAILABLE_TRADES: Array<{ id: Trade; label: string; description: string }> = [
   { id: "siding", label: "Siding", description: "James Hardie siding installation" },
   { id: "roofing", label: "Roofing", description: "Roof installation and repairs" },
   { id: "windows", label: "Windows", description: "Window installation and replacement" },
@@ -26,7 +27,7 @@ export function TradeSelectionStep({ data, onUpdate, onValidationChange }: Trade
     onValidationChange?.(isValid);
   }, [data.selectedTrades, onValidationChange]);
 
-  const handleTradeToggle = (tradeId: string) => {
+  const handleTradeToggle = (tradeId: Trade) => {
     const currentTrades = data.selectedTrades || [];
     const newTrades = currentTrades.includes(tradeId)
       ? currentTrades.filter((id) => id !== tradeId)

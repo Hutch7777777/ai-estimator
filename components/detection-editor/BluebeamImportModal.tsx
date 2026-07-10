@@ -140,7 +140,7 @@ interface ImportDiffResponse {
 // Constants
 // =============================================================================
 
-const EXTRACTION_API_URL = process.env.NEXT_PUBLIC_EXTRACTION_API_URL || 'https://extraction-api-production.up.railway.app';
+const EXTRACTION_API_URL = '/api/extraction';
 const MAX_FILE_SIZE_MB = 100;
 
 // =============================================================================

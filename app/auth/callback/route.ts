@@ -1,5 +1,6 @@
 import { createClient } from '@/lib/supabase/server';
 import { NextResponse } from 'next/server';
+import { sanitizeRedirectPath } from '@/lib/auth/redirect';
 
 export async function GET(request: Request) {
   const { searchParams, origin } = new URL(request.url);
@@ -12,9 +13,9 @@ export async function GET(request: Request) {
   const type = searchParams.get('type');
 
   // Common parameters
-  const redirectTo = searchParams.get('redirectTo') || '/project';
+  const redirectTo = sanitizeRedirectPath(searchParams.get('redirectTo'));
   const newUser = searchParams.get('newUser') === 'true';
-  const next = searchParams.get('next') || redirectTo;
+  const next = sanitizeRedirectPath(searchParams.get('next'), redirectTo);
 
   const supabase = await createClient();
 

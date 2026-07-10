@@ -1,4 +1,5 @@
-// Using direct fetch for storage operations due to Supabase client issues
+import { createClient } from '@/lib/supabase/client';
+import { getStorageObjectPath } from '@/lib/supabase/storageUrls';
 
 const BUCKET_NAME = "project-pdfs";
 
@@ -6,7 +7,7 @@ const BUCKET_NAME = "project-pdfs";
  * Upload a PDF file to Supabase Storage
  * @param projectId - The project ID to associate the PDF with
  * @param file - The PDF file to upload
- * @returns The public URL of the uploaded file
+ * @returns A stable storage reference. Access still requires an authenticated download or signed URL.
  */
 export async function uploadProjectPdf(
   projectId: string,
@@ -18,30 +19,14 @@ export async function uploadProjectPdf(
     const sanitizedName = file.name.replace(/[^a-zA-Z0-9.-]/g, "_");
     const filePath = `${projectId}/${timestamp}_${sanitizedName}`;
 
-    // Upload the file using direct fetch to Supabase Storage API
-    const response = await fetch(
-      `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/${BUCKET_NAME}/${filePath}`,
-      {
-        method: 'POST',
-        headers: {
-          'apikey': process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-          'Authorization': `Bearer ${process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY}`,
-          'Content-Type': file.type,
-          'Cache-Control': '3600',
-          'x-upsert': 'false'
-        },
-        body: file
-      }
-    );
+    const supabase = createClient();
+    const { error: uploadError } = await supabase.storage
+      .from(BUCKET_NAME)
+      .upload(filePath, file, { cacheControl: '3600', upsert: false });
+    if (uploadError) return { url: null, error: `Upload failed: ${uploadError.message}` };
 
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error("Error uploading PDF:", errorText);
-      return { url: null, error: `Upload failed: ${response.statusText}` };
-    }
-
-    // Construct the public URL
-    const publicUrl = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/${BUCKET_NAME}/${filePath}`;
+    // Keep a stable reference even though the bucket itself is private.
+    const { data: { publicUrl } } = supabase.storage.from(BUCKET_NAME).getPublicUrl(filePath);
 
     return { url: publicUrl };
   } catch (error) {
@@ -59,18 +44,13 @@ export async function downloadProjectPdf(
   pdfUrl: string
 ): Promise<{ blob: Blob | null; error?: string }> {
   try {
-    // Validate URL - must be a full URL, not a relative path
-    if (!pdfUrl || (!pdfUrl.startsWith('http://') && !pdfUrl.startsWith('https://'))) {
-      console.warn('Invalid PDF URL (not a full URL):', pdfUrl);
-      return { blob: null, error: 'Invalid PDF URL - not a full URL' };
-    }
+    const objectPath = getStorageObjectPath(pdfUrl, BUCKET_NAME);
+    if (!objectPath) return { blob: null, error: 'Invalid PDF storage reference' };
 
-    const response = await fetch(pdfUrl);
-    if (!response.ok) {
-      return { blob: null, error: `Failed to fetch PDF: ${response.statusText}` };
-    }
-    const blob = await response.blob();
-    return { blob };
+    const supabase = createClient();
+    const { data, error } = await supabase.storage.from(BUCKET_NAME).download(objectPath);
+    if (error) return { blob: null, error: `Failed to fetch PDF: ${error.message}` };
+    return { blob: data };
   } catch (error) {
     console.error("Error downloading PDF:", error);
     return { blob: null, error: String(error) };
@@ -85,50 +65,20 @@ export async function deleteProjectPdfs(
   projectId: string
 ): Promise<{ success: boolean; error?: string }> {
   try {
-    // List all files in the project folder
-    const listResponse = await fetch(
-      `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/list/${BUCKET_NAME}`,
-      {
-        method: 'POST',
-        headers: {
-          'apikey': process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-          'Authorization': `Bearer ${process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({ prefix: projectId })
-      }
-    );
-
-    if (!listResponse.ok) {
-      const errorText = await listResponse.text();
-      return { success: false, error: `List failed: ${errorText}` };
-    }
-
-    const files = await listResponse.json();
+    const supabase = createClient();
+    const { data: files, error: listError } = await supabase.storage
+      .from(BUCKET_NAME)
+      .list(projectId);
+    if (listError) return { success: false, error: `List failed: ${listError.message}` };
 
     if (!files || files.length === 0) {
       return { success: true }; // No files to delete
     }
 
     // Delete all files
-    const filePaths = files.map((f: { name: string }) => `${projectId}/${f.name}`);
-    const deleteResponse = await fetch(
-      `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/${BUCKET_NAME}`,
-      {
-        method: 'DELETE',
-        headers: {
-          'apikey': process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-          'Authorization': `Bearer ${process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({ prefixes: filePaths })
-      }
-    );
-
-    if (!deleteResponse.ok) {
-      const errorText = await deleteResponse.text();
-      return { success: false, error: `Delete failed: ${errorText}` };
-    }
+    const filePaths = files.map((file) => `${projectId}/${file.name}`);
+    const { error: deleteError } = await supabase.storage.from(BUCKET_NAME).remove(filePaths);
+    if (deleteError) return { success: false, error: `Delete failed: ${deleteError.message}` };
 
     return { success: true };
   } catch (error) {

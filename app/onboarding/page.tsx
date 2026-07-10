@@ -44,7 +44,11 @@ export default function OnboardingPage() {
       const slug = companyName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
       const { data: orgData, error: orgError } = await (supabase as any)
         .from('organizations')
-        .insert({ name: companyName, slug: slug + '-' + Date.now().toString(36) })
+        .insert({
+          name: companyName,
+          slug: slug + '-' + Date.now().toString(36),
+          created_by: user.id,
+        })
         .select()
         .single();
 

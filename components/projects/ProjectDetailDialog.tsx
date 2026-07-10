@@ -34,8 +34,8 @@ interface Project {
   status: string;
   created_at: string;
   updated_at?: string;
-  hover_pdf_url?: string;
-  excel_url?: string;
+  hover_pdf_url: string | null;
+  excel_url: string | null;
 }
 
 interface ProjectConfiguration {
@@ -73,6 +73,8 @@ export function ProjectDetailDialog({
       return;
     }
 
+    const currentProjectId = projectId;
+
     async function fetchProjectDetails() {
       try {
         setLoading(true);
@@ -82,7 +84,7 @@ export function ProjectDetailDialog({
         const { data: projectData, error: projectError } = await supabase
           .from("projects")
           .select("*")
-          .eq("id", projectId)
+          .eq("id", currentProjectId)
           .single();
 
         if (projectError) throw projectError;
@@ -91,7 +93,7 @@ export function ProjectDetailDialog({
         const { data: configData, error: configError } = await supabase
           .from("project_configurations")
           .select("*")
-          .eq("project_id", projectId);
+          .eq("project_id", currentProjectId);
 
         if (configError) throw configError;
 
@@ -290,7 +292,7 @@ export function ProjectDetailDialog({
                         asChild
                       >
                         <a
-                          href={project.hover_pdf_url}
+                          href={`/api/projects/${project.id}/pdf`}
                           target="_blank"
                           rel="noopener noreferrer"
                         >

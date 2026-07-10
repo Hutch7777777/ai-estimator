@@ -1147,7 +1147,6 @@ export function PlanIntelligence({ takeoffId, jobId: propJobId, projectId }: Pla
 
     try {
       const allCallouts: MaterialCallout[] = [];
-      let totalTokens = 0;
       let totalAnnotations = 0;
       let totalMaterialSpecs = 0;
 
@@ -1207,8 +1206,6 @@ export function PlanIntelligence({ takeoffId, jobId: propJobId, projectId }: Pla
       }, {} as Record<string, number>);
 
       console.log(`[PlanIntelligence] Callouts by trade:`, byTrade);
-      console.log(`[PlanIntelligence] Total tokens used: ${totalTokens}`);
-
       // Log enhanced data summary
       const withManufacturer = deduplicated.filter(c => c.manufacturer).length;
       const withDimensions = deduplicated.filter(c => c.dimensions?.exposure_inches || c.dimensions?.thickness_inches).length;

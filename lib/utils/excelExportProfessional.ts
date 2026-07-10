@@ -35,19 +35,19 @@ interface LineItem {
   id: string;
   section_id: string;
   item_number?: number;
-  item_type?: 'material' | 'labor' | 'overhead';  // NEW: Item type field
+  item_type?: 'material' | 'labor' | 'overhead' | 'paint' | null;
   description: string;
   quantity: number;
   unit: string;
   material_unit_cost: number;
   labor_unit_cost: number;
   equipment_unit_cost: number;
-  sku?: string;
-  notes?: string;
+  sku?: string | null;
+  notes?: string | null;
   calculation_source?: string;
-  formula_used?: string;
-  presentation_group?: string;
-  category?: string;
+  formula_used?: string | null;
+  presentation_group?: string | null;
+  category?: string | null;
 }
 
 interface Section {

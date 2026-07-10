@@ -23,24 +23,39 @@ export async function updateSession(request: NextRequest) {
     }
   );
 
-  // Use getSession() instead of getUser() - validates JWT locally without network call
-  const { data: { session }, error } = await supabase.auth.getSession();
+  // Validate the token with Supabase Auth. Server-side authorization must not
+  // trust the unverified session payload stored in cookies.
+  const { data: { user }, error } = await supabase.auth.getUser();
 
-  if (error) {
+  if (error && error.name !== 'AuthSessionMissingError') {
     console.error('Middleware auth error:', error.message);
   }
 
-  const publicRoutes = ['/login', '/signup', '/auth/callback', '/auth/confirm', '/onboarding', '/api'];
-  const isPublicRoute = publicRoutes.some(route => request.nextUrl.pathname.startsWith(route));
+  const pathname = request.nextUrl.pathname;
+  const publicRoutes = new Set(['/', '/login', '/signup', '/terms', '/privacy']);
+  const isPublicRoute =
+    publicRoutes.has(pathname) ||
+    pathname.startsWith('/auth/callback') ||
+    pathname.startsWith('/auth/confirm');
 
-  if (!session && !isPublicRoute) {
+  if (!user && pathname.startsWith('/api/')) {
+    return NextResponse.json(
+      { success: false, error: 'Authentication required' },
+      {
+        status: 401,
+        headers: { 'Cache-Control': 'no-store' },
+      }
+    );
+  }
+
+  if (!user && !isPublicRoute) {
     const url = request.nextUrl.clone();
     url.pathname = '/login';
     url.searchParams.set('redirectTo', request.nextUrl.pathname);
     return NextResponse.redirect(url);
   }
 
-  if (session && (request.nextUrl.pathname === '/login' || request.nextUrl.pathname === '/signup')) {
+  if (user && (pathname === '/login' || pathname === '/signup')) {
     const url = request.nextUrl.clone();
     url.pathname = '/project';
     return NextResponse.redirect(url);

@@ -1,6 +1,6 @@
 'use client';
 
-import React, { memo, useState, useRef, useCallback } from 'react';
+import React, { memo, useState, useCallback } from 'react';
 import { MousePointer2, Pentagon, Hand, Ruler, Minus, MapPin, ChevronRight, Download, Loader2, Scissors, ScanSearch, Wand2, Settings } from 'lucide-react';
 import type { ToolMode, DetectionClass } from '@/lib/types/extraction';
 import { DETECTION_CLASS_COLORS, getClassDisplayLabel } from '@/lib/types/extraction';
@@ -95,9 +95,6 @@ const MarkupToolbar = memo(function MarkupToolbar({
 }: MarkupToolbarProps) {
   // Track which tool's class selector is open
   const [openSelector, setOpenSelector] = useState<'create' | 'line' | 'point' | null>(null);
-  // Refs for positioning the popover
-  const buttonRefs = useRef<Map<string, HTMLButtonElement>>(new Map());
-
   const getSelectedClass = useCallback(
     (toolId: ToolMode): DetectionClass => {
       switch (toolId) {
@@ -182,9 +179,7 @@ const MarkupToolbar = memo(function MarkupToolbar({
               <Tooltip>
                 <TooltipTrigger asChild>
                   <button
-                    ref={(el) => {
-                      if (el) buttonRefs.current.set(tool.id as string, el);
-                    }}
+                    id={`markup-tool-${tool.id}`}
                     type="button"
                     onClick={() => handleToolClick(tool)}
                     disabled={isToolDisabled}
@@ -227,7 +222,7 @@ const MarkupToolbar = memo(function MarkupToolbar({
                   onSelectClass={handleClassSelect}
                   isOpen={openSelector === tool.id}
                   onClose={handleCloseSelector}
-                  anchorEl={buttonRefs.current.get(tool.id) || null}
+                  anchorId={`markup-tool-${tool.id}`}
                 />
               )}
             </div>

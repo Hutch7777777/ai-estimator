@@ -1,5 +1,5 @@
 // Extraction API client for Phase 4 enhanced data
-// Connects to extraction-api-production.up.railway.app
+// Authenticated same-origin client for the Railway extraction service.
 
 import type { WallHeightsData, Phase4Data } from '@/lib/types/extraction';
 
@@ -50,9 +50,7 @@ export interface SidingPolygonResponse {
   };
 }
 
-const EXTRACTION_API_BASE =
-  process.env.NEXT_PUBLIC_EXTRACTION_API_URL ||
-  'https://extraction-api-production.up.railway.app';
+const EXTRACTION_API_BASE = '/api/extraction';
 
 /**
  * Get wall heights data for a job (OCR-extracted or estimated)

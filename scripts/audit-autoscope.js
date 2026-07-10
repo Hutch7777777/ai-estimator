@@ -1,35 +1,12 @@
 #!/usr/bin/env node
+/* eslint-disable @typescript-eslint/no-require-imports -- standalone Node CommonJS audit script */
 /**
  * Auto-Scope Rules Audit Script
  *
  * Run with: node scripts/audit-autoscope.js
  */
 
-// Read credentials from the environment (matches .env.local) instead of
-// hardcoding them into a committed file.
-const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL;
-const SUPABASE_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY;
-
-if (!SUPABASE_URL || !SUPABASE_KEY) {
-  console.error(
-    'Missing Supabase credentials. Run with:\n' +
-    '  NEXT_PUBLIC_SUPABASE_URL=... NEXT_PUBLIC_SUPABASE_ANON_KEY=... node scripts/audit-autoscope.js\n' +
-    'or: set -a; source .env.local; set +a; node scripts/audit-autoscope.js'
-  );
-  process.exit(1);
-}
-
-async function fetchTable(table, params = {}) {
-  const searchParams = new URLSearchParams(params);
-  const url = `${SUPABASE_URL}/rest/v1/${table}?${searchParams.toString()}`;
-  const response = await fetch(url, {
-    headers: {
-      'apikey': SUPABASE_KEY,
-      'Authorization': `Bearer ${SUPABASE_KEY}`,
-    },
-  });
-  return response.json();
-}
+const { fetchTable } = require('./lib/supabase-audit-client');
 
 async function main() {
   console.log('🔍 Auto-Scope Rules Audit\n');
@@ -114,21 +91,24 @@ async function main() {
       });
     }
 
-    // Also check for category alignment
+    // Rule material_category is a semantic output/behavior label, not a
+    // pricing foreign key. Pricing is resolved by SKU, while assignment
+    // triggers use trigger_condition.material_category. Keep this comparison
+    // informational so it is not mistaken for a data-integrity failure.
     console.log('\n' + '='.repeat(80));
-    console.log('CATEGORY ALIGNMENT CHECK');
+    console.log('SEMANTIC CATEGORY COMPARISON (INFORMATIONAL)');
     console.log('='.repeat(80));
 
     const pricingCategories = new Set(pricingItems.map(p => p.category));
 
-    console.log('\n⚠️  AUTO-SCOPE CATEGORIES NOT FOUND IN pricing_items:');
+    console.log('\nRule output categories not used as pricing categories:');
     const missingCategories = categories.filter(c => !pricingCategories.has(c));
     if (missingCategories.length === 0) {
-      console.log('   ✅ All auto-scope categories exist in pricing_items');
+      console.log('   None');
     } else {
       missingCategories.forEach(c => {
         const ruleNames = rules.filter(r => r.material_category === c).map(r => r.rule_name);
-        console.log(`   ❌ ${c} (used by rules: ${ruleNames.join(', ')})`);
+        console.log(`   ℹ️  ${c} (used by rules: ${ruleNames.join(', ')})`);
       });
     }
   }

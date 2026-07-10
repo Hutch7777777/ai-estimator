@@ -5,6 +5,9 @@
  * These types ensure type safety when working with database queries.
  */
 
+import type { JobStatus } from '@/lib/types/extractionJob';
+export type { JobStatus } from '@/lib/types/extractionJob';
+
 // ============================================================================
 // ENUMS
 // ============================================================================
@@ -20,6 +23,55 @@ export type TakeoffStatus = 'draft' | 'in_progress' | 'review' | 'approved' | 's
 export type CalculationSource = 'auto_scope' | 'manual' | 'hover_pdf' | 'imported';
 
 export type Unit = 'EA' | 'PC' | 'SQ' | 'LF' | 'SF' | 'RL' | 'BX' | 'BDL' | 'GAL';
+
+export type UserProfileRow = {
+  id: string;
+  email: string;
+  full_name: string | null;
+  avatar_url: string | null;
+  phone: string | null;
+}
+
+export type OrganizationRow = {
+  id: string;
+  name: string;
+  slug: string;
+  logo_url: string | null;
+  settings: Record<string, unknown>;
+  subscription_tier: 'free' | 'pro' | 'enterprise';
+  created_by: string | null;
+  created_at: string;
+}
+
+export type OrganizationMembershipRow = {
+  id: string;
+  user_id: string;
+  organization_id: string;
+  role: 'owner' | 'admin' | 'estimator' | 'viewer';
+  joined_at: string;
+}
+
+export type PricingItemRow = {
+  id: string;
+  sku: string;
+  product_name: string;
+  category: string;
+  trade: Trade | null;
+  manufacturer: string | null;
+  material_cost: number | null;
+  unit: string;
+}
+
+export type SupportRequestRow = {
+  id: string;
+  user_id: string;
+  organization_id: string;
+  subject: string;
+  message: string;
+  status: 'open' | 'in_progress' | 'resolved' | 'closed';
+  created_at: string;
+  updated_at: string;
+}
 
 // Extraction system enums
 export type DetectionStatus = 'auto' | 'verified' | 'edited' | 'deleted';
@@ -39,7 +91,9 @@ export type DetectionClass =
 export type PageType =
   | 'elevation'
   | 'floor_plan'
+  | 'roof_plan'
   | 'schedule'
+  | 'notes'
   | 'cover'
   | 'detail'
   | 'section'
@@ -47,13 +101,6 @@ export type PageType =
   | 'other';
 
 export type ElevationName = 'front' | 'rear' | 'left' | 'right';
-
-export type JobStatus =
-  | 'converting'
-  | 'classifying'
-  | 'processing'
-  | 'complete'
-  | 'failed';
 
 // ============================================================================
 // TABLE INTERFACES
@@ -64,7 +111,7 @@ export type JobStatus =
  *
  * Stores main project information and tracks processing status.
  */
-export interface Project {
+export type Project = {
   id: string; // UUID
   organization_id: string; // UUID - owning organization (RLS scope)
   name: string; // Project name
@@ -89,7 +136,7 @@ export interface Project {
  * CRITICAL: This table defines ALL form fields dynamically.
  * NEVER hardcode field definitions - always query this table.
  */
-export interface TradeConfiguration {
+export type TradeConfiguration = {
   id: string; // UUID
   trade: Trade;
   config_section: string; // e.g., "General", "Materials", "Colors"
@@ -149,7 +196,7 @@ export interface ShowIfCondition {
  * Contains 76+ products for dropdowns.
  * IMPORTANT: Must be grouped by category in UI.
  */
-export interface ProductCatalog {
+export type ProductCatalog = {
   id: string; // UUID
   trade: Trade;
   manufacturer: string; // e.g., "James Hardie", "CertainTeed"
@@ -192,7 +239,7 @@ export interface ProductCatalog {
  * Stores user-submitted form data as JSONB.
  * Each trade gets its own configuration record.
  */
-export interface ProjectConfiguration {
+export type ProjectConfiguration = {
   id: string; // UUID
   project_id: string; // UUID - Foreign key to projects table
   trade: Trade;
@@ -207,7 +254,7 @@ export interface ProjectConfiguration {
  * Main takeoff/estimate records, one per project.
  * Created when project status changes to 'extracted'.
  */
-export interface Takeoff {
+export type Takeoff = {
   id: string; // UUID
   project_id: string; // UUID - Foreign key to projects table
   status: TakeoffStatus;
@@ -236,7 +283,7 @@ export interface Takeoff {
  * Sections organize line items by trade (siding, roofing, windows, gutters).
  * One section per selected trade in the project.
  */
-export interface TakeoffSection {
+export type TakeoffSection = {
   id: string; // UUID
   takeoff_id: string; // UUID - Foreign key to takeoffs table
   name: Trade; // Internal name: 'siding', 'roofing', 'windows', 'gutters'
@@ -263,7 +310,7 @@ export interface TakeoffSection {
  * Individual line items with detailed material/labor/equipment cost breakdown.
  * Implements Mike Skjei pricing methodology with transparent cost breakdowns.
  */
-export interface TakeoffLineItem {
+export type TakeoffLineItem = {
   id: string; // UUID
   takeoff_id: string; // UUID - Foreign key to takeoffs table
   section_id: string; // UUID - Foreign key to takeoff_sections table
@@ -272,6 +319,8 @@ export interface TakeoffLineItem {
   item_number: number;
   description: string;
   sku: string | null;
+  category?: string | null;
+  size_display?: string | null;
 
   // Item classification — set by the calculation pipeline; older rows may
   // be null (consumers fall back to cost-based detection)
@@ -331,9 +380,10 @@ export interface LineItemWithState extends TakeoffLineItem {
  *
  * Tracks PDF extraction jobs with page/detection processing status.
  */
-export interface ExtractionJob {
+export type ExtractionJob = {
   id: string; // UUID
   project_id: string | null; // UUID - Optional link to projects table
+  organization_id: string | null;
   project_name: string | null;
   status: JobStatus;
   source_pdf_url: string | null;
@@ -350,7 +400,7 @@ export interface ExtractionJob {
  *
  * Individual pages from extracted PDFs with classification info.
  */
-export interface ExtractionPage {
+export type ExtractionPage = {
   id: string; // UUID
   job_id: string; // UUID - Foreign key to extraction_jobs
   page_number: number;
@@ -368,6 +418,58 @@ export interface ExtractionPage {
   original_height: number | null;
   // Annotated image with Bluebeam markups visible (for "Show Bluebeam Markups" toggle)
   annotated_image_url?: string | null;
+  ocr_data?: Record<string, unknown> | null;
+  ocr_status?: string | null;
+  ocr_processed_at?: string | null;
+}
+
+export type ExtractionDetectionDraftRow = {
+  id: string;
+  job_id: string;
+  page_id: string;
+  source_detection_id: string | null;
+  class: string;
+  pixel_x: number;
+  pixel_y: number;
+  pixel_width: number;
+  pixel_height: number;
+  polygon_points: Array<{ x: number; y: number }> | null;
+  area_sf: number | null;
+  perimeter_lf: number | null;
+  confidence: number | null;
+  detection_index: number | null;
+  matched_tag: string | null;
+  is_triangle: boolean | null;
+  is_deleted: boolean;
+  is_user_created: boolean;
+  status: string | null;
+  assigned_material_id: string | null;
+  assigned_material_name: string | null;
+  material_notes: string | null;
+  material_cost_override: number | null;
+  color_override: string | null;
+  markup_type: string | null;
+  marker_label: string | null;
+  bluebeam_content: string | null;
+  item_count: number | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export type ExtractionDetectionValidatedRow = {
+  id: string;
+  job_id: string;
+  page_id: string;
+  class: string;
+  pixel_x: number;
+  pixel_y: number;
+  pixel_width: number;
+  pixel_height: number;
+  area_sf: number | null;
+  perimeter_lf: number | null;
+  confidence: number | null;
+  detection_index: number | null;
+  created_at: string;
 }
 
 /**
@@ -376,7 +478,7 @@ export interface ExtractionPage {
  * ML-detected bounding boxes with real-world measurements.
  * This is typically a view that joins detection data with calculated dimensions.
  */
-export interface ExtractionDetectionDetail {
+export type ExtractionDetectionDetail = {
   id: string; // UUID
   job_id: string; // UUID
   page_id: string; // UUID
@@ -420,7 +522,7 @@ export interface ExtractionDetectionDetail {
  *
  * Aggregated calculations per elevation (facade areas, opening areas, etc.)
  */
-export interface ExtractionElevationCalc {
+export type ExtractionElevationCalc = {
   id: string; // UUID
   job_id: string; // UUID
   page_id: string; // UUID
@@ -470,7 +572,7 @@ export interface ExtractionElevationCalc {
  *
  * Aggregated totals across all elevations for a job.
  */
-export interface ExtractionJobTotal {
+export type ExtractionJobTotal = {
   id: string; // UUID
   job_id: string; // UUID
   elevation_count: number;
@@ -523,68 +625,128 @@ export interface ExtractionJobTotal {
 export interface Database {
   public: {
     Tables: {
+      user_profiles: {
+        Row: UserProfileRow;
+        Insert: Pick<UserProfileRow, 'id' | 'email'> & Partial<Omit<UserProfileRow, 'id' | 'email'>>;
+        Update: Partial<Omit<UserProfileRow, 'id'>>;
+        Relationships: [];
+      };
+      organizations: {
+        Row: OrganizationRow;
+        Insert: Pick<OrganizationRow, 'name' | 'slug' | 'created_by'> & Partial<Omit<OrganizationRow, 'id' | 'name' | 'slug' | 'created_by' | 'created_at'>>;
+        Update: Partial<Omit<OrganizationRow, 'id' | 'created_at'>>;
+        Relationships: [];
+      };
+      organization_memberships: {
+        Row: OrganizationMembershipRow;
+        Insert: Pick<OrganizationMembershipRow, 'user_id' | 'organization_id' | 'role'> & Partial<Pick<OrganizationMembershipRow, 'id' | 'joined_at'>>;
+        Update: Partial<Pick<OrganizationMembershipRow, 'role'>>;
+        Relationships: [];
+      };
+      pricing_items: {
+        Row: PricingItemRow;
+        Insert: Omit<PricingItemRow, 'id'> & { id?: string };
+        Update: Partial<Omit<PricingItemRow, 'id'>>;
+        Relationships: [];
+      };
+      support_requests: {
+        Row: SupportRequestRow;
+        Insert: Pick<SupportRequestRow, 'user_id' | 'organization_id' | 'subject' | 'message'> &
+          Partial<Pick<SupportRequestRow, 'id' | 'status' | 'created_at' | 'updated_at'>>;
+        Update: Partial<Pick<SupportRequestRow, 'subject' | 'message' | 'status' | 'updated_at'>>;
+        Relationships: [];
+      };
       projects: {
         Row: Project;
-        Insert: Omit<Project, 'id' | 'created_at' | 'updated_at'>;
+        Insert: Pick<Project, 'organization_id' | 'name' | 'client_name' | 'address' | 'selected_trades'> &
+          Partial<Omit<Project, 'organization_id' | 'name' | 'client_name' | 'address' | 'selected_trades' | 'created_at' | 'updated_at'>>;
         Update: Partial<Omit<Project, 'id' | 'created_at' | 'updated_at'>>;
+        Relationships: [];
       };
       trade_configurations: {
         Row: TradeConfiguration;
         Insert: Omit<TradeConfiguration, 'id'>;
         Update: Partial<Omit<TradeConfiguration, 'id'>>;
+        Relationships: [];
       };
       product_catalog: {
         Row: ProductCatalog;
         Insert: Omit<ProductCatalog, 'id'>;
         Update: Partial<Omit<ProductCatalog, 'id'>>;
+        Relationships: [];
       };
       project_configurations: {
         Row: ProjectConfiguration;
         Insert: Omit<ProjectConfiguration, 'id' | 'created_at' | 'updated_at'>;
         Update: Partial<Omit<ProjectConfiguration, 'id' | 'created_at' | 'updated_at'>>;
+        Relationships: [];
       };
       takeoffs: {
         Row: Takeoff;
         Insert: Omit<Takeoff, 'id' | 'created_at' | 'updated_at' | 'total_material' | 'total_labor' | 'total_equipment' | 'grand_total'>;
         Update: Partial<Omit<Takeoff, 'id' | 'created_at' | 'updated_at' | 'total_material' | 'total_labor' | 'total_equipment' | 'grand_total'>>;
+        Relationships: [];
       };
       takeoff_sections: {
         Row: TakeoffSection;
         Insert: Omit<TakeoffSection, 'id' | 'created_at' | 'updated_at' | 'total_material' | 'total_labor' | 'total_equipment' | 'section_total'>;
         Update: Partial<Omit<TakeoffSection, 'id' | 'created_at' | 'updated_at' | 'total_material' | 'total_labor' | 'total_equipment' | 'section_total'>>;
+        Relationships: [];
       };
       takeoff_line_items: {
         Row: TakeoffLineItem;
         Insert: Omit<TakeoffLineItem, 'id' | 'created_at' | 'updated_at' | 'material_extended' | 'labor_extended' | 'equipment_extended' | 'line_total'>;
         Update: Partial<Omit<TakeoffLineItem, 'id' | 'created_at' | 'updated_at' | 'material_extended' | 'labor_extended' | 'equipment_extended' | 'line_total'>>;
+        Relationships: [];
       };
       // Extraction system tables
       extraction_jobs: {
         Row: ExtractionJob;
         Insert: Omit<ExtractionJob, 'id' | 'created_at'>;
         Update: Partial<Omit<ExtractionJob, 'id' | 'created_at'>>;
+        Relationships: [];
       };
       extraction_pages: {
         Row: ExtractionPage;
         Insert: Omit<ExtractionPage, 'id'>;
         Update: Partial<Omit<ExtractionPage, 'id'>>;
+        Relationships: [];
+      };
+      extraction_detections_draft: {
+        Row: ExtractionDetectionDraftRow;
+        Insert: Omit<ExtractionDetectionDraftRow, 'id' | 'created_at' | 'updated_at'> & Partial<Pick<ExtractionDetectionDraftRow, 'id' | 'created_at' | 'updated_at'>>;
+        Update: Partial<Omit<ExtractionDetectionDraftRow, 'id' | 'created_at'>>;
+        Relationships: [];
+      };
+      extraction_detections_validated: {
+        Row: ExtractionDetectionValidatedRow;
+        Insert: Omit<ExtractionDetectionValidatedRow, 'id' | 'created_at'> & Partial<Pick<ExtractionDetectionValidatedRow, 'id' | 'created_at'>>;
+        Update: Partial<Omit<ExtractionDetectionValidatedRow, 'id' | 'created_at'>>;
+        Relationships: [];
       };
       extraction_detection_details: {
         Row: ExtractionDetectionDetail;
         Insert: Omit<ExtractionDetectionDetail, 'id' | 'created_at'>;
         Update: Partial<Omit<ExtractionDetectionDetail, 'id' | 'created_at'>>;
+        Relationships: [];
       };
       extraction_elevation_calcs: {
         Row: ExtractionElevationCalc;
         Insert: Omit<ExtractionElevationCalc, 'id'>;
         Update: Partial<Omit<ExtractionElevationCalc, 'id'>>;
+        Relationships: [];
       };
       extraction_job_totals: {
         Row: ExtractionJobTotal;
         Insert: Omit<ExtractionJobTotal, 'id'>;
         Update: Partial<Omit<ExtractionJobTotal, 'id'>>;
+        Relationships: [];
       };
     };
+    Views: { [_ in never]: never };
+    Functions: { [_ in never]: never };
+    Enums: { [_ in never]: never };
+    CompositeTypes: { [_ in never]: never };
   };
 }
 

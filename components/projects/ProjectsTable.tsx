@@ -30,6 +30,7 @@ import {
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { ProjectDetailDialog } from "@/components/projects/ProjectDetailDialog";
 import { ProjectCard } from "@/components/projects/ProjectCard";
+import { authenticatedSupabaseFetch } from "@/lib/supabase/authenticatedFetch";
 
 interface Project {
   id: string;
@@ -84,15 +85,8 @@ export function ProjectsTable() {
         setLoading(true);
         setError(null);
 
-        // Use direct fetch since Supabase JS client has issues
-        const response = await fetch(
-          `${process.env.NEXT_PUBLIC_SUPABASE_URL}/rest/v1/projects?select=*&organization_id=eq.${organization.id}&order=created_at.desc`,
-          {
-            headers: {
-              'apikey': process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-              'Authorization': `Bearer ${process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY}`
-            }
-          }
+        const response = await authenticatedSupabaseFetch(
+          `/rest/v1/projects?select=*&organization_id=eq.${organization.id}&order=created_at.desc`
         );
 
         if (!response.ok) {
@@ -194,15 +188,10 @@ export function ProjectsTable() {
     }
 
     try {
-      // Use direct fetch for delete
-      const response = await fetch(
-        `${process.env.NEXT_PUBLIC_SUPABASE_URL}/rest/v1/projects?id=eq.${projectId}`,
+      const response = await authenticatedSupabaseFetch(
+        `/rest/v1/projects?id=eq.${projectId}`,
         {
           method: 'DELETE',
-          headers: {
-            'apikey': process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-            'Authorization': `Bearer ${process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY}`
-          }
         }
       );
 

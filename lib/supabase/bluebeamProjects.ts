@@ -1,5 +1,4 @@
-// Using direct fetch instead of Supabase client due to client issues
-// (Supabase JS client queries build but never execute HTTP requests)
+import { authenticatedSupabaseFetch } from '@/lib/supabase/authenticatedFetch';
 
 export interface BluebeamProject {
   id: string;
@@ -30,16 +29,8 @@ export async function fetchProjects(organizationId?: string): Promise<{
   }
 
   try {
-    const url = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/rest/v1/bluebeam_projects?select=*&organization_id=eq.${organizationId}&order=updated_at.desc`;
-
-    const response = await fetch(
-      url,
-      {
-        headers: {
-          'apikey': process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-          'Authorization': `Bearer ${process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY}`
-        }
-      }
+    const response = await authenticatedSupabaseFetch(
+      `/rest/v1/bluebeam_projects?select=*&organization_id=eq.${organizationId}&order=updated_at.desc`
     );
 
     if (!response.ok) {
@@ -71,13 +62,11 @@ export async function createProject(
   }
 
   try {
-    const response = await fetch(
-      `${process.env.NEXT_PUBLIC_SUPABASE_URL}/rest/v1/bluebeam_projects`,
+    const response = await authenticatedSupabaseFetch(
+      '/rest/v1/bluebeam_projects',
       {
         method: 'POST',
         headers: {
-          'apikey': process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-          'Authorization': `Bearer ${process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY}`,
           'Content-Type': 'application/json',
           'Prefer': 'return=representation'
         },
@@ -116,13 +105,11 @@ export async function updateProject(
   >
 ): Promise<{ success: boolean; error?: string }> {
   try {
-    const response = await fetch(
-      `${process.env.NEXT_PUBLIC_SUPABASE_URL}/rest/v1/bluebeam_projects?id=eq.${projectId}`,
+    const response = await authenticatedSupabaseFetch(
+      `/rest/v1/bluebeam_projects?id=eq.${projectId}`,
       {
         method: 'PATCH',
         headers: {
-          'apikey': process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-          'Authorization': `Bearer ${process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY}`,
           'Content-Type': 'application/json'
         },
         body: JSON.stringify(updates)
@@ -146,12 +133,10 @@ export async function getProject(
   projectId: string
 ): Promise<{ data: BluebeamProject | null; error?: string }> {
   try {
-    const response = await fetch(
-      `${process.env.NEXT_PUBLIC_SUPABASE_URL}/rest/v1/bluebeam_projects?id=eq.${projectId}&select=*`,
+    const response = await authenticatedSupabaseFetch(
+      `/rest/v1/bluebeam_projects?id=eq.${projectId}&select=*`,
       {
         headers: {
-          'apikey': process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-          'Authorization': `Bearer ${process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY}`,
           'Accept': 'application/vnd.pgrst.object+json'
         }
       }
@@ -175,14 +160,10 @@ export async function deleteProject(
   projectId: string
 ): Promise<{ success: boolean; error?: string }> {
   try {
-    const response = await fetch(
-      `${process.env.NEXT_PUBLIC_SUPABASE_URL}/rest/v1/bluebeam_projects?id=eq.${projectId}`,
+    const response = await authenticatedSupabaseFetch(
+      `/rest/v1/bluebeam_projects?id=eq.${projectId}`,
       {
         method: 'DELETE',
-        headers: {
-          'apikey': process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-          'Authorization': `Bearer ${process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY}`
-        }
       }
     );
 

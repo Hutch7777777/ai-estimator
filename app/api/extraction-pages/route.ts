@@ -1,5 +1,6 @@
 import { createClient } from '@/lib/supabase/server';
 import { NextResponse } from 'next/server';
+import type { PageType } from '@/lib/types/database';
 
 // =============================================================================
 // Types
@@ -34,6 +35,19 @@ interface DetectionRecord {
   is_deleted?: boolean;
 }
 
+const PAGE_TYPES: ReadonlySet<PageType> = new Set([
+  'elevation',
+  'floor_plan',
+  'roof_plan',
+  'schedule',
+  'notes',
+  'cover',
+  'detail',
+  'section',
+  'site_plan',
+  'other',
+]);
+
 // =============================================================================
 // GET Handler - Fetch extraction pages for a project
 // =============================================================================
@@ -47,7 +61,10 @@ export async function GET(request: Request) {
     const { searchParams } = new URL(request.url);
     const projectId = searchParams.get('project_id');
     const jobIdParam = searchParams.get('job_id');
-    const pageType = searchParams.get('page_type') || 'elevation'; // Default to elevation for backwards compatibility
+    const requestedPageType = searchParams.get('page_type') || 'elevation';
+    const pageType: PageType = PAGE_TYPES.has(requestedPageType as PageType)
+      ? requestedPageType as PageType
+      : 'elevation';
     console.log('[API] Project ID:', projectId);
     console.log('[API] Job ID:', jobIdParam);
     console.log('[API] Page Type:', pageType);
@@ -251,7 +268,7 @@ export async function GET(request: Request) {
         console.log('[API] Returning DRAFT data - NOT querying validated or AI');
 
         // Normalize draft data to match DetectionRecord (use DB values with null fallback)
-        const normalizedDraftData = draftData.map((det: Record<string, unknown>) => ({
+        const normalizedDraftData = draftData.map((det) => ({
           ...det,
           area_sf: det.area_sf ?? null,
           perimeter_lf: det.perimeter_lf ?? null,

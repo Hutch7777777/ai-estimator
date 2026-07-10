@@ -6,6 +6,7 @@ import { Input } from '@/components/ui/input';
 import { ChevronDown, X, Search, Package, Loader2 } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import { cn } from '@/lib/utils';
+import type { Trade } from '@/lib/types/database';
 
 // =============================================================================
 // Types
@@ -32,7 +33,7 @@ interface ProductSelectorProps {
   category?: string | string[];
 
   /** Filter by trade */
-  trade?: string;
+  trade?: Trade;
 
   /** Currently selected SKU */
   value: string | null | undefined;
