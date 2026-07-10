@@ -1,22 +1,24 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
-import { createClient as createSupabaseClient } from '@supabase/supabase-js';
+import type { SupabaseClient } from '@supabase/supabase-js';
+import {
+  createExtractionServiceHeaders,
+  resolveRequestId,
+} from '@/lib/server/extractionRequestAuth';
+import { getAuthorizedJobOrganization } from '@/lib/server/extractionAuthorization';
+
+export const runtime = 'nodejs';
 
 // =============================================================================
 // Redetect Page API Route
 // Triggers re-detection via the external extraction API
 // =============================================================================
 
-const EXTRACTION_API_BASE =
+const EXTRACTION_API_BASE = (
+  process.env.EXTRACTION_API_URL ||
   process.env.NEXT_PUBLIC_EXTRACTION_API_URL ||
-  'https://extraction-api-production.up.railway.app';
-
-// Create untyped Supabase client for extraction_detections_draft operations
-// (This table is not in the generated types)
-const getUntypedSupabaseClient = () => createSupabaseClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-);
+  'https://extraction-api-production.up.railway.app'
+).replace(/\/$/, '');
 
 interface ExtractionPageRecord {
   id: string;
@@ -68,6 +70,13 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
     // Get page details from database
     const supabase = await createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) {
+      return NextResponse.json(
+        { success: false, error: 'Authentication required' },
+        { status: 401 }
+      );
+    }
 
     const { data: pageData, error: pageError } = await supabase
       .from('extraction_pages')
@@ -86,30 +95,48 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     const page = pageData as ExtractionPageRecord;
     const imageUrl = page.original_image_url || page.image_url;
 
+    const organizationId = await getAuthorizedJobOrganization(supabase, page.job_id);
+    if (!organizationId) {
+      return NextResponse.json(
+        { success: false, error: 'Page not found' },
+        { status: 404 }
+      );
+    }
+
     console.log('[redetect-page] Found page:', {
       id: page.id,
       job_id: page.job_id,
       page_number: page.page_number,
-      image_url: imageUrl.substring(0, 50) + '...',
     });
 
     // Call the extraction API to re-run detection
     console.log('[redetect-page] Calling extraction API...');
 
+    const extractionBody = JSON.stringify({
+      page_id: page.id,
+      job_id: page.job_id,
+      image_url: imageUrl,
+      min_confidence: min_confidence || 0.0,
+    });
+    const requestId = resolveRequestId(request.headers.get('x-request-id'));
+    const extractionHeaders = createExtractionServiceHeaders({
+      method: 'POST',
+      path: '/redetect',
+      body: extractionBody,
+      userId: user.id,
+      organizationId,
+      requestId,
+    });
+    extractionHeaders.set('Content-Type', 'application/json');
+
     const redetectResponse = await fetch(`${EXTRACTION_API_BASE}/redetect`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        page_id: page.id,
-        job_id: page.job_id,
-        image_url: imageUrl,
-        min_confidence: min_confidence || 0.0,
-      }),
+      headers: extractionHeaders,
+      body: extractionBody,
     });
 
     if (!redetectResponse.ok) {
-      const errorText = await redetectResponse.text();
-      console.error('[redetect-page] Extraction API error:', redetectResponse.status, errorText);
+      console.error('[redetect-page] Extraction API error:', redetectResponse.status);
 
       // If the endpoint doesn't exist yet, return a helpful message
       if (redetectResponse.status === 404) {
@@ -139,7 +166,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       console.log('[redetect-page] Saving', result.detections.length, 'detections to draft table...');
 
       // Use untyped client for extraction_detections_draft operations
-      const untypedSupabase = getUntypedSupabaseClient();
+      const untypedSupabase = supabase as unknown as SupabaseClient;
 
       // First, mark existing draft detections as deleted
       const { error: deleteError } = await untypedSupabase
@@ -153,6 +180,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
       // Insert new detections
       const detectionsToInsert = result.detections.map((det) => ({
+        job_id: page.job_id,
         page_id: page_id,
         class: det.class,
         confidence: det.confidence,
@@ -187,7 +215,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         detections: insertedData,
         detection_count: insertedData?.length || 0,
         message: `Re-detected ${insertedData?.length || 0} objects on page`,
-      });
+      }, { headers: { 'X-Request-Id': requestId } });
     }
 
     // Return the result from the extraction API
@@ -196,7 +224,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       page_id: page_id,
       detections: result.detections || [],
       detection_count: result.detection_count || 0,
-    });
+    }, { headers: { 'X-Request-Id': requestId } });
   } catch (error) {
     console.error('[redetect-page] Unexpected error:', error);
     return NextResponse.json(

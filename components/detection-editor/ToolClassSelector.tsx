@@ -23,8 +23,8 @@ interface ToolClassSelectorProps {
   isOpen: boolean;
   /** Callback to close the popover */
   onClose: () => void;
-  /** Position reference element (the button) */
-  anchorEl: HTMLElement | null;
+  /** DOM id of the button used to position the selector */
+  anchorId: string;
 }
 
 // =============================================================================
@@ -68,7 +68,7 @@ export default function ToolClassSelector({
   onSelectClass,
   isOpen,
   onClose,
-  anchorEl,
+  anchorId,
 }: ToolClassSelectorProps) {
   const popoverRef = useRef<HTMLDivElement>(null);
   const [position, setPosition] = useState({ top: 0, left: 0 });
@@ -79,6 +79,7 @@ export default function ToolClassSelector({
 
   // Calculate position relative to anchor element
   useEffect(() => {
+    const anchorEl = document.getElementById(anchorId);
     if (isOpen && anchorEl) {
       const rect = anchorEl.getBoundingClientRect();
       // Position to the right of the button
@@ -87,11 +88,13 @@ export default function ToolClassSelector({
         left: rect.right + 8,
       });
     }
-  }, [isOpen, anchorEl]);
+  }, [isOpen, anchorId]);
 
   // Close on outside click
   useEffect(() => {
     if (!isOpen) return;
+
+    const anchorEl = document.getElementById(anchorId);
 
     const handleClickOutside = (e: MouseEvent) => {
       if (
@@ -113,7 +116,7 @@ export default function ToolClassSelector({
       clearTimeout(timer);
       document.removeEventListener('mousedown', handleClickOutside);
     };
-  }, [isOpen, onClose, anchorEl]);
+  }, [isOpen, onClose, anchorId]);
 
   // Close on escape
   useEffect(() => {

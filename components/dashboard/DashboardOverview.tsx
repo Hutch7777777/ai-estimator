@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 import { useOrganization } from "@/lib/hooks/useOrganization";
 import Link from "next/link";
+import { authenticatedSupabaseFetch } from "@/lib/supabase/authenticatedFetch";
 
 interface ProjectStats {
   total: number;
@@ -63,18 +64,8 @@ export function DashboardOverview() {
     if (!organization) return;
 
     try {
-      const url = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/rest/v1/projects?select=*&organization_id=eq.${organization.id}&order=created_at.desc`;
-      console.log('[DashboardOverview] Fetching projects with URL:', url);
-
-      // Use direct fetch since Supabase JS client has issues
-      const response = await fetch(
-        url,
-        {
-          headers: {
-            'apikey': process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-            'Authorization': `Bearer ${process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY}`
-          }
-        }
+      const response = await authenticatedSupabaseFetch(
+        `/rest/v1/projects?select=*&organization_id=eq.${organization.id}&order=created_at.desc`
       );
 
       if (!response.ok) {

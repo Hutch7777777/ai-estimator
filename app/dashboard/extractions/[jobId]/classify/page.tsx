@@ -30,12 +30,13 @@ import {
 } from 'lucide-react';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import type { ExtractionJob, ExtractionPage, PageType } from '@/lib/types/extraction';
+import { authenticatedSupabaseFetch } from '@/lib/supabase/authenticatedFetch';
 
 // =============================================================================
 // Constants
 // =============================================================================
 
-const EXTRACTION_API_URL = process.env.NEXT_PUBLIC_EXTRACTION_API_URL || 'https://extraction-api-production.up.railway.app';
+const EXTRACTION_API_URL = '/api/extraction';
 
 // Polling interval for post-confirm status checking
 const POLLING_INTERVAL = 3000;
@@ -122,7 +123,9 @@ const PAGE_TYPES: PageType[] = [
   'detail',
   'schedule',
   'floor_plan',
+  'roof_plan',
   'elevation',
+  'notes',
   'section',
   'site_plan',
   'other',
@@ -191,12 +194,10 @@ export default function ClassificationReviewPage() {
       setError(null);
 
       // Fetch job info
-      const jobResponse = await fetch(
-        `${process.env.NEXT_PUBLIC_SUPABASE_URL}/rest/v1/extraction_jobs?id=eq.${jobId}&select=*`,
+      const jobResponse = await authenticatedSupabaseFetch(
+        `/rest/v1/extraction_jobs?id=eq.${jobId}&select=*`,
         {
           headers: {
-            'apikey': process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-            'Authorization': `Bearer ${process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY}`,
             'Accept': 'application/vnd.pgrst.object+json',
           },
         }
@@ -210,14 +211,8 @@ export default function ClassificationReviewPage() {
       setJob(jobData);
 
       // Fetch pages
-      const pagesResponse = await fetch(
-        `${process.env.NEXT_PUBLIC_SUPABASE_URL}/rest/v1/extraction_pages?job_id=eq.${jobId}&select=*&order=page_number.asc`,
-        {
-          headers: {
-            'apikey': process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-            'Authorization': `Bearer ${process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY}`,
-          },
-        }
+      const pagesResponse = await authenticatedSupabaseFetch(
+        `/rest/v1/extraction_pages?job_id=eq.${jobId}&select=*&order=page_number.asc`
       );
 
       if (!pagesResponse.ok) {
@@ -249,12 +244,10 @@ export default function ClassificationReviewPage() {
 
     const interval = setInterval(async () => {
       try {
-        const response = await fetch(
-          `${process.env.NEXT_PUBLIC_SUPABASE_URL}/rest/v1/extraction_jobs?id=eq.${jobId}&select=status,project_id`,
+        const response = await authenticatedSupabaseFetch(
+          `/rest/v1/extraction_jobs?id=eq.${jobId}&select=status,project_id`,
           {
             headers: {
-              'apikey': process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-              'Authorization': `Bearer ${process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY}`,
               'Accept': 'application/vnd.pgrst.object+json',
             },
           }
@@ -304,13 +297,11 @@ export default function ClassificationReviewPage() {
     );
 
     try {
-      const response = await fetch(
-        `${process.env.NEXT_PUBLIC_SUPABASE_URL}/rest/v1/extraction_pages?id=eq.${pageId}`,
+      const response = await authenticatedSupabaseFetch(
+        `/rest/v1/extraction_pages?id=eq.${pageId}`,
         {
           method: 'PATCH',
           headers: {
-            'apikey': process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-            'Authorization': `Bearer ${process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY}`,
             'Content-Type': 'application/json',
           },
           body: JSON.stringify({ page_type: newType }),

@@ -73,16 +73,15 @@ import SAMClassPicker from './SAMClassPicker';
 import BluebeamImportModal from './BluebeamImportModal';
 import { exportTakeoffToExcel, type TakeoffData } from '@/lib/utils/exportTakeoffExcel';
 import { useOrganization } from '@/lib/hooks/useOrganization';
-import { createClient } from '@supabase/supabase-js';
+import { createClient } from '@/lib/supabase/client';
+import { authenticatedSupabaseFetch } from '@/lib/supabase/authenticatedFetch';
+import type { SupabaseClient } from '@supabase/supabase-js';
 import EstimateSettingsPanel, { type TrimSystem, type EstimateConfig, type CalculatedMeasurements } from './EstimateSettingsPanel';
 import { DEFAULT_ESTIMATE_CONFIG } from './EstimateSettingsPanel/defaults';
 
 // Create untyped Supabase client for extraction_detections_draft operations
 // (This table is not in the generated types)
-const getSupabaseClient = () => createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-);
+const getSupabaseClient = () => createClient() as unknown as SupabaseClient;
 
 // =============================================================================
 // Types
@@ -523,26 +522,11 @@ export default function DetectionEditor({
       }
 
       try {
-        // Use direct fetch to bypass Supabase client type issues
-        const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-        const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-
-        if (!url || !key) {
-          throw new Error('Missing Supabase environment variables');
-        }
-
-        console.log('[DetectionEditor] Saving scale via direct fetch:', {
-          pageId: currentPageId,
-          pixelsPerFoot,
-        });
-
-        const response = await fetch(
-          `${url}/rest/v1/extraction_pages?id=eq.${currentPageId}`,
+        const response = await authenticatedSupabaseFetch(
+          `/rest/v1/extraction_pages?id=eq.${currentPageId}`,
           {
             method: 'PATCH',
             headers: {
-              'apikey': key,
-              'Authorization': `Bearer ${key}`,
               'Content-Type': 'application/json',
               'Prefer': 'return=representation',
             },
@@ -2019,7 +2003,7 @@ export default function DetectionEditor({
 
       try {
         // Call the backend API
-        const apiUrl = process.env.NEXT_PUBLIC_EXTRACTION_API_URL || 'http://localhost:5050';
+        const apiUrl = '/api/extraction';
         const response = await fetch(`${apiUrl}/api/pages/${pageId}/classify`, {
           method: 'PATCH',
           headers: {
@@ -4391,7 +4375,7 @@ export default function DetectionEditor({
     setIsExportingBluebeam(true);
 
     try {
-      const apiUrl = process.env.NEXT_PUBLIC_EXTRACTION_API_URL || 'https://extraction-api-production.up.railway.app';
+      const apiUrl = '/api/extraction';
 
       const response = await fetch(`${apiUrl}/export-bluebeam`, {
         method: 'POST',
@@ -4643,7 +4627,6 @@ export default function DetectionEditor({
             />
 
             {/* Estimate Settings Panel - slides out between toolbar and canvas */}
-            {console.log('🔧 Panel render check: showEstimateSettings=', showEstimateSettings, 'configLoaded=', configLoaded)}
             {showEstimateSettings && (
               <EstimateSettingsPanel
                 isOpen={showEstimateSettings}
@@ -5126,8 +5109,8 @@ export default function DetectionEditor({
                 const matCost = dbTotals?.total_material_cost ?? t?.material_cost ?? t?.total_material_cost ?? pt?.material_cost ?? 0;
                 // Calculate paint cost from line items if not in totals
                 const paintCostFromLineItems = takeoffDetails?.line_items
-                  ?.filter((item: Record<string, unknown>) => item.item_type === 'paint')
-                  .reduce((sum: number, item: Record<string, unknown>) => {
+                  ?.filter((item) => item.item_type === 'paint')
+                  .reduce((sum, item) => {
                     const matExt = Number(item.material_extended) || 0;
                     const laborExt = Number(item.labor_extended) || 0;
                     return sum + matExt + laborExt;

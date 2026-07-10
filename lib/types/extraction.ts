@@ -1,6 +1,9 @@
 // Extraction Detection System Types
 // Matches production database schema
 
+import type { JobStatus } from '@/lib/types/extractionJob';
+export type { JobStatus } from '@/lib/types/extractionJob';
+
 // =============================================================================
 // Re-exports
 // =============================================================================
@@ -84,7 +87,9 @@ export type AllDetectionClasses = DetectionClass | InternalDetectionClass;
 export type PageType =
   | 'elevation'
   | 'floor_plan'
+  | 'roof_plan'
   | 'schedule'
+  | 'notes'
   | 'cover'
   | 'detail'
   | 'section'
@@ -92,16 +97,6 @@ export type PageType =
   | 'other';
 
 export type ElevationName = 'front' | 'rear' | 'left' | 'right';
-
-export type JobStatus =
-  | 'importing'   // Bluebeam fresh import in progress
-  | 'converting'
-  | 'classifying'
-  | 'classified'  // Pages classified, ready for user review
-  | 'processing'
-  | 'complete'
-  | 'approved'    // Detections approved, takeoff generated
-  | 'failed';
 
 export type EditType =
   | 'verify'

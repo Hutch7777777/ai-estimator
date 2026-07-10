@@ -6,6 +6,7 @@ import Link from 'next/link';
 import { ArrowLeft, Loader2, User, Building2, Users, HelpCircle, CreditCard, Save, ChevronDown, ChevronUp, Trash2, Package, Calculator, Briefcase, Info } from 'lucide-react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
@@ -16,6 +17,8 @@ import { toast } from 'sonner';
 import { NoOrganization } from '@/components/no-organization';
 import { resolveSettings } from '@/lib/types/organization';
 import { ProductSelector } from '@/components/settings/ProductSelector';
+
+type MembershipRole = 'owner' | 'admin' | 'estimator' | 'viewer';
 
 function AccountSettingsContent() {
   const router = useRouter();
@@ -221,7 +224,7 @@ function AccountSettingsContent() {
         .from('user_profiles')
         .upsert({
           id: user.id,
-          email: user.email,
+          email: user.email || '',
           full_name: fullName,
           phone: phone || null,
         });
@@ -357,20 +360,38 @@ function AccountSettingsContent() {
       return;
     }
 
+    if (!user || !organization) {
+      toast.error('Sign in and select an organization before contacting support');
+      return;
+    }
+
     setIsSaving(true);
     try {
-      // For now, just show success - in production, this would send an email or create a ticket
-      toast.success('Support request submitted. We\'ll get back to you soon!');
+      const { data: request, error } = await supabase
+        .from('support_requests')
+        .insert({
+          user_id: user.id,
+          organization_id: organization.id,
+          subject: supportSubject.trim(),
+          message: supportMessage.trim(),
+        })
+        .select('id')
+        .single();
+
+      if (error) throw error;
+
+      toast.success(`Support request ${request.id.slice(0, 8)} submitted`);
       setSupportSubject('');
       setSupportMessage('');
-    } catch (err: any) {
-      toast.error('Failed to submit support request');
+    } catch (err) {
+      console.error('Support request failed:', err);
+      toast.error('Failed to submit support request. Please try again.');
     } finally {
       setIsSaving(false);
     }
   };
 
-  const handleChangeMemberRole = async (memberId: string, newRole: string) => {
+  const handleChangeMemberRole = async (memberId: string, newRole: MembershipRole) => {
     try {
       const { error } = await supabase
         .from('organization_memberships')
@@ -1075,7 +1096,7 @@ function AccountSettingsContent() {
                             <>
                               <select
                                 value={member.role}
-                                onChange={(e) => handleChangeMemberRole(member.id, e.target.value)}
+                                onChange={(e) => handleChangeMemberRole(member.id, e.target.value as MembershipRole)}
                                 className="h-9 rounded-md border border-input bg-background px-3 py-1 text-sm"
                               >
                                 <option value="admin">Admin</option>
@@ -1140,25 +1161,6 @@ function AccountSettingsContent() {
                 </form>
               </div>
 
-              <div className="bg-white border border-[#e2e8f0] rounded-lg p-6 shadow-sm space-y-4">
-                <h2 className="text-lg font-semibold text-[#0f172a]">Resources</h2>
-                <div className="space-y-3">
-                  <a
-                    href="#"
-                    className="block p-3 rounded-lg border border-[#e2e8f0] hover:border-[#00cc6a] hover:bg-[#f8fafc] transition-colors"
-                  >
-                    <p className="font-medium text-[#0f172a]">Documentation</p>
-                    <p className="text-sm text-[#64748b]">Learn how to use Estimate.ai</p>
-                  </a>
-                  <a
-                    href="#"
-                    className="block p-3 rounded-lg border border-[#e2e8f0] hover:border-[#00cc6a] hover:bg-[#f8fafc] transition-colors"
-                  >
-                    <p className="font-medium text-[#0f172a]">Request a Feature</p>
-                    <p className="text-sm text-[#64748b]">Tell us what you'd like to see</p>
-                  </a>
-                </div>
-              </div>
             </div>
           </TabsContent>
 
@@ -1170,32 +1172,16 @@ function AccountSettingsContent() {
               <div className="p-4 rounded-lg bg-[#f8fafc] border border-[#e2e8f0]">
                 <div className="flex items-center justify-between">
                   <div>
-                    <p className="font-medium text-[#0f172a]">Free Plan</p>
-                    <p className="text-sm text-[#64748b]">Basic features for getting started</p>
+                    <p className="font-medium text-[#0f172a]">Pilot Access</p>
+                    <p className="text-sm text-[#64748b]">Billing is managed directly during the pilot.</p>
                   </div>
-                  <Button variant="outline" disabled>
-                    Upgrade
-                  </Button>
+                  <Badge variant="secondary">Active</Badge>
                 </div>
               </div>
 
-              <div className="space-y-4">
-                <h3 className="font-medium text-[#0f172a]">Usage This Month</h3>
-                <div className="grid gap-4 sm:grid-cols-3">
-                  <div className="p-4 rounded-lg bg-[#f8fafc] border border-[#e2e8f0]">
-                    <p className="text-2xl font-bold text-[#0f172a]">0</p>
-                    <p className="text-sm text-[#64748b]">Projects Created</p>
-                  </div>
-                  <div className="p-4 rounded-lg bg-[#f8fafc] border border-[#e2e8f0]">
-                    <p className="text-2xl font-bold text-[#0f172a]">0</p>
-                    <p className="text-sm text-[#64748b]">PDFs Processed</p>
-                  </div>
-                  <div className="p-4 rounded-lg bg-[#f8fafc] border border-[#e2e8f0]">
-                    <p className="text-2xl font-bold text-[#0f172a]">0</p>
-                    <p className="text-sm text-[#64748b]">Exports Generated</p>
-                  </div>
-                </div>
-              </div>
+              <p className="text-sm text-[#64748b]">
+                Use the Support tab for plan changes, invoices, or account questions.
+              </p>
             </div>
           </TabsContent>
         </Tabs>

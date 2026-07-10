@@ -64,8 +64,6 @@ const SAMClassPicker = memo(function SAMClassPicker({
   errorMessage = null,
   alternatives = [],
 }: SAMClassPickerProps) {
-  if (!isVisible) return null;
-
   // Calculate position style
   const positionStyle = useMemo(() => {
     if (!position) return {};
@@ -74,6 +72,8 @@ const SAMClassPicker = memo(function SAMClassPicker({
       top: `${position.y}px`,
     };
   }, [position]);
+
+  if (!isVisible) return null;
 
   // Show unavailable state
   if (isFeatureDisabled || errorMessage) {

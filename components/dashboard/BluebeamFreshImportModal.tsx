@@ -31,7 +31,7 @@ import {
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 
-const EXTRACTION_API_URL = process.env.NEXT_PUBLIC_EXTRACTION_API_URL;
+const EXTRACTION_API_URL = '/api/extraction';
 
 // Detection classes available for mapping
 const DETECTION_CLASSES = [
@@ -170,6 +170,7 @@ export function BluebeamFreshImportModal({
     try {
       const formData = new FormData();
       formData.append("pdf_file", selectedFile);
+      if (organizationId) formData.append("organization_id", organizationId);
 
       const response = await fetch(`${EXTRACTION_API_URL}/import-bluebeam-fresh/preview`, {
         method: "POST",

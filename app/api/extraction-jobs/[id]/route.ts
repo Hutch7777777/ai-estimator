@@ -1,5 +1,6 @@
 import { createClient } from '@/lib/supabase/server';
 import { NextRequest, NextResponse } from 'next/server';
+import { isExtractionJobActive } from '@/lib/types/extractionJob';
 
 // =============================================================================
 // DELETE Handler - Delete extraction job
@@ -31,8 +32,7 @@ export async function DELETE(
     }
 
     // Fetch the job to verify it exists and check status
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { data: job, error: fetchError } = await (supabase as any)
+    const { data: job, error: fetchError } = await supabase
       .from('extraction_jobs')
       .select('id, status')
       .eq('id', id)
@@ -46,7 +46,7 @@ export async function DELETE(
     }
 
     // Block deletion if job is currently processing
-    if (job.status === 'processing' || job.status === 'converting') {
+    if (isExtractionJobActive(job.status)) {
       return NextResponse.json(
         { success: false, error: 'Cannot delete a job that is currently processing' },
         { status: 400 }
@@ -54,8 +54,7 @@ export async function DELETE(
     }
 
     // Delete the job (child tables have ON DELETE CASCADE)
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { error: deleteError } = await (supabase as any)
+    const { error: deleteError } = await supabase
       .from('extraction_jobs')
       .delete()
       .eq('id', id);
@@ -88,7 +87,7 @@ export async function PATCH(
 ) {
   try {
     const { id } = await params;
-    const body = await request.json();
+    const body = await request.json() as { project_name?: unknown };
     const { project_name } = body;
 
     if (!id) {
@@ -98,20 +97,25 @@ export async function PATCH(
       );
     }
 
-    if (project_name === undefined) {
+    if (typeof project_name !== 'string' || !project_name.trim()) {
       return NextResponse.json(
-        { success: false, error: 'project_name is required' },
+        { success: false, error: 'project_name must be a non-empty string' },
+        { status: 400 }
+      );
+    }
+
+    if (project_name.trim().length > 200) {
+      return NextResponse.json(
+        { success: false, error: 'project_name must be 200 characters or fewer' },
         { status: 400 }
       );
     }
 
     const supabase = await createClient();
 
-    // Use any to bypass type checking since extraction_jobs might not be in the generated types
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { data, error } = await (supabase as any)
+    const { data, error } = await supabase
       .from('extraction_jobs')
-      .update({ project_name })
+      .update({ project_name: project_name.trim() })
       .eq('id', id)
       .select()
       .single();

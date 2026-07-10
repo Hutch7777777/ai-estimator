@@ -1,5 +1,6 @@
 import { createClient } from "@/lib/supabase/client";
 import { ProjectFormData } from "@/lib/types/project-form";
+import { getStorageObjectPath } from "@/lib/supabase/storageUrls";
 
 /**
  * Single submission path for the project creation wizard.
@@ -57,7 +58,7 @@ function resolveMarkupPercent(data: ProjectFormData): number {
   return 15;
 }
 
-function buildWebhookPayload(data: ProjectFormData, pdfUrl: string, projectId: string) {
+function buildWebhookPayload(data: ProjectFormData, workflowPdfUrl: string, projectId: string) {
   const cleanedSiding = cleanConfig(data.configurations?.siding || {});
   const cleanedRoofing = cleanConfig(data.configurations?.roofing || {});
   const cleanedWindows = cleanConfig(data.configurations?.windows || {});
@@ -78,7 +79,7 @@ function buildWebhookPayload(data: ProjectFormData, pdfUrl: string, projectId: s
     roofing: cleanedRoofing,
     windows: cleanedWindows,
     gutters: cleanedGutters,
-    hover_pdf_url: pdfUrl,
+    hover_pdf_url: workflowPdfUrl,
     created_at: new Date().toISOString(),
   };
 }
@@ -128,7 +129,8 @@ export async function submitProject(
     }
     callbacks.onUploadStart?.();
 
-    const fileName = `${projectId}/${Date.now()}_${data.pdfFile.name}`;
+    const sanitizedName = data.pdfFile.name.replace(/[^a-zA-Z0-9.-]/g, '_');
+    const fileName = `${organizationId}/${projectId}/${Date.now()}_${sanitizedName}`;
     const { data: uploadData, error: uploadError } = await supabase.storage
       .from("hover-pdfs")
       .upload(fileName, data.pdfFile, {
@@ -138,6 +140,8 @@ export async function submitProject(
 
     if (uploadError) throw new Error(`Upload failed: ${uploadError.message}`);
 
+    // Keep a stable object reference in the database. The bucket is private;
+    // consumers receive short-lived signed URLs instead of this URL directly.
     const { data: { publicUrl } } = supabase.storage
       .from("hover-pdfs")
       .getPublicUrl(uploadData.path);
@@ -146,11 +150,22 @@ export async function submitProject(
     callbacks.onUploaded?.(pdfUrl);
   }
 
+  const storagePath = getStorageObjectPath(pdfUrl, 'hover-pdfs');
+  let workflowPdfUrl = pdfUrl;
+  if (storagePath) {
+    const { data: signedData, error: signedError } = await supabase.storage
+      .from('hover-pdfs')
+      .createSignedUrl(storagePath, 60 * 60);
+    if (signedError || !signedData?.signedUrl) {
+      throw new Error(`Could not authorize PDF processing: ${signedError?.message || 'Unknown storage error'}`);
+    }
+    workflowPdfUrl = signedData.signedUrl;
+  }
+
   // Stage 2: Save project + trade configurations (skipped if already saved)
   if (!data.projectId) {
     const { error: dbError } = await supabase
       .from("projects")
-      // @ts-expect-error - Supabase generated types return never for insert
       .insert({
         id: projectId,
         organization_id: organizationId,
@@ -173,7 +188,6 @@ export async function submitProject(
 
     const { error: configError } = await supabase
       .from("project_configurations")
-      // @ts-expect-error - Supabase generated types return never for insert
       .insert(configInserts);
 
     if (configError) throw new Error(`Configuration save error: ${configError.message}`);
@@ -184,7 +198,7 @@ export async function submitProject(
   // Stage 3: Trigger the n8n estimate workflow (always runs — it is the
   // final stage, so reaching here means it hasn't succeeded yet)
   callbacks.onProcessingStart?.();
-  const payload = buildWebhookPayload(data, pdfUrl, projectId);
+  const payload = buildWebhookPayload(data, workflowPdfUrl, projectId);
   await triggerEstimateWorkflow(payload, data.projectName);
 
   return { projectId, pdfUrl };

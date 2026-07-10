@@ -31,11 +31,20 @@ import {
 
 export type ItemType = "material" | "labor" | "overhead" | "paint";
 
-export interface SeparatedItems {
-  materials: LineItemWithState[];
-  labor: LineItemWithState[];
-  overhead: LineItemWithState[];
-  paint: LineItemWithState[];
+interface ClassifiableLineItem {
+  item_type?: "material" | "labor" | "overhead" | "paint" | null;
+  material_unit_cost?: number | null;
+  labor_unit_cost?: number | null;
+  equipment_unit_cost?: number | null;
+  category?: string | null;
+  presentation_group?: string | null;
+}
+
+export interface SeparatedItems<T extends ClassifiableLineItem = LineItemWithState> {
+  materials: T[];
+  labor: T[];
+  overhead: T[];
+  paint: T[];
 }
 
 export interface GroupedMaterials {
@@ -108,18 +117,17 @@ export const PRESENTATION_GROUP_CONFIG: Record<
  * This function is still useful for legacy responses where labor/overhead
  * items were mixed with materials.
  */
-export function separateItemsByType(
-  lineItems: LineItemWithState[]
-): SeparatedItems {
-  const materials: LineItemWithState[] = [];
-  const labor: LineItemWithState[] = [];
-  const overhead: LineItemWithState[] = [];
-  const paint: LineItemWithState[] = [];
+export function separateItemsByType<T extends ClassifiableLineItem>(
+  lineItems: T[]
+): SeparatedItems<T> {
+  const materials: T[] = [];
+  const labor: T[] = [];
+  const overhead: T[] = [];
+  const paint: T[] = [];
 
   lineItems.forEach((item) => {
     // Check item_type field first (if it exists)
-    const itemType =
-      (item as any).item_type || detectItemType(item);
+    const itemType = item.item_type || detectItemType(item);
 
     switch (itemType) {
       case "material":
@@ -146,14 +154,14 @@ export function separateItemsByType(
 /**
  * Detect item type based on cost fields and description (fallback if item_type not set)
  */
-function detectItemType(item: LineItemWithState): ItemType {
+function detectItemType(item: ClassifiableLineItem): ItemType {
   const hasMaterialCost = (item.material_unit_cost || 0) > 0;
   const hasLaborCost = (item.labor_unit_cost || 0) > 0;
   const hasEquipmentCost = (item.equipment_unit_cost || 0) > 0;
 
   // Check for paint items by category or presentation_group
-  const category = ((item as any).category || "").toLowerCase();
-  const presentationGroup = ((item as any).presentation_group || "").toLowerCase();
+  const category = (item.category || "").toLowerCase();
+  const presentationGroup = (item.presentation_group || "").toLowerCase();
 
   if (category === "paint" || presentationGroup.includes("paint")) {
     return "paint";

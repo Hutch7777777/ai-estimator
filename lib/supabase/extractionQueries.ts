@@ -2,7 +2,9 @@
 // Using direct fetch instead of Supabase client to bypass client issues
 
 import type React from 'react';
-import { createClient } from '@supabase/supabase-js';
+import type { SupabaseClient } from '@supabase/supabase-js';
+import { createClient } from '@/lib/supabase/client';
+import { authenticatedSupabaseFetch } from '@/lib/supabase/authenticatedFetch';
 import type {
   ExtractionJob,
   ExtractionPage,
@@ -36,20 +38,10 @@ function mapDraftToDetection(draft: DraftDetection): ExtractionDetection {
 // Direct Fetch API (bypasses Supabase client)
 // =============================================================================
 
-const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const SUPABASE_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
-
 async function directFetch<T>(endpoint: string): Promise<T | null> {
-  const url = `${SUPABASE_URL}/rest/v1/${endpoint}`;
-  console.log('[directFetch] Fetching:', url);
-
   try {
-    const response = await fetch(url, {
-      headers: {
-        'apikey': SUPABASE_KEY,
-        'Authorization': `Bearer ${SUPABASE_KEY}`,
-        'Content-Type': 'application/json',
-      },
+    const response = await authenticatedSupabaseFetch(`/rest/v1/${endpoint}`, {
+      headers: { 'Content-Type': 'application/json' },
     });
 
     if (!response.ok) {
@@ -68,11 +60,11 @@ async function directFetch<T>(endpoint: string): Promise<T | null> {
 }
 
 // Keep Supabase client for realtime subscriptions only
-let _extractionClient: ReturnType<typeof createClient> | null = null;
+let _extractionClient: SupabaseClient | null = null;
 
 function getClient() {
   if (!_extractionClient) {
-    _extractionClient = createClient(SUPABASE_URL, SUPABASE_KEY);
+    _extractionClient = createClient() as unknown as SupabaseClient;
   }
   return _extractionClient;
 }

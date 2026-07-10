@@ -504,7 +504,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
           const structuredTextContent = structuredMessage.content.find(block => block.type === 'text');
           if (structuredTextContent && structuredTextContent.type === 'text') {
             // Clean up the response - remove any markdown code blocks
-            let jsonText = structuredTextContent.text
+            const jsonText = structuredTextContent.text
               .replace(/```json\n?/g, '')
               .replace(/```\n?/g, '')
               .trim();

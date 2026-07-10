@@ -12,7 +12,7 @@ export interface ProjectFormData {
   address: string;
 
   // Step 2: Trade Selection
-  selectedTrades: string[];
+  selectedTrades: Trade[];
 
   // Step 3: Product Configuration
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -30,3 +30,4 @@ export interface ProjectFormData {
   // final submit button never insert a duplicate project.
   projectId?: string | null;
 }
+import type { Trade } from '@/lib/types/database';

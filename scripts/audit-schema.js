@@ -1,26 +1,12 @@
 #!/usr/bin/env node
+/* eslint-disable @typescript-eslint/no-require-imports -- standalone Node CommonJS audit script */
 /**
  * Schema Audit Script - Pre-expansion validation
  *
  * Run with: node scripts/audit-schema.js
  */
 
-const SUPABASE_URL = 'https://okwtyttfqbfmcqtenize.supabase.co';
-const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9rd3R5dHRmcWJmbWNxdGVuaXplIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjI0NDYwNTEsImV4cCI6MjA3ODAyMjA1MX0.I1HRDRZpj4ExWp9_8tB_k1Bxzuc2SjqQ6DSyAar2AOE';
-
-async function fetchTable(table, params = {}) {
-  const searchParams = new URLSearchParams(params);
-  const url = `${SUPABASE_URL}/rest/v1/${table}?${searchParams.toString()}`;
-
-  const response = await fetch(url, {
-    headers: {
-      'apikey': SUPABASE_KEY,
-      'Authorization': `Bearer ${SUPABASE_KEY}`,
-      'Content-Type': 'application/json',
-    },
-  });
-  return response.json();
-}
+const { fetchTable } = require('./lib/supabase-audit-client');
 
 async function main() {
   console.log('🔍 Schema Audit for pricing_items expansion\n');

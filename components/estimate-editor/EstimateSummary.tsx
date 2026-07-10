@@ -186,9 +186,30 @@ export function EstimateSummary({
         projectId: takeoff.project_id,
       };
 
+      const exportTakeoff = {
+        id: takeoff.id,
+        project_id: takeoff.project_id,
+        takeoff_name: projectInfo.projectName,
+        total_material_cost: legacyShared.material_cost + legacyShared.paint_cost,
+        total_labor_cost: legacyShared.labor_cost,
+        total_equipment_cost: legacyShared.overhead_cost,
+        subtotal: legacyShared.subtotal,
+        markup_percent: legacyShared.markup_percent,
+        markup_amount: legacyShared.markup_amount,
+        final_price: legacyShared.final_price,
+      };
+      const exportSections = sections.map((section) => ({
+        id: section.id,
+        takeoff_id: section.takeoff_id,
+        section_name: section.display_name || section.name,
+        display_order: section.sort_order,
+        section_total: section.section_total,
+        notes: section.notes || undefined,
+      }));
+
       await exportProfessionalEstimate(
-        takeoff,
-        sections,
+        exportTakeoff,
+        exportSections,
         lineItemsBySection,
         exportProjectInfo
       );
@@ -215,8 +236,17 @@ export function EstimateSummary({
         jobAddress: projectInfo.address,
       };
 
+      const exportSections = sections.map((section) => ({
+        id: section.id,
+        takeoff_id: section.takeoff_id,
+        section_name: section.display_name || section.name,
+        display_order: section.sort_order,
+        section_total: section.section_total,
+        notes: section.notes || undefined,
+      }));
+
       await exportVendorTakeoffLegacy(
-        sections,
+        exportSections,
         lineItemsBySection,
         exportProjectInfo
       );

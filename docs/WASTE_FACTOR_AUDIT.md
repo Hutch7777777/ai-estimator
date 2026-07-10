@@ -1,13 +1,11 @@
 # Waste Factor Audit & Fix Plan
 
-**Date:** 2026-07-07 · **Status:** ENGINE SIDE IMPLEMENTED on branch
-`feat/org-waste-factor` (commit 4c915e6 in exterior-estimation-api — NOT
-merged/pushed; tsc clean, 69/69 tests pass; zero behavior change until rules
-are migrated). One deliberate divergence from Section III below: the final
-fallback is **10%** (not 12%) so that rewriting `* 1.10 → * waste_factor`
-is behavior-preserving for orgs without explicit settings — the 10%-vs-12%
-call is Verification step 2. The SQL rule migration (Section III) and MN568
-protocol (Section IV) remain manual and user-gated.
+**Date:** 2026-07-09 · **Status:** ENGINE SIDE IMPLEMENTED in the current
+`exterior-estimation-api` working tree (not pushed or deployed). TypeScript,
+production compilation, and 78/78 tests pass. Project settings override org
+settings, which override a behavior-preserving 10% fallback. Explicit SKU
+waste wins; deliberate shingle/shake and corner exceptions remain. The SQL
+formula migration and MN568 protocol below have not been applied.
 **Scope:** frontend repo (`ai-estimator`) + calculation engine working tree
 (`~/projects/estimatepros/exterior-estimation-api`, read-only audit).
 **Why:** `organizations.settings.labor_rates.default_waste_factor_percent`
@@ -54,21 +52,21 @@ The engine ALREADY fetches org settings for overhead
 service client, keyed on the `organization_id` the frontend already sends in
 every approve payload). Waste rides the same query:
 
-**Engine changes (exterior-estimation-api):**
-1. `types/autoscope.ts` — add `waste_factor: number` to `MeasurementContext`.
-2. `orchestrator-v2.ts` — at the existing org-settings read, also read
-   `settings.labor_rates.default_waste_factor_percent`; allow
-   `estimate_settings.waste_factor_percent` (per-project override, add field
-   to `ProjectEstimateSettings` in `configService.ts`) to take priority;
-   compute `resolvedWasteFactor = 1 + (project ?? org ?? 12)/100` once.
-3. `autoscope-v2.ts` — `buildMeasurementContext()` sets
-   `ctx.waste_factor = resolvedWasteFactor`. `evaluateFormula` needs no
-   change — the new key is automatically available to every formula.
-4. Replace BOTH duplicated `categoryWasteDefaults` maps with
-   `pricing.waste_factor || resolvedWasteFactor` (keep material-specific
-   overrides via `pricing_items.waste_factor` where deliberate).
-5. Reconcile or decommission `CONVERSION_SPECS` (legacy path) as part of the
-   same change — don't leave four disagreeing waste tables.
+**Implemented engine changes (exterior-estimation-api):**
+1. `waste.ts` is the pure, tested resolver for project/org/default precedence,
+   explicit SKU values, deliberate category exceptions, and count/linear/area
+   detection behavior.
+2. `MeasurementContext` exposes `waste_factor`; the orchestrator stamps the
+   resolved multiplier before evaluating any database formula.
+3. `ProjectEstimateSettings` accepts `waste_factor_percent` and the existing
+   organization settings query reads
+   `labor_rates.default_waste_factor_percent` without another round trip.
+4. Material-assignment math and its human-readable notes now use the same
+   resolver. Dynamic linear/area detections use it when their database mapping
+   has no explicit factor; count detections stay at 1.0 unless configured.
+5. Legacy V1 `CONVERSION_SPECS` remains isolated to the legacy calculation
+   path. It should be removed when that path is formally retired, not mixed
+   into the V2 launch change.
 
 **Rules migration (Supabase SQL Editor — manual, per your MCP-read-only rule):**
 ```sql
@@ -117,8 +115,11 @@ override field in EstimateSettingsPanel writing
 
 ## V. Side findings from this audit
 
-- `scripts/audit-autoscope.js` (this repo) has a **live Supabase anon key
-  hardcoded** — move it to an env var.
+- All Supabase audit scripts now use a shared environment-backed read-only
+  client; embedded anon credentials were removed.
+- The category audit previously labeled 26 semantic rule categories as pricing
+  mismatches. All 172 active SKUs resolve. Rule `material_category` is not a
+  pricing foreign key, so those labels must not be blanket-rewritten.
 - Engine `webhook.ts`'s two endpoints are ~180-line copy-paste drift — the
   waste change doesn't touch them, but they're a standing hazard.
 - Use the repo skills when executing this plan: `/calc-engine` before edits,

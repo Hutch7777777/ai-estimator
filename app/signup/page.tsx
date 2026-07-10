@@ -10,6 +10,8 @@ import { Label } from '@/components/ui/label';
 import { Loader2, Mail, Lock, User, ArrowRight, Check } from 'lucide-react';
 import { toast } from 'sonner';
 
+const PUBLIC_SIGNUP_ENABLED = process.env.NEXT_PUBLIC_ENABLE_PUBLIC_SIGNUP === 'true';
+
 export default function SignupPage() {
   const router = useRouter();
   const supabase = createClient();
@@ -19,6 +21,34 @@ export default function SignupPage() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [fullName, setFullName] = useState('');
+
+  if (!PUBLIC_SIGNUP_ENABLED) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-[#f8fafc] px-4">
+        <div className="w-full max-w-md space-y-6 rounded-xl border border-[#e2e8f0] bg-white p-8 text-center shadow-sm">
+          <Link href="/" className="inline-flex items-center">
+            <span className="font-mono text-2xl font-bold text-[#0f172a]">ESTIMATE</span>
+            <span className="font-mono text-2xl font-bold text-[#00cc6a]">.ai</span>
+          </Link>
+          <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-[#dcfce7]">
+            <Lock className="h-7 w-7 text-[#00cc6a]" />
+          </div>
+          <div>
+            <h1 className="text-2xl font-bold text-[#0f172a] font-heading">Pilot access is invite-only</h1>
+            <p className="mt-3 text-sm leading-6 text-[#475569]">
+              Ask your Estimate.ai contact for an invitation. If you already have an account, sign in below.
+            </p>
+          </div>
+          <Button asChild className="w-full h-11">
+            <Link href="/login">Sign in</Link>
+          </Button>
+          <p className="text-xs text-[#94a3b8]">
+            Invitations are issued manually while the service is in pilot.
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   const handleGoogleSignup = async () => {
     setIsLoading(true);

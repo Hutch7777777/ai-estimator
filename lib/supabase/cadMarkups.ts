@@ -6,6 +6,7 @@ import {
   LinearMeasurement,
   DEFAULT_MARKUP_COLOR,
 } from "@/components/cad-markup/types";
+import { authenticatedSupabaseFetch } from "@/lib/supabase/authenticatedFetch";
 
 // Database row type
 interface CadManualMarkupRow {
@@ -207,14 +208,10 @@ export async function saveMarkups(
 ): Promise<{ success: boolean; error?: string }> {
   try {
     // Delete existing markups for this project
-    const deleteResponse = await fetch(
-      `${process.env.NEXT_PUBLIC_SUPABASE_URL}/rest/v1/cad_manual_markups?project_id=eq.${projectId}`,
+    const deleteResponse = await authenticatedSupabaseFetch(
+      `/rest/v1/cad_manual_markups?project_id=eq.${projectId}`,
       {
         method: 'DELETE',
-        headers: {
-          'apikey': process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-          'Authorization': `Bearer ${process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY}`
-        }
       }
     );
 
@@ -236,13 +233,11 @@ export async function saveMarkups(
     }
 
     // Insert all markups
-    const insertResponse = await fetch(
-      `${process.env.NEXT_PUBLIC_SUPABASE_URL}/rest/v1/cad_manual_markups`,
+    const insertResponse = await authenticatedSupabaseFetch(
+      '/rest/v1/cad_manual_markups',
       {
         method: 'POST',
         headers: {
-          'apikey': process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-          'Authorization': `Bearer ${process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY}`,
           'Content-Type': 'application/json'
         },
         body: JSON.stringify(rows)
@@ -269,14 +264,8 @@ export async function loadMarkups(
   projectId: string
 ): Promise<{ data: MarkupData | null; error?: string }> {
   try {
-    const response = await fetch(
-      `${process.env.NEXT_PUBLIC_SUPABASE_URL}/rest/v1/cad_manual_markups?project_id=eq.${projectId}&select=*&order=page_number.asc,created_at.asc`,
-      {
-        headers: {
-          'apikey': process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-          'Authorization': `Bearer ${process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY}`
-        }
-      }
+    const response = await authenticatedSupabaseFetch(
+      `/rest/v1/cad_manual_markups?project_id=eq.${projectId}&select=*&order=page_number.asc,created_at.asc`
     );
 
     if (!response.ok) {
@@ -324,14 +313,10 @@ export async function deleteAllMarkups(
   projectId: string
 ): Promise<{ success: boolean; error?: string }> {
   try {
-    const response = await fetch(
-      `${process.env.NEXT_PUBLIC_SUPABASE_URL}/rest/v1/cad_manual_markups?project_id=eq.${projectId}`,
+    const response = await authenticatedSupabaseFetch(
+      `/rest/v1/cad_manual_markups?project_id=eq.${projectId}`,
       {
         method: 'DELETE',
-        headers: {
-          'apikey': process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-          'Authorization': `Bearer ${process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY}`
-        }
       }
     );
 
@@ -355,13 +340,11 @@ export async function getMarkupCount(
   projectId: string
 ): Promise<{ count: number; error?: string }> {
   try {
-    const response = await fetch(
-      `${process.env.NEXT_PUBLIC_SUPABASE_URL}/rest/v1/cad_manual_markups?project_id=eq.${projectId}&select=id`,
+    const response = await authenticatedSupabaseFetch(
+      `/rest/v1/cad_manual_markups?project_id=eq.${projectId}&select=id`,
       {
         method: 'HEAD',
         headers: {
-          'apikey': process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-          'Authorization': `Bearer ${process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY}`,
           'Prefer': 'count=exact'
         }
       }

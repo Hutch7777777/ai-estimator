@@ -41,6 +41,11 @@ import { ExtractionUploadStep } from "@/components/project-form/ExtractionUpload
 import { BluebeamFreshImportModal } from "@/components/dashboard/BluebeamFreshImportModal";
 import { subscribeToAllJobs } from "@/lib/supabase/extractionQueries";
 import type { JobStatus, ExtractionJob } from "@/lib/types/extraction";
+import {
+  EXTRACTION_JOB_STATUS_LABELS,
+  isExtractionJobActive,
+} from '@/lib/types/extractionJob';
+import { authenticatedSupabaseFetch } from "@/lib/supabase/authenticatedFetch";
 
 // =============================================================================
 // Constants
@@ -63,7 +68,7 @@ export function ExtractionsTable() {
   const [error, setError] = useState<string | null>(null);
   const [uploadDialogOpen, setUploadDialogOpen] = useState(false);
   const [bluebeamImportOpen, setBluebeamImportOpen] = useState(false);
-  const [tempProjectId] = useState(() => crypto.randomUUID());
+  const [tempProjectId, setTempProjectId] = useState(() => crypto.randomUUID());
 
   // Inline editing state
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -172,15 +177,8 @@ export function ExtractionsTable() {
         setLoading(true);
         setError(null);
 
-        // Use direct fetch since Supabase JS client has issues
-        const response = await fetch(
-          `${process.env.NEXT_PUBLIC_SUPABASE_URL}/rest/v1/extraction_jobs?select=id,project_id,project_name,status,total_pages,elevation_count,created_at,completed_at&order=created_at.desc`,
-          {
-            headers: {
-              'apikey': process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-              'Authorization': `Bearer ${process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY}`
-            }
-          }
+        const response = await authenticatedSupabaseFetch(
+          '/rest/v1/extraction_jobs?select=id,project_id,project_name,status,total_pages,elevation_count,created_at,completed_at&order=created_at.desc'
         );
 
         if (!response.ok) {
@@ -281,26 +279,7 @@ export function ExtractionsTable() {
 
   // Get status display text
   const getStatusText = (status: JobStatus): string => {
-    switch (status) {
-      case "importing":
-        return "Importing";
-      case "converting":
-        return "Converting PDF";
-      case "classifying":
-        return "Classifying Pages";
-      case "classified":
-        return "Ready for Review";
-      case "processing":
-        return "Detecting Objects";
-      case "complete":
-        return "Complete";
-      case "approved":
-        return "Approved";
-      case "failed":
-        return "Failed";
-      default:
-        return status;
-    }
+    return EXTRACTION_JOB_STATUS_LABELS[status];
   };
 
   // Get status color classes
@@ -313,7 +292,10 @@ export function ExtractionsTable() {
       case "failed":
         return "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200";
       case "importing":
+      case "analyzing":
+      case "refining":
         return "bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200";
+      case "pending":
       case "converting":
       case "classifying":
         return "bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200";
@@ -377,11 +359,17 @@ export function ExtractionsTable() {
             </CardDescription>
           </div>
           <div className="flex gap-2">
-            <Button variant="outline" onClick={() => setBluebeamImportOpen(true)}>
+            <Button variant="outline" onClick={() => {
+              setTempProjectId(crypto.randomUUID());
+              setBluebeamImportOpen(true);
+            }}>
               <Upload className="h-4 w-4 mr-2" />
               Upload Marked Up Plans
             </Button>
-            <Button onClick={() => setUploadDialogOpen(true)}>
+            <Button onClick={() => {
+              setTempProjectId(crypto.randomUUID());
+              setUploadDialogOpen(true);
+            }}>
               <Upload className="h-4 w-4 mr-2" />
               Upload Plans
             </Button>
@@ -526,9 +514,9 @@ export function ExtractionsTable() {
                         variant="ghost"
                         className="h-8 w-8 text-gray-400 hover:text-red-500 disabled:opacity-50 disabled:cursor-not-allowed"
                         onClick={() => setConfirmDeleteId(job.id)}
-                        disabled={job.status === 'processing' || job.status === 'converting'}
+                        disabled={isExtractionJobActive(job.status)}
                         title={
-                          job.status === 'processing' || job.status === 'converting'
+                          isExtractionJobActive(job.status)
                             ? 'Cannot delete while processing'
                             : 'Delete extraction job'
                         }
