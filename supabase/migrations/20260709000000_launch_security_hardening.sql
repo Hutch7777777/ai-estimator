@@ -38,7 +38,10 @@ UPDATE public.extraction_jobs AS job
 SET organization_id = project.organization_id
 FROM public.projects AS project
 WHERE job.organization_id IS NULL
-  AND job.project_id = project.id;
+  -- extraction_jobs.project_id is a legacy text column in production while
+  -- projects.id is uuid. Compare as text so malformed legacy values remain
+  -- quarantined instead of aborting the migration with an invalid cast.
+  AND job.project_id = project.id::text;
 
 CREATE OR REPLACE FUNCTION private.enforce_extraction_job_organization()
 RETURNS trigger
@@ -53,7 +56,7 @@ BEGIN
     SELECT project.organization_id
     INTO project_organization_id
     FROM public.projects AS project
-    WHERE project.id = NEW.project_id;
+    WHERE project.id::text = NEW.project_id;
   END IF;
 
   IF NEW.organization_id IS NULL AND project_organization_id IS NOT NULL THEN
@@ -177,7 +180,7 @@ AS $$
   );
 $$;
 
-CREATE OR REPLACE FUNCTION private.user_can_access_project(target_project_id uuid)
+CREATE OR REPLACE FUNCTION private.user_can_access_project(target_project_id text)
 RETURNS boolean
 LANGUAGE sql
 SECURITY DEFINER
@@ -189,7 +192,7 @@ AS $$
     FROM public.projects AS project
     JOIN public.organization_memberships AS membership
       ON membership.organization_id = project.organization_id
-    WHERE project.id = target_project_id
+    WHERE project.id::text = target_project_id
       AND membership.user_id = auth.uid()
   );
 $$;
@@ -204,7 +207,7 @@ AS $$
   SELECT target_job_id IS NOT NULL AND EXISTS (
     SELECT 1
     FROM public.extraction_jobs AS job
-    LEFT JOIN public.projects AS project ON project.id = job.project_id
+    LEFT JOIN public.projects AS project ON project.id::text = job.project_id
     JOIN public.organization_memberships AS membership
       ON membership.user_id = auth.uid()
      AND membership.organization_id = COALESCE(job.organization_id, project.organization_id)
@@ -288,6 +291,21 @@ AS $$
       AND (
         regexp_replace(split_part(project.hover_pdf_url, '/hover-pdfs/', 2), '\?.*$', '') = object_name
         OR regexp_replace(split_part(project.hover_pdf_url, '/project-pdfs/', 2), '\?.*$', '') = object_name
+      )
+  ) OR EXISTS (
+    -- Some extraction uploads use an import-generated folder rather than an
+    -- organization or project id. Preserve access only while the exact object
+    -- remains referenced by a tenant-owned extraction job.
+    SELECT 1
+    FROM public.extraction_jobs AS job
+    LEFT JOIN public.projects AS project ON project.id::text = job.project_id
+    JOIN public.organization_memberships AS membership
+      ON membership.user_id = auth.uid()
+     AND membership.organization_id = COALESCE(job.organization_id, project.organization_id)
+    WHERE job.source_pdf_url IS NOT NULL
+      AND (
+        regexp_replace(split_part(job.source_pdf_url, '/hover-pdfs/', 2), '\?.*$', '') = object_name
+        OR regexp_replace(split_part(job.source_pdf_url, '/project-pdfs/', 2), '\?.*$', '') = object_name
       )
   );
 $$;
@@ -495,8 +513,6 @@ END $$;
 UPDATE storage.buckets
 SET public = false
 WHERE id IN ('hover-pdfs', 'project-pdfs');
-
-ALTER TABLE storage.objects ENABLE ROW LEVEL SECURITY;
 
 -- Restrictive policies are ANDed with every existing permissive policy. This
 -- closes legacy public access to client PDFs without deleting policies that
